@@ -34,6 +34,8 @@ import {
   Search,
   Link2,
   Save,
+  Trash2,
+  Wand2,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -168,6 +170,13 @@ export function TopicDossierClient({
   const [searchResults, setSearchResults] = useState<Item[]>([]);
   const [searching, setSearching] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
+
+  // Delete state
+  const [deleting, setDeleting] = useState(false);
+
+  // Auto-link AI state
+  const [autoLinking, setAutoLinking] = useState(false);
+  const [autoLinkResult, setAutoLinkResult] = useState<{ linked: number; scanned: number } | null>(null);
 
   const router = useRouter();
 
@@ -406,6 +415,56 @@ export function TopicDossierClient({
     }
   };
 
+  const handleDeleteTopic = async () => {
+    if (!confirm(`Delete "${topic.title}"? This will remove all links and cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        toast.success(`Deleted "${topic.title}"`);
+        router.push('/topics');
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.error ?? 'Failed to delete topic');
+      }
+    } catch {
+      toast.error('Network error');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleAutoLink = async () => {
+    setAutoLinking(true);
+    setAutoLinkResult(null);
+    try {
+      const res = await fetch('/api/agents/auto-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic_id: topic.id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const linked = data.items_linked ?? 0;
+        const scanned = data.items_scanned ?? 0;
+        setAutoLinkResult({ linked, scanned });
+        if (linked > 0) {
+          toast.success(`AI found ${linked} related items out of ${scanned} scanned`);
+          router.refresh();
+        } else {
+          toast.info(`Scanned ${scanned} items — no new matches found`);
+        }
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.error ?? 'Auto-link failed');
+      }
+    } catch {
+      toast.error('Network error');
+    } finally {
+      setAutoLinking(false);
+    }
+  };
+
   /* ---------- render ---------- */
 
   return (
@@ -513,6 +572,18 @@ export function TopicDossierClient({
                 <Pencil className="h-4 w-4" />
                 Edit
               </button>
+              <button
+                onClick={handleDeleteTopic}
+                disabled={deleting}
+                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-red-500/30 hover:text-red-400 disabled:opacity-50"
+              >
+                {deleting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Delete
+              </button>
             </div>
           )}
         </div>
@@ -570,6 +641,18 @@ export function TopicDossierClient({
           )}
           {summary ? 'Refresh Summary' : 'Generate Summary'}
         </button>
+        <button
+          onClick={handleAutoLink}
+          disabled={autoLinking}
+          className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-emerald-500/30 hover:text-emerald-400"
+        >
+          {autoLinking ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Wand2 className="h-4 w-4" />
+          )}
+          {autoLinking ? 'Scanning items...' : 'AI Find Related Items'}
+        </button>
         {accounts.length > 0 && (
           <span className="text-xs text-muted-foreground">
             via {accounts.map((a) => a.email).join(', ')}
@@ -579,6 +662,11 @@ export function TopicDossierClient({
           <span className="flex items-center gap-1 text-xs text-red-400">
             <AlertCircle className="h-3 w-3" />
             {composeError}
+          </span>
+        )}
+        {autoLinkResult && (
+          <span className="text-xs text-emerald-400">
+            Found {autoLinkResult.linked} related items (scanned {autoLinkResult.scanned})
           </span>
         )}
       </div>

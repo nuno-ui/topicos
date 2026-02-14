@@ -248,3 +248,16 @@ export const ContactExtractOutputSchema = z.object({
   })),
 });
 export type ContactExtractOutput = z.infer<typeof ContactExtractOutputSchema>;
+
+// Auto-link: AI scans items to find ones related to a specific topic
+export const AutoLinkItemSchema = z.object({
+  item_id: z.string(),
+  relevance: z.number().min(0).max(1),
+  reason: z.string(),
+});
+
+export const AutoLinkOutputSchema = z.object({
+  matches: z.array(AutoLinkItemSchema).default([]),
+  summary: z.string().default(''),
+});
+export type AutoLinkOutput = z.infer<typeof AutoLinkOutputSchema>;

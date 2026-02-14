@@ -280,12 +280,14 @@ export function TopicsListClient({ topics }: TopicsListClientProps) {
           filtered.map((topic) => {
             const colors = AREA_COLORS[topic.area];
             return (
-              <Link
+              <div
                 key={topic.id}
-                href={`/topics/${topic.id}`}
                 className="flex items-center justify-between rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/30"
               >
-                <div className="min-w-0 flex-1">
+                <Link
+                  href={`/topics/${topic.id}`}
+                  className="min-w-0 flex-1"
+                >
                   <div className="flex items-center gap-3">
                     <span
                       className={cn(
@@ -312,9 +314,33 @@ export function TopicsListClient({ topics }: TopicsListClientProps) {
                       {topic.description}
                     </p>
                   )}
+                </Link>
+                <div className="flex items-center gap-2 ml-4 shrink-0">
+                  <button
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!confirm(`Delete "${topic.title}"? This cannot be undone.`)) return;
+                      try {
+                        const res = await fetch(`/api/topics/${topic.id}`, { method: 'DELETE' });
+                        if (res.ok) {
+                          toast.success(`Deleted "${topic.title}"`);
+                          router.refresh();
+                        } else {
+                          toast.error('Failed to delete topic');
+                        }
+                      } catch {
+                        toast.error('Network error');
+                      }
+                    }}
+                    className="rounded p-1.5 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    title="Delete topic"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <ChevronRight className="ml-4 h-4 w-4 shrink-0 text-muted-foreground" />
-              </Link>
+              </div>
             );
           })
         )}
