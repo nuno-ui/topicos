@@ -15,6 +15,7 @@ export async function GET(request: Request) {
   let query = supabase
     .from('contacts')
     .select('*')
+    .eq('user_id', user.id)
     .order('interaction_count', { ascending: false })
     .limit(limit);
 

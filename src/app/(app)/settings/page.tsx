@@ -16,11 +16,13 @@ export default async function SettingsPage() {
   const { data: googleAccounts } = await supabase
     .from('google_accounts')
     .select('*')
+    .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
   const { data: recentSyncs } = await supabase
     .from('sync_runs')
     .select('*')
+    .eq('user_id', user.id)
     .order('started_at', { ascending: false })
     .limit(10);
 

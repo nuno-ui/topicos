@@ -21,14 +21,12 @@ import {
   Gauge,
   ListChecks,
   Bot,
-  Send,
   ChevronDown,
   ChevronRight,
   FileEdit,
   Building2,
   UserCircle,
   MailPlus,
-  CalendarPlus,
   Zap,
 } from 'lucide-react';
 import Link from 'next/link';

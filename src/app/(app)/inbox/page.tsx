@@ -11,12 +11,14 @@ export default async function InboxPage() {
   const { data: items } = await supabase
     .from('items')
     .select('*')
+    .eq('user_id', user.id)
     .order('occurred_at', { ascending: false });
 
   // Fetch topic links to know which items are linked
   const { data: topicLinks } = await supabase
     .from('topic_links')
-    .select('*');
+    .select('*')
+    .eq('user_id', user.id);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const linkedItemIds = (topicLinks ?? []).map((link: any) => link.item_id as string);
@@ -25,13 +27,15 @@ export default async function InboxPage() {
   const { data: topics } = await supabase
     .from('topics')
     .select('*')
+    .eq('user_id', user.id)
     .eq('status', 'active')
     .order('updated_at', { ascending: false });
 
   // Fetch google accounts for badges and filtering
   const { data: accounts } = await supabase
     .from('google_accounts')
-    .select('id, email');
+    .select('id, email')
+    .eq('user_id', user.id);
 
   return (
     <InboxClient

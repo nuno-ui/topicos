@@ -46,7 +46,8 @@ export default async function TopicPage({ params }: TopicPageProps) {
   // Fetch accounts for action buttons
   const { data: accounts } = await supabase
     .from('google_accounts')
-    .select('id, email');
+    .select('id, email')
+    .eq('user_id', user.id);
 
   // Fetch email drafts for this topic
   const { data: drafts } = await supabase

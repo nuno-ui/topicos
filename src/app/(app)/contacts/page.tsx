@@ -10,12 +10,14 @@ export default async function ContactsPage() {
   const { data: contacts } = await supabase
     .from('contacts')
     .select('*')
+    .eq('user_id', user.id)
     .order('interaction_count', { ascending: false });
 
   // Fetch contact-topic links with topic info
   const { data: contactTopicLinks } = await supabase
     .from('contact_topic_links')
-    .select('*, topics:topic_id(id, title, area)');
+    .select('*, topics:topic_id(id, title, area)')
+    .eq('user_id', user.id);
 
   // Build a map of contact_id -> topics
   const contactTopicsMap: Record<string, { id: string; title: string; area: string }[]> = {};

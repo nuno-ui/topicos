@@ -10,6 +10,7 @@ export default async function AgentsPage() {
   const { data: agentRuns } = await supabase
     .from('agent_runs')
     .select('*')
+    .eq('user_id', user.id)
     .order('started_at', { ascending: false })
     .limit(50);
 

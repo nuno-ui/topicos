@@ -5,7 +5,6 @@ import type { AgentRun } from '@/types/database';
 import { cn } from '@/lib/utils';
 import {
   Bot,
-  Sparkles,
   Filter as FilterIcon,
   Clock,
   CheckCircle2,

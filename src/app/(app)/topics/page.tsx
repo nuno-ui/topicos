@@ -10,6 +10,7 @@ export default async function TopicsPage() {
   const { data: topics } = await supabase
     .from('topics')
     .select('*')
+    .eq('user_id', user.id)
     .order('updated_at', { ascending: false });
 
   return <TopicsListClient topics={topics ?? []} />;
