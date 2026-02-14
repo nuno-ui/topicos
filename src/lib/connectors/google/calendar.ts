@@ -113,6 +113,8 @@ export async function fetchCalendarEvents(
           : null,
         start: event.start ?? null,
         end: event.end ?? null,
+        recurringEventId: event.recurringEventId ?? null,
+        recurrence: event.recurrence ?? null,
       },
     });
   }

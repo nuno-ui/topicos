@@ -77,12 +77,14 @@ export async function fetchGmailMessages(
   const auth = getGoogleClient(accessToken, refreshToken);
   const gmail = google.gmail({ version: 'v1', auth });
 
-  // List message IDs
+  // List message IDs (inbox + sent)
+  // Fetch both received and sent messages by not filtering by label
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const listRes: any = await gmail.users.messages.list({
     userId: 'me',
     maxResults,
     pageToken: cursor || undefined,
+    q: 'in:inbox OR in:sent',
   });
 
   const messageRefs = listRes?.data?.messages ?? [];
@@ -136,6 +138,10 @@ export async function fetchGmailMessages(
         ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(accountEmail)}#inbox/${ref.id}`
         : `https://mail.google.com/mail/u/0/#inbox/${ref.id}`;
 
+      // Determine if sent or received based on labels
+      const labels: string[] = msg.labelIds ?? [];
+      const isSent = labels.includes('SENT');
+
       items.push({
         external_id: ref.id,
         title: subject,
@@ -147,8 +153,9 @@ export async function fetchGmailMessages(
         metadata: {
           from,
           to,
-          labels: msg.labelIds ?? [],
+          labels,
           threadId: msg.threadId ?? null,
+          direction: isSent ? 'sent' : 'received',
         },
       });
     } catch (err) {

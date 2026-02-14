@@ -51,8 +51,8 @@ const SOURCE_LABELS: Record<ItemSource, string> = {
   gmail: 'Emails',
   calendar: 'Events',
   drive: 'Files',
-  manual: 'Manual',
-  slack: 'Slack',
+  manual: 'Notes',
+  slack: 'Chats',
 };
 
 type TabKey = 'all' | ItemSource;
@@ -62,8 +62,8 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: 'gmail', label: 'Emails', icon: Mail },
   { key: 'calendar', label: 'Events', icon: Calendar },
   { key: 'drive', label: 'Files', icon: FileText },
-  { key: 'slack', label: 'Slack', icon: MessageSquare },
-  { key: 'manual', label: 'Manual', icon: StickyNote },
+  { key: 'slack', label: 'Chats', icon: MessageSquare },
+  { key: 'manual', label: 'Notes', icon: StickyNote },
 ];
 
 type TriageFilter = 'untriaged' | 'all' | 'relevant' | 'low_relevance' | 'noise';
@@ -75,6 +75,14 @@ interface InboxClientProps {
   linkedItemIds: string[];
   topics: Topic[];
   accounts: { id: string; email: string }[];
+  /** Custom page title (e.g. "Emails", "Events") */
+  pageTitle?: string;
+  /** Custom page description */
+  pageDescription?: string;
+  /** Default source tab to show */
+  defaultSource?: TabKey;
+  /** Hide the source tabs row (when showing a single-source page) */
+  hideTabs?: boolean;
 }
 
 export function InboxClient({
@@ -82,11 +90,15 @@ export function InboxClient({
   linkedItemIds: initialLinkedIds,
   topics,
   accounts,
+  pageTitle,
+  pageDescription,
+  defaultSource,
+  hideTabs = false,
 }: InboxClientProps) {
   const [items, setItems] = useState<Item[]>(initialItems);
   const [linkedIds, setLinkedIds] = useState<Set<string>>(new Set(initialLinkedIds));
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<TabKey>('all');
+  const [activeTab, setActiveTab] = useState<TabKey>(defaultSource ?? 'all');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [triageFilter, setTriageFilter] = useState<TriageFilter>('all');
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
@@ -158,6 +170,48 @@ export function InboxClient({
     return counts;
   }, [items, linkedIds, triageFilter, selectedAccountId, showLinked]);
 
+  // Group recurring calendar events: show only the latest instance with a count badge
+  const { displayItems, recurringCounts } = useMemo(() => {
+    const isCalendarView = activeTab === 'calendar' || defaultSource === 'calendar';
+    if (!isCalendarView) {
+      return { displayItems: filtered, recurringCounts: new Map<string, number>() };
+    }
+
+    // Group by recurringEventId
+    const groups = new Map<string, Item[]>();
+    const nonRecurring: Item[] = [];
+
+    for (const item of filtered) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const meta = item.metadata as any;
+      const recurringId = meta?.recurringEventId;
+      if (recurringId) {
+        const existing = groups.get(recurringId) || [];
+        existing.push(item);
+        groups.set(recurringId, existing);
+      } else {
+        nonRecurring.push(item);
+      }
+    }
+
+    // For each group, keep only the most recent (first since sorted desc)
+    const result: Item[] = [...nonRecurring];
+    const counts = new Map<string, number>();
+
+    for (const [recurringId, groupItems] of groups) {
+      // Items are already sorted by occurred_at desc, so first is most recent
+      result.push(groupItems[0]);
+      if (groupItems.length > 1) {
+        counts.set(groupItems[0].id, groupItems.length);
+      }
+    }
+
+    // Re-sort by date desc
+    result.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
+
+    return { displayItems: result, recurringCounts: counts };
+  }, [filtered, activeTab, defaultSource]);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -177,7 +231,7 @@ export function InboxClient({
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex((prev) => (prev < filtered.length - 1 ? prev + 1 : prev));
+        setSelectedIndex((prev) => (prev < displayItems.length - 1 ? prev + 1 : prev));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
@@ -185,14 +239,14 @@ export function InboxClient({
         const target = document.activeElement?.tagName;
         if (target === 'INPUT' || target === 'TEXTAREA') return;
         e.preventDefault();
-        const item = filtered[selectedIndex];
+        const item = displayItems[selectedIndex];
         if (item) setLinkDropdownOpen(item.id);
       } else if (e.key === 'Escape') {
         setLinkDropdownOpen(null);
         setTopicSearch('');
       }
     },
-    [filtered, selectedIndex, linkDropdownOpen]
+    [displayItems, selectedIndex, linkDropdownOpen]
   );
 
   useEffect(() => {
@@ -295,10 +349,10 @@ export function InboxClient({
   };
 
   const handleSelectAll = () => {
-    if (selectedIds.size === filtered.length) {
+    if (selectedIds.size === displayItems.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filtered.map((i) => i.id)));
+      setSelectedIds(new Set(displayItems.map((i) => i.id)));
     }
   };
 
@@ -356,9 +410,9 @@ export function InboxClient({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Inbox</h1>
+          <h1 className="text-2xl font-bold">{pageTitle ?? 'Inbox'}</h1>
           <p className="text-sm text-muted-foreground">
-            {filtered.length} item{filtered.length !== 1 ? 's' : ''} · Organize with AI or link manually
+            {pageDescription ?? `${displayItems.length} item${displayItems.length !== 1 ? 's' : ''} · Organize with AI or link manually`}
           </p>
         </div>
         <button
@@ -387,42 +441,44 @@ export function InboxClient({
         onSelect={setSelectedAccountId}
       />
 
-      {/* Source tabs */}
-      <div className="flex items-center gap-1 border-b border-border">
-        {TABS.map((tab) => {
-          const TabIcon = tab.icon;
-          const count = tabCounts[tab.key];
-          const isActive = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => {
-                setActiveTab(tab.key);
-                setSelectedIndex(-1);
-              }}
-              className={cn(
-                'flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
-                isActive
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <TabIcon className="h-4 w-4" />
-              {tab.label}
-              {count > 0 && (
-                <span
-                  className={cn(
-                    'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
-                    isActive ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
-                  )}
-                >
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {/* Source tabs (hidden on single-source pages) */}
+      {!hideTabs && (
+        <div className="flex items-center gap-1 border-b border-border">
+          {TABS.map((tab) => {
+            const TabIcon = tab.icon;
+            const count = tabCounts[tab.key];
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => {
+                  setActiveTab(tab.key);
+                  setSelectedIndex(-1);
+                }}
+                className={cn(
+                  'flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <TabIcon className="h-4 w-4" />
+                {tab.label}
+                {count > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+                      isActive ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+                    )}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Search + Filter row */}
       <div className="flex items-center gap-3">
@@ -485,12 +541,12 @@ export function InboxClient({
             close
           </span>
         </div>
-        {filtered.length > 0 && (
+        {displayItems.length > 0 && (
           <button
             onClick={handleSelectAll}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
-            {selectedIds.size === filtered.length ? (
+            {selectedIds.size === displayItems.length ? (
               <CheckSquare className="h-3.5 w-3.5" />
             ) : (
               <Square className="h-3.5 w-3.5" />
@@ -523,7 +579,7 @@ export function InboxClient({
 
       {/* Items list */}
       <div className="space-y-2">
-        {filtered.length === 0 ? (
+        {displayItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-card py-16 text-center">
             <Inbox className="mb-3 h-10 w-10 text-muted-foreground" />
             <p className="font-medium text-foreground">
@@ -545,12 +601,13 @@ export function InboxClient({
             )}
           </div>
         ) : (
-          filtered.map((item, index) => {
+          displayItems.map((item, index) => {
             const SourceIcon = SOURCE_ICONS[item.source];
             const isSelected = index === selectedIndex;
             const isLinked = linkedItemId === item.id;
             const isLinking = linkingItemId === item.id;
             const isDropdownOpen = linkDropdownOpen === item.id;
+            const recurringCount = recurringCounts.get(item.id);
             const accountEmail = item.account_id ? accountMap[item.account_id] : null;
             const triage = triageStatusLabel(item.triage_status);
             const isLinkedToTopic = linkedIds.has(item.id);
@@ -647,6 +704,13 @@ export function InboxClient({
                     {item.triage_score != null && (
                       <span className="text-[10px] text-muted-foreground">
                         score: {(item.triage_score * 100).toFixed(0)}%
+                      </span>
+                    )}
+                    {/* Recurring event badge */}
+                    {recurringCount && recurringCount > 1 && (
+                      <span className="flex items-center gap-0.5 rounded-md border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
+                        <RefreshCw className="h-2.5 w-2.5" />
+                        {recurringCount} occurrences
                       </span>
                     )}
                     {/* Account badge */}

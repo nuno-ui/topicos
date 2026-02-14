@@ -118,25 +118,11 @@ export async function POST(request: Request) {
       }
     }
 
-    // After syncing, trigger Curator Agent to auto-organize new items
-    try {
-      const { CuratorAgent } = await import('@/lib/agents/curator');
-      const curator = new CuratorAgent();
-      const curatorResult = await curator.execute(user.id, 'post_sync');
-
-      return NextResponse.json({
-        synced: syncResults.length,
-        accounts: syncResults,
-        curator: curatorResult.success ? curatorResult.output : { error: curatorResult.error },
-      });
-    } catch (curatorErr) {
-      console.error('Curator agent error:', curatorErr);
-      return NextResponse.json({
-        synced: syncResults.length,
-        accounts: syncResults,
-        curator: { error: 'Curator agent failed' },
-      });
-    }
+    // Return sync results (Curator is now manual-only via the Agents page)
+    return NextResponse.json({
+      synced: syncResults.length,
+      accounts: syncResults,
+    });
   } catch (err) {
     console.error('Sync error:', err);
     return NextResponse.json(
