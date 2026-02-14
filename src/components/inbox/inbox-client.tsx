@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { Item, Topic, ItemSource } from '@/types/database';
 import { cn } from '@/lib/utils';
+import { AccountBadge, AccountFilter } from '@/components/ui/account-badge';
 import {
   Mail,
   Calendar,
@@ -14,9 +15,15 @@ import {
   Check,
   Inbox,
   ChevronDown,
+  ExternalLink,
+  Sparkles,
+  Loader2,
+  Eye,
+  EyeOff,
+  Filter,
 } from 'lucide-react';
 
-/* ---------- Source icon mapping ---------- */
+/* ---------- Source icon & color mapping ---------- */
 
 const SOURCE_ICONS: Record<ItemSource, React.ElementType> = {
   gmail: Mail,
@@ -32,40 +39,117 @@ const SOURCE_COLORS: Record<ItemSource, string> = {
   manual: 'text-emerald-400',
 };
 
+const SOURCE_LABELS: Record<ItemSource, string> = {
+  gmail: 'Emails',
+  calendar: 'Events',
+  drive: 'Files',
+  manual: 'Manual',
+};
+
+type TabKey = 'all' | ItemSource;
+
+const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
+  { key: 'all', label: 'All', icon: Inbox },
+  { key: 'gmail', label: 'Emails', icon: Mail },
+  { key: 'calendar', label: 'Events', icon: Calendar },
+  { key: 'drive', label: 'Files', icon: FileText },
+  { key: 'manual', label: 'Manual', icon: StickyNote },
+];
+
+type TriageFilter = 'untriaged' | 'all' | 'relevant' | 'low_relevance' | 'noise';
+
 /* ---------- Props ---------- */
 
 interface InboxClientProps {
   items: Item[];
+  linkedItemIds: string[];
   topics: Topic[];
+  accounts: { id: string; email: string }[];
 }
 
-export function InboxClient({ items: initialItems, topics }: InboxClientProps) {
+export function InboxClient({
+  items: initialItems,
+  linkedItemIds: initialLinkedIds,
+  topics,
+  accounts,
+}: InboxClientProps) {
   const [items, setItems] = useState<Item[]>(initialItems);
+  const [linkedIds, setLinkedIds] = useState<Set<string>>(new Set(initialLinkedIds));
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<TabKey>('all');
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [triageFilter, setTriageFilter] = useState<TriageFilter>('untriaged');
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [linkDropdownOpen, setLinkDropdownOpen] = useState<string | null>(null);
   const [linkingItemId, setLinkingItemId] = useState<string | null>(null);
   const [linkedItemId, setLinkedItemId] = useState<string | null>(null);
   const [topicSearch, setTopicSearch] = useState('');
+  const [showLinked, setShowLinked] = useState(false);
+  const [curatorRunning, setCuratorRunning] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Filter items client-side by search query
-  const filtered = items.filter((item) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      item.title.toLowerCase().includes(q) ||
-      (item.snippet?.toLowerCase().includes(q) ?? false)
-    );
-  });
+  // Build an account email map for badges
+  const accountMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const acc of accounts) {
+      map[acc.id] = acc.email;
+    }
+    return map;
+  }, [accounts]);
+
+  // Filter items by all criteria
+  const filtered = useMemo(() => {
+    return items.filter((item) => {
+      // Tab filter
+      if (activeTab !== 'all' && item.source !== activeTab) return false;
+
+      // Account filter
+      if (selectedAccountId && item.account_id !== selectedAccountId) return false;
+
+      // Triage/linked filter
+      const isLinked = linkedIds.has(item.id);
+      if (triageFilter === 'untriaged') {
+        if (isLinked && !showLinked) return false;
+      } else if (triageFilter === 'relevant') {
+        if (item.triage_status !== 'relevant') return false;
+      } else if (triageFilter === 'low_relevance') {
+        if (item.triage_status !== 'low_relevance') return false;
+      } else if (triageFilter === 'noise') {
+        if (item.triage_status !== 'noise') return false;
+      }
+
+      // Search filter
+      if (search) {
+        const q = search.toLowerCase();
+        if (
+          !item.title.toLowerCase().includes(q) &&
+          !(item.snippet?.toLowerCase().includes(q) ?? false)
+        ) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [items, activeTab, selectedAccountId, triageFilter, search, linkedIds, showLinked]);
+
+  // Count items per tab
+  const tabCounts = useMemo(() => {
+    const counts: Record<TabKey, number> = { all: 0, gmail: 0, calendar: 0, drive: 0, manual: 0 };
+    for (const item of items) {
+      const isLinked = linkedIds.has(item.id);
+      if (triageFilter === 'untriaged' && isLinked && !showLinked) continue;
+      if (selectedAccountId && item.account_id !== selectedAccountId) continue;
+      counts.all++;
+      counts[item.source]++;
+    }
+    return counts;
+  }, [items, linkedIds, triageFilter, selectedAccountId, showLinked]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node)
-      ) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setLinkDropdownOpen(null);
         setTopicSearch('');
       }
@@ -77,13 +161,11 @@ export function InboxClient({ items: initialItems, topics }: InboxClientProps) {
   // Keyboard navigation
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (linkDropdownOpen) return; // Don't navigate while dropdown is open
+      if (linkDropdownOpen) return;
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex((prev) =>
-          prev < filtered.length - 1 ? prev + 1 : prev
-        );
+        setSelectedIndex((prev) => (prev < filtered.length - 1 ? prev + 1 : prev));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
@@ -92,9 +174,7 @@ export function InboxClient({ items: initialItems, topics }: InboxClientProps) {
         if (target === 'INPUT' || target === 'TEXTAREA') return;
         e.preventDefault();
         const item = filtered[selectedIndex];
-        if (item) {
-          setLinkDropdownOpen(item.id);
-        }
+        if (item) setLinkDropdownOpen(item.id);
       } else if (e.key === 'Escape') {
         setLinkDropdownOpen(null);
         setTopicSearch('');
@@ -124,13 +204,15 @@ export function InboxClient({ items: initialItems, topics }: InboxClientProps) {
         return;
       }
 
-      // Optimistic update: show brief success then remove item
       setLinkedItemId(itemId);
       setTimeout(() => {
-        setItems((prev) => prev.filter((i) => i.id !== itemId));
+        setLinkedIds((prev) => new Set([...prev, itemId]));
         setLinkedItemId(null);
         setLinkDropdownOpen(null);
         setTopicSearch('');
+        if (!showLinked) {
+          setItems((prev) => prev.filter((i) => i.id !== itemId));
+        }
       }, 400);
     } catch {
       console.error('Network error linking item');
@@ -144,31 +226,33 @@ export function InboxClient({ items: initialItems, topics }: InboxClientProps) {
     const topicTitle = topicSearch.trim() || 'Untitled Topic';
     setLinkingItemId(itemId);
     try {
-      // 1. Create the topic
       const topicRes = await fetch('/api/topics', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: topicTitle,
-          area: 'personal',
-          description: '',
-        }),
+        body: JSON.stringify({ title: topicTitle, area: 'personal', description: '' }),
       });
-
-      if (!topicRes.ok) {
-        const body = await topicRes.json();
-        console.error('Failed to create topic:', body.error);
-        return;
-      }
-
+      if (!topicRes.ok) return;
       const newTopic = await topicRes.json();
-
-      // 2. Link item to new topic
       await handleLinkToTopic(itemId, newTopic.id);
     } catch {
       console.error('Network error creating topic');
     } finally {
-      setLinkingItemId(null);
+      setLinkingItemId(itemId);
+    }
+  };
+
+  // Run Curator Agent
+  const handleRunCurator = async () => {
+    setCuratorRunning(true);
+    try {
+      const res = await fetch('/api/agents/curator', { method: 'POST' });
+      if (res.ok) {
+        window.location.reload();
+      }
+    } catch {
+      console.error('Curator error');
+    } finally {
+      setCuratorRunning(false);
     }
   };
 
@@ -177,11 +261,12 @@ export function InboxClient({ items: initialItems, topics }: InboxClientProps) {
     const date = new Date(dateStr);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffDays = Math.floor(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
+    const isFuture = diffMs < 0;
 
     if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffDays === 1) return isFuture ? 'Tomorrow' : 'Yesterday';
+    if (diffDays < 7) return isFuture ? `in ${diffDays}d` : `${diffDays}d ago`;
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
@@ -190,48 +275,145 @@ export function InboxClient({ items: initialItems, topics }: InboxClientProps) {
     t.title.toLowerCase().includes(topicSearch.toLowerCase())
   );
 
+  const triageStatusLabel = (status: string | null) => {
+    switch (status) {
+      case 'relevant': return { text: 'Relevant', className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' };
+      case 'low_relevance': return { text: 'Low', className: 'bg-amber-500/10 text-amber-400 border-amber-500/20' };
+      case 'noise': return { text: 'Noise', className: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20' };
+      default: return { text: 'Pending', className: 'bg-blue-500/10 text-blue-400 border-blue-500/20' };
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Inbox</h1>
           <p className="text-sm text-muted-foreground">
-            {filtered.length} untriaged item{filtered.length !== 1 ? 's' : ''} waiting to be linked to a topic
+            {filtered.length} item{filtered.length !== 1 ? 's' : ''} · Organize with AI or link manually
           </p>
         </div>
+        <button
+          onClick={handleRunCurator}
+          disabled={curatorRunning}
+          className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+        >
+          {curatorRunning ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Organizing...
+            </>
+          ) : (
+            <>
+              <Sparkles className="h-4 w-4" />
+              AI Organize
+            </>
+          )}
+        </button>
       </div>
 
-      {/* Search bar */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="text"
-          placeholder="Filter items by title or snippet..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full rounded-lg border border-border bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-        />
+      {/* Account filter */}
+      <AccountFilter
+        accounts={accounts}
+        selectedAccountId={selectedAccountId}
+        onSelect={setSelectedAccountId}
+      />
+
+      {/* Source tabs */}
+      <div className="flex items-center gap-1 border-b border-border">
+        {TABS.map((tab) => {
+          const TabIcon = tab.icon;
+          const count = tabCounts[tab.key];
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setActiveTab(tab.key);
+                setSelectedIndex(-1);
+              }}
+              className={cn(
+                'flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
+                isActive
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <TabIcon className="h-4 w-4" />
+              {tab.label}
+              {count > 0 && (
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+                    isActive ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+                  )}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Keyboard hint */}
+      {/* Search + Filter row */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search items..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-lg border border-border bg-card py-2 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+
+        {/* Triage filter dropdown */}
+        <div className="flex items-center gap-1.5">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          <select
+            value={triageFilter}
+            onChange={(e) => setTriageFilter(e.target.value as TriageFilter)}
+            className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="untriaged">Untriaged</option>
+            <option value="all">All Items</option>
+            <option value="relevant">Relevant</option>
+            <option value="low_relevance">Low Relevance</option>
+            <option value="noise">Noise</option>
+          </select>
+        </div>
+
+        {/* Show linked toggle */}
+        <button
+          onClick={() => setShowLinked(!showLinked)}
+          className={cn(
+            'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors',
+            showLinked
+              ? 'border-primary/30 bg-primary/5 text-primary'
+              : 'border-border text-muted-foreground hover:text-foreground'
+          )}
+          title={showLinked ? 'Hide linked items' : 'Show linked items'}
+        >
+          {showLinked ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          Linked
+        </button>
+      </div>
+
+      {/* Keyboard hints */}
       <div className="flex items-center gap-4 text-xs text-muted-foreground">
         <span>
-          <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">
-            &uarr;&darr;
-          </kbd>{' '}
+          <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">↑↓</kbd>{' '}
           navigate
         </span>
         <span>
-          <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">
-            l
-          </kbd>{' '}
-          link to topic
+          <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">l</kbd>{' '}
+          link
         </span>
         <span>
-          <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">
-            esc
-          </kbd>{' '}
+          <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">esc</kbd>{' '}
           close
         </span>
       </div>
@@ -246,8 +428,8 @@ export function InboxClient({ items: initialItems, topics }: InboxClientProps) {
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {items.length === 0
-                ? 'All items have been linked to topics.'
-                : 'Try adjusting your search filter.'}
+                ? 'All items have been organized.'
+                : 'Try adjusting your filters or search.'}
             </p>
           </div>
         ) : (
@@ -257,134 +439,175 @@ export function InboxClient({ items: initialItems, topics }: InboxClientProps) {
             const isLinked = linkedItemId === item.id;
             const isLinking = linkingItemId === item.id;
             const isDropdownOpen = linkDropdownOpen === item.id;
+            const accountEmail = item.account_id ? accountMap[item.account_id] : null;
+            const triage = triageStatusLabel(item.triage_status);
+            const isLinkedToTopic = linkedIds.has(item.id);
 
             return (
               <div
                 key={item.id}
                 onClick={() => setSelectedIndex(index)}
                 className={cn(
-                  'relative flex items-start gap-4 rounded-lg border border-border bg-card p-4 transition-all',
+                  'relative flex items-start gap-3 rounded-lg border border-border bg-card p-3 transition-all',
                   isSelected && 'border-primary/40 bg-primary/5',
-                  isLinked && 'scale-95 opacity-0 transition-all duration-300'
+                  isLinked && 'scale-95 opacity-0 transition-all duration-300',
+                  isLinkedToTopic && 'opacity-60'
                 )}
               >
                 {/* Source icon */}
                 <div
                   className={cn(
-                    'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background',
+                    'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-background',
                     SOURCE_COLORS[item.source]
                   )}
                 >
-                  <SourceIcon className="h-4.5 w-4.5" />
+                  <SourceIcon className="h-4 w-4" />
                 </div>
 
                 {/* Content */}
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-3">
-                    <h3 className="truncate font-medium text-foreground">
-                      {item.title}
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="truncate text-sm font-medium text-foreground">
+                      {item.url ? (
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-primary hover:underline transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {item.title}
+                          <ExternalLink className="ml-1 inline h-3 w-3 opacity-50" />
+                        </a>
+                      ) : (
+                        item.title
+                      )}
                     </h3>
                     <span className="shrink-0 text-xs text-muted-foreground">
                       {formatDate(item.occurred_at)}
                     </span>
                   </div>
                   {item.snippet && (
-                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                    <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
                       {item.snippet}
                     </p>
                   )}
-                  <div className="mt-2 flex items-center gap-2">
+                  <div className="mt-1.5 flex items-center gap-2">
                     <span
                       className={cn(
-                        'rounded-md border px-2 py-0.5 text-xs font-medium capitalize',
+                        'rounded-md border px-1.5 py-0.5 text-[10px] font-medium capitalize',
                         'bg-background text-muted-foreground border-border'
                       )}
                     >
-                      {item.source}
+                      {SOURCE_LABELS[item.source]}
                     </span>
+                    {/* Triage status badge */}
+                    <span
+                      className={cn(
+                        'rounded-md border px-1.5 py-0.5 text-[10px] font-medium',
+                        triage.className
+                      )}
+                    >
+                      {triage.text}
+                    </span>
+                    {/* Triage score */}
+                    {item.triage_score != null && (
+                      <span className="text-[10px] text-muted-foreground">
+                        score: {(item.triage_score * 100).toFixed(0)}%
+                      </span>
+                    )}
+                    {/* Account badge */}
+                    {accountEmail && <AccountBadge email={accountEmail} size="sm" />}
+                    {/* Linked indicator */}
+                    {isLinkedToTopic && (
+                      <span className="flex items-center gap-0.5 text-[10px] text-emerald-400">
+                        <Link2 className="h-3 w-3" />
+                        Linked
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 {/* Link to Topic button + dropdown */}
-                <div className="relative shrink-0" ref={isDropdownOpen ? dropdownRef : undefined}>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setLinkDropdownOpen(isDropdownOpen ? null : item.id);
-                      setTopicSearch('');
-                    }}
-                    disabled={isLinking}
-                    className={cn(
-                      'flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium transition-colors',
-                      'text-muted-foreground hover:border-primary/30 hover:text-foreground',
-                      isDropdownOpen && 'border-primary/30 text-foreground',
-                      isLinking && 'opacity-50'
-                    )}
-                  >
-                    <Link2 className="h-3.5 w-3.5" />
-                    Link
-                    <ChevronDown className="h-3 w-3" />
-                  </button>
+                {!isLinkedToTopic && (
+                  <div className="relative shrink-0" ref={isDropdownOpen ? dropdownRef : undefined}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLinkDropdownOpen(isDropdownOpen ? null : item.id);
+                        setTopicSearch('');
+                      }}
+                      disabled={isLinking}
+                      className={cn(
+                        'flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium transition-colors',
+                        'text-muted-foreground hover:border-primary/30 hover:text-foreground',
+                        isDropdownOpen && 'border-primary/30 text-foreground',
+                        isLinking && 'opacity-50'
+                      )}
+                    >
+                      <Link2 className="h-3 w-3" />
+                      Link
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
 
-                  {/* Topic dropdown */}
-                  {isDropdownOpen && (
-                    <div className="absolute right-0 top-full z-50 mt-1.5 w-72 rounded-lg border border-border bg-card shadow-xl">
-                      {/* Search in dropdown */}
-                      <div className="border-b border-border p-2">
-                        <input
-                          type="text"
-                          placeholder="Search topics or type new name..."
-                          value={topicSearch}
-                          onChange={(e) => setTopicSearch(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          autoFocus
-                          className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
+                    {/* Topic dropdown */}
+                    {isDropdownOpen && (
+                      <div className="absolute right-0 top-full z-50 mt-1.5 w-72 rounded-lg border border-border bg-card shadow-xl">
+                        <div className="border-b border-border p-2">
+                          <input
+                            type="text"
+                            placeholder="Search topics or type new name..."
+                            value={topicSearch}
+                            onChange={(e) => setTopicSearch(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
 
-                      <div className="max-h-56 overflow-y-auto p-1">
-                        {filteredTopics.map((topic) => (
+                        <div className="max-h-56 overflow-y-auto p-1">
+                          {filteredTopics.map((topic) => (
+                            <button
+                              key={topic.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleLinkToTopic(item.id, topic.id);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-primary/10"
+                            >
+                              <Check className="h-3.5 w-3.5 shrink-0 text-transparent" />
+                              <span className="truncate">{topic.title}</span>
+                              <span className="ml-auto shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] capitalize text-muted-foreground">
+                                {topic.area}
+                              </span>
+                            </button>
+                          ))}
+
+                          {filteredTopics.length === 0 && !topicSearch && (
+                            <p className="px-3 py-4 text-center text-sm text-muted-foreground">
+                              No topics yet. Type a name to create one.
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="border-t border-border p-1">
                           <button
-                            key={topic.id}
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleLinkToTopic(item.id, topic.id);
+                              handleCreateTopicAndLink(item.id);
                             }}
-                            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-primary/10"
+                            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-primary transition-colors hover:bg-primary/10"
                           >
-                            <Check className="h-3.5 w-3.5 shrink-0 text-transparent" />
-                            <span className="truncate">{topic.title}</span>
-                            <span className="ml-auto shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] capitalize text-muted-foreground">
-                              {topic.area}
+                            <Plus className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">
+                              Create{topicSearch ? ` "${topicSearch}"` : ' new topic'} &amp; link
                             </span>
                           </button>
-                        ))}
-
-                        {filteredTopics.length === 0 && !topicSearch && (
-                          <p className="px-3 py-4 text-center text-sm text-muted-foreground">
-                            No topics yet. Type a name to create one.
-                          </p>
-                        )}
+                        </div>
                       </div>
-
-                      {/* Create topic & link option */}
-                      <div className="border-t border-border p-1">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCreateTopicAndLink(item.id);
-                          }}
-                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-primary transition-colors hover:bg-primary/10"
-                        >
-                          <Plus className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate">
-                            Create{topicSearch ? ` "${topicSearch}"` : ' new topic'} &amp; link
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { Topic, Item, Task, TopicLink, Area, TaskStatus, ItemSource } from '@/types/database';
+import type { Topic, Item, Task, TopicLink, Area, TaskStatus, ItemSource, Contact, EmailDraft } from '@/types/database';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -16,6 +16,20 @@ import {
   CheckCircle2,
   Loader2,
   AlertCircle,
+  ExternalLink,
+  Users,
+  Gauge,
+  ListChecks,
+  Bot,
+  Send,
+  ChevronDown,
+  ChevronRight,
+  FileEdit,
+  Building2,
+  UserCircle,
+  MailPlus,
+  CalendarPlus,
+  Zap,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -64,6 +78,12 @@ const SOURCE_ICONS: Record<ItemSource, React.ElementType> = {
   manual: StickyNote,
 };
 
+const PRIORITY_COLORS: Record<string, string> = {
+  high: 'bg-red-500/10 text-red-400 border-red-500/20',
+  medium: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  low: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+};
+
 /* ---------- types ---------- */
 
 interface LinkedItem {
@@ -75,6 +95,32 @@ interface TopicDossierClientProps {
   topic: Topic;
   linkedItems: LinkedItem[];
   tasks: Task[];
+  contacts: Contact[];
+  accounts: { id: string; email: string }[];
+  drafts: EmailDraft[];
+}
+
+/* ---------- helpers ---------- */
+
+function getUrgencyColor(score: number | null) {
+  if (score == null) return { bar: 'bg-zinc-600', text: 'text-zinc-400', label: 'Not scored' };
+  if (score >= 80) return { bar: 'bg-red-500', text: 'text-red-400', label: 'Critical' };
+  if (score >= 60) return { bar: 'bg-orange-500', text: 'text-orange-400', label: 'High' };
+  if (score >= 40) return { bar: 'bg-amber-500', text: 'text-amber-400', label: 'Medium' };
+  if (score >= 20) return { bar: 'bg-blue-500', text: 'text-blue-400', label: 'Low' };
+  return { bar: 'bg-emerald-500', text: 'text-emerald-400', label: 'Minimal' };
+}
+
+function formatRelativeTime(dateStr: string) {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
+  if (diffMins < 10080) return `${Math.floor(diffMins / 1440)}d ago`;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 /* ---------- component ---------- */
@@ -83,6 +129,9 @@ export function TopicDossierClient({
   topic,
   linkedItems,
   tasks: initialTasks,
+  contacts,
+  accounts,
+  drafts,
 }: TopicDossierClientProps) {
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [summarizing, setSummarizing] = useState(false);
@@ -96,13 +145,44 @@ export function TopicDossierClient({
   const [creatingTask, setCreatingTask] = useState(false);
   const [taskError, setTaskError] = useState<string | null>(null);
 
+  // Collapsible sections
+  const [timelineOpen, setTimelineOpen] = useState(true);
+  const [draftsOpen, setDraftsOpen] = useState(true);
+
+  // Compose state
+  const [composing, setComposing] = useState(false);
+  const [composeError, setComposeError] = useState<string | null>(null);
+
   const areaColor = AREA_COLORS[topic.area];
+  const urgency = getUrgencyColor(topic.urgency_score);
 
   // Sort linked items chronologically (oldest first)
   const sortedItems = [...linkedItems].sort(
     (a, b) =>
       new Date(a.item.occurred_at).getTime() - new Date(b.item.occurred_at).getTime()
   );
+
+  // Merge people from topic.people and contacts
+  const allPeople = [
+    ...(topic.people ?? []).map((p) => ({
+      name: p.name,
+      email: p.email ?? null,
+      role: p.role ?? null,
+      organization: p.organization ?? null,
+      isContact: false,
+      contactId: null as string | null,
+    })),
+    ...contacts
+      .filter((c) => !(topic.people ?? []).some((p) => p.email === c.email))
+      .map((c) => ({
+        name: c.name ?? c.email,
+        email: c.email,
+        role: c.role,
+        organization: c.organization,
+        isContact: true,
+        contactId: c.id,
+      })),
+  ];
 
   /* ---------- handlers ---------- */
 
@@ -191,6 +271,32 @@ export function TopicDossierClient({
     }
   };
 
+  const handleSmartCompose = async () => {
+    if (!accounts.length) {
+      setComposeError('No Google account connected. Connect one in Settings.');
+      return;
+    }
+    setComposing(true);
+    setComposeError(null);
+    try {
+      const res = await fetch('/api/agents/compose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic_id: topic.id }),
+      });
+      if (res.ok) {
+        window.location.reload();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setComposeError(body.error ?? 'Failed to compose draft');
+      }
+    } catch {
+      setComposeError('Network error. Please try again.');
+    } finally {
+      setComposing(false);
+    }
+  };
+
   /* ---------- render ---------- */
 
   return (
@@ -204,11 +310,11 @@ export function TopicDossierClient({
         Back to Topics
       </Link>
 
-      {/* Header */}
+      {/* Header with urgency */}
       <div className="rounded-lg border border-border bg-card p-6">
         <div className="flex items-start justify-between">
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
+          <div className="space-y-3 flex-1">
+            <div className="flex items-center gap-3 flex-wrap">
               <span
                 className={cn(
                   'rounded-md border px-2.5 py-1 text-xs font-medium capitalize',
@@ -225,6 +331,17 @@ export function TopicDossierClient({
               >
                 {topic.status}
               </span>
+              {topic.priority > 0 && (
+                <span className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-400">
+                  Priority: {topic.priority}
+                </span>
+              )}
+              {topic.last_agent_update_at && (
+                <span className="flex items-center gap-1 rounded-md border border-purple-500/20 bg-purple-500/10 px-2.5 py-1 text-xs font-medium text-purple-400">
+                  <Bot className="h-3 w-3" />
+                  AI updated {formatRelativeTime(topic.last_agent_update_at)}
+                </span>
+              )}
             </div>
             <h1 className="text-2xl font-bold text-foreground">{topic.title}</h1>
             {topic.description && (
@@ -233,13 +350,35 @@ export function TopicDossierClient({
               </p>
             )}
           </div>
-          <Link
-            href={`/topics/${topic.id}/edit`}
-            className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
-          >
-            <Pencil className="h-4 w-4" />
-            Edit
-          </Link>
+          <div className="flex items-center gap-2 shrink-0 ml-4">
+            <Link
+              href={`/topics/${topic.id}/edit`}
+              className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
+            >
+              <Pencil className="h-4 w-4" />
+              Edit
+            </Link>
+          </div>
+        </div>
+
+        {/* Urgency Score Meter */}
+        <div className="mt-5 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm">
+              <Gauge className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium text-foreground">Urgency</span>
+              <span className={cn('text-xs font-medium', urgency.text)}>{urgency.label}</span>
+            </div>
+            <span className={cn('text-sm font-bold tabular-nums', urgency.text)}>
+              {topic.urgency_score != null ? `${topic.urgency_score}/100` : '—'}
+            </span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-background">
+            <div
+              className={cn('h-full rounded-full transition-all duration-500', urgency.bar)}
+              style={{ width: `${topic.urgency_score ?? 0}%` }}
+            />
+          </div>
         </div>
 
         {/* Area accent bar */}
@@ -249,27 +388,146 @@ export function TopicDossierClient({
         />
       </div>
 
+      {/* Quick Actions Bar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          onClick={handleSmartCompose}
+          disabled={composing}
+          className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-purple-500/30 hover:text-purple-400"
+        >
+          {composing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <MailPlus className="h-4 w-4" />
+          )}
+          Smart Compose
+        </button>
+        <button
+          onClick={handleGenerateSummary}
+          disabled={summarizing}
+          className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-cyan-500/30 hover:text-cyan-400"
+        >
+          {summarizing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Sparkles className="h-4 w-4" />
+          )}
+          {summary ? 'Refresh Summary' : 'Generate Summary'}
+        </button>
+        {accounts.length > 0 && (
+          <span className="text-xs text-muted-foreground">
+            via {accounts.map((a) => a.email).join(', ')}
+          </span>
+        )}
+        {composeError && (
+          <span className="flex items-center gap-1 text-xs text-red-400">
+            <AlertCircle className="h-3 w-3" />
+            {composeError}
+          </span>
+        )}
+      </div>
+
+      {/* Two-column layout for side-by-side info */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* People Involved */}
+        <div className="rounded-lg border border-border bg-card p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Users className="h-5 w-5 text-muted-foreground" />
+            <h2 className="text-lg font-semibold text-foreground">People Involved</h2>
+            <span className="rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground">
+              {allPeople.length}
+            </span>
+          </div>
+
+          {allPeople.length === 0 ? (
+            <p className="text-sm text-muted-foreground italic">
+              No people identified yet. The Curator Agent will extract contacts automatically.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {allPeople.map((person, i) => (
+                <div key={person.email ?? `person-${i}`} className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background text-sm font-medium text-muted-foreground">
+                    {person.name?.[0]?.toUpperCase() ?? <UserCircle className="h-4 w-4" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-foreground truncate">
+                        {person.name}
+                      </span>
+                      {person.isContact && (
+                        <span className="rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-400">
+                          Contact
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      {person.email && <span className="truncate">{person.email}</span>}
+                      {person.role && (
+                        <span className="flex items-center gap-1">
+                          <span className="text-border">·</span> {person.role}
+                        </span>
+                      )}
+                      {person.organization && (
+                        <span className="flex items-center gap-1">
+                          <Building2 className="h-3 w-3" /> {person.organization}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* AI Next Steps */}
+        <div className="rounded-lg border border-border bg-card p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <ListChecks className="h-5 w-5 text-muted-foreground" />
+            <h2 className="text-lg font-semibold text-foreground">AI Next Steps</h2>
+            <span className="rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground">
+              {(topic.next_steps ?? []).length}
+            </span>
+          </div>
+
+          {(topic.next_steps ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground italic">
+              No AI-generated next steps yet. Run the Curator Agent to generate recommendations.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {(topic.next_steps ?? []).map((step, i) => (
+                <div
+                  key={`step-${i}`}
+                  className="flex items-start gap-3 rounded-md border border-border bg-background px-4 py-3"
+                >
+                  <Zap className="h-4 w-4 mt-0.5 shrink-0 text-amber-400" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground">{step.action}</p>
+                    {step.rationale && (
+                      <p className="mt-1 text-xs text-muted-foreground">{step.rationale}</p>
+                    )}
+                  </div>
+                  <span
+                    className={cn(
+                      'shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium capitalize',
+                      PRIORITY_COLORS[step.priority] ?? PRIORITY_COLORS.medium
+                    )}
+                  >
+                    {step.priority}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Summary section */}
       <div className="rounded-lg border border-border bg-card p-6">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">AI Summary</h2>
-          <button
-            onClick={handleGenerateSummary}
-            disabled={summarizing}
-            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            {summarizing ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-4 w-4" />
-                Generate Summary
-              </>
-            )}
-          </button>
         </div>
 
         {summaryError && (
@@ -286,59 +544,205 @@ export function TopicDossierClient({
             </p>
           ) : (
             <p className="text-sm italic text-muted-foreground">
-              No AI summary yet. Click &quot;Generate Summary&quot; to create one from linked items.
+              No AI summary yet. Click &quot;Generate Summary&quot; above to create one.
             </p>
           )}
         </div>
       </div>
 
-      {/* Timeline section */}
-      <div className="rounded-lg border border-border bg-card p-6">
-        <h2 className="text-lg font-semibold text-foreground">Timeline</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Linked items in chronological order
-        </p>
+      {/* Email Drafts section */}
+      {drafts.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-6">
+          <button
+            onClick={() => setDraftsOpen((v) => !v)}
+            className="flex w-full items-center justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <FileEdit className="h-5 w-5 text-muted-foreground" />
+              <h2 className="text-lg font-semibold text-foreground">Email Drafts</h2>
+              <span className="rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground">
+                {drafts.length}
+              </span>
+            </div>
+            {draftsOpen ? (
+              <ChevronDown className="h-5 w-5 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-5 w-5 text-muted-foreground" />
+            )}
+          </button>
 
-        {sortedItems.length === 0 ? (
-          <div className="mt-4 rounded-md border border-border bg-background p-6 text-center text-sm text-muted-foreground">
-            No linked items yet. Items will appear here as they are linked to this topic.
-          </div>
-        ) : (
-          <div className="mt-4 space-y-1">
-            {sortedItems.map(({ link, item }) => {
-              const SourceIcon = SOURCE_ICONS[item.source as ItemSource] ?? StickyNote;
-              return (
+          {draftsOpen && (
+            <div className="mt-4 space-y-3">
+              {drafts.map((draft) => (
                 <div
-                  key={link.id}
-                  className="flex items-center gap-4 rounded-md border border-border bg-background px-4 py-3 transition-colors hover:border-primary/20"
+                  key={draft.id}
+                  className="rounded-md border border-border bg-background px-4 py-3"
                 >
-                  <div
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
-                    style={{
-                      backgroundColor: `${areaColor.hex}15`,
-                      color: areaColor.hex,
-                    }}
-                  >
-                    <SourceIcon className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-foreground">
-                      {item.title}
-                    </p>
-                    {item.snippet && (
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {item.snippet}
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-foreground truncate">
+                          {draft.subject || '(no subject)'}
+                        </p>
+                        {draft.agent_generated && (
+                          <span className="flex items-center gap-1 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-400">
+                            <Bot className="h-2.5 w-2.5" /> AI
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            'rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize',
+                            draft.status === 'sent'
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              : draft.status === 'failed'
+                                ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                          )}
+                        >
+                          {draft.status}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-muted-foreground truncate">
+                        To: {draft.to_addresses.join(', ')}
+                        {draft.cc_addresses.length > 0 && ` · CC: ${draft.cc_addresses.join(', ')}`}
                       </p>
-                    )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 ml-3">
+                      <span className="text-xs text-muted-foreground">
+                        {formatRelativeTime(draft.created_at)}
+                      </span>
+                      {draft.status === 'draft' && draft.gmail_draft_id && (
+                        <a
+                          href={`https://mail.google.com/mail/#drafts/${draft.gmail_draft_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          Open
+                        </a>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-                    <Clock className="h-3.5 w-3.5" />
-                    {new Date(item.occurred_at).toLocaleDateString()}
-                  </div>
+                  {draft.body_text && (
+                    <p className="mt-2 text-xs text-muted-foreground line-clamp-2">
+                      {draft.body_text.slice(0, 200)}
+                    </p>
+                  )}
                 </div>
-              );
-            })}
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Timeline section (collapsible) */}
+      <div className="rounded-lg border border-border bg-card p-6">
+        <button
+          onClick={() => setTimelineOpen((v) => !v)}
+          className="flex w-full items-center justify-between"
+        >
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Timeline</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {sortedItems.length} linked item{sortedItems.length !== 1 ? 's' : ''} in chronological order
+            </p>
           </div>
+          {timelineOpen ? (
+            <ChevronDown className="h-5 w-5 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+          )}
+        </button>
+
+        {timelineOpen && (
+          <>
+            {sortedItems.length === 0 ? (
+              <div className="mt-4 rounded-md border border-border bg-background p-6 text-center text-sm text-muted-foreground">
+                No linked items yet. Items will appear here as they are linked to this topic.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-1">
+                {sortedItems.map(({ link, item }) => {
+                  const SourceIcon = SOURCE_ICONS[item.source as ItemSource] ?? StickyNote;
+                  return (
+                    <div
+                      key={link.id}
+                      className="flex items-center gap-4 rounded-md border border-border bg-background px-4 py-3 transition-colors hover:border-primary/20"
+                    >
+                      <div
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
+                        style={{
+                          backgroundColor: `${areaColor.hex}15`,
+                          color: areaColor.hex,
+                        }}
+                      >
+                        <SourceIcon className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {item.url ? (
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="hover:underline hover:text-primary transition-colors"
+                              >
+                                {item.title}
+                              </a>
+                            ) : (
+                              item.title
+                            )}
+                          </p>
+                          {item.url && (
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="shrink-0 text-muted-foreground hover:text-primary transition-colors"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
+                        </div>
+                        {item.snippet && (
+                          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                            {item.snippet}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+                        {link.confidence != null && (
+                          <span
+                            className={cn(
+                              'rounded-full px-2 py-0.5 text-[10px] font-medium',
+                              link.confidence >= 0.8
+                                ? 'bg-emerald-500/10 text-emerald-400'
+                                : link.confidence >= 0.5
+                                  ? 'bg-amber-500/10 text-amber-400'
+                                  : 'bg-zinc-500/10 text-zinc-400'
+                            )}
+                          >
+                            {Math.round(link.confidence * 100)}%
+                          </span>
+                        )}
+                        {link.created_by !== 'user' && (
+                          <span className="flex items-center gap-0.5 text-purple-400">
+                            <Bot className="h-3 w-3" />
+                          </span>
+                        )}
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" />
+                          {new Date(item.occurred_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -440,16 +844,29 @@ export function TopicDossierClient({
                     />
                   </button>
                   <div className="min-w-0 flex-1">
-                    <p
-                      className={cn(
-                        'text-sm font-medium',
-                        task.status === 'done'
-                          ? 'text-muted-foreground line-through'
-                          : 'text-foreground'
+                    <div className="flex items-center gap-2">
+                      <p
+                        className={cn(
+                          'text-sm font-medium',
+                          task.status === 'done'
+                            ? 'text-muted-foreground line-through'
+                            : 'text-foreground'
+                        )}
+                      >
+                        {task.title}
+                      </p>
+                      {task.created_by !== 'user' && (
+                        <span className="flex items-center gap-0.5 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-400">
+                          <Bot className="h-2.5 w-2.5" />
+                          {task.created_by}
+                        </span>
                       )}
-                    >
-                      {task.title}
-                    </p>
+                    </div>
+                    {task.rationale && (
+                      <p className="mt-0.5 text-xs text-muted-foreground truncate">
+                        {task.rationale}
+                      </p>
+                    )}
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
                     {task.due_at && (

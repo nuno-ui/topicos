@@ -12,7 +12,8 @@ type ConnectorFn = (
   accessToken: string,
   refreshToken: string,
   cursor?: string,
-  maxResults?: number
+  maxResults?: number,
+  accountEmail?: string
 ) => Promise<ConnectorResult>;
 
 const CONNECTOR_MAP: Record<string, ConnectorFn> = {
@@ -100,7 +101,8 @@ export async function syncAccount(
       accountId,
       source,
       accessToken,
-      refreshToken
+      refreshToken,
+      account.email
     );
     results.push(result);
   }
@@ -120,7 +122,8 @@ async function syncSource(
   accountId: string,
   source: ItemSource,
   accessToken: string,
-  refreshToken: string
+  refreshToken: string,
+  accountEmail: string
 ): Promise<SyncSourceResult> {
   const startedAt = new Date().toISOString();
 
@@ -171,7 +174,9 @@ async function syncSource(
     const { items, nextCursor } = await connector(
       accessToken,
       refreshToken,
-      lastCursor
+      lastCursor,
+      undefined,
+      accountEmail
     );
 
     // Upsert items

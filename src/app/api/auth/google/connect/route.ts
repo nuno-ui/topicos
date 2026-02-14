@@ -2,9 +2,20 @@ import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 const GOOGLE_SCOPES = [
+  // Read access
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/drive.readonly',
+  // Write access (Gmail)
+  'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/gmail.labels',
+  // Write access (Calendar)
+  'https://www.googleapis.com/auth/calendar.events',
+  // Write access (Drive)
+  'https://www.googleapis.com/auth/drive.file',
+  // User info
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
 ];

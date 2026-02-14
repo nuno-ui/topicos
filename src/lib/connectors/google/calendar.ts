@@ -14,7 +14,8 @@ export async function fetchCalendarEvents(
   accessToken: string,
   refreshToken: string,
   cursor?: string,
-  maxResults: number = DEFAULT_MAX_RESULTS
+  maxResults: number = DEFAULT_MAX_RESULTS,
+  accountEmail?: string
 ): Promise<ConnectorResult> {
   const auth = getGoogleClient(accessToken, refreshToken);
   const calendar = google.calendar({ version: 'v3', auth });
@@ -96,7 +97,11 @@ export async function fetchCalendarEvents(
       title: event.summary ?? '(no title)',
       snippet,
       body: null,
-      url: event.htmlLink ?? null,
+      url: event.htmlLink
+        ? (accountEmail && !event.htmlLink.includes('authuser')
+          ? `${event.htmlLink}${event.htmlLink.includes('?') ? '&' : '?'}authuser=${encodeURIComponent(accountEmail)}`
+          : event.htmlLink)
+        : null,
       occurred_at: occurredAt,
       source: 'calendar',
       metadata: {

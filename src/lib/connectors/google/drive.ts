@@ -14,7 +14,8 @@ export async function fetchDriveFiles(
   accessToken: string,
   refreshToken: string,
   cursor?: string,
-  maxResults: number = DEFAULT_MAX_RESULTS
+  maxResults: number = DEFAULT_MAX_RESULTS,
+  accountEmail?: string
 ): Promise<ConnectorResult> {
   const auth = getGoogleClient(accessToken, refreshToken);
   const drive = google.drive({ version: 'v3', auth });
@@ -56,7 +57,11 @@ export async function fetchDriveFiles(
       title: file.name ?? '(untitled)',
       snippet,
       body: null,
-      url: file.webViewLink ?? null,
+      url: file.webViewLink
+        ? (accountEmail && !file.webViewLink.includes('authuser')
+          ? `${file.webViewLink}${file.webViewLink.includes('?') ? '&' : '?'}authuser=${encodeURIComponent(accountEmail)}`
+          : file.webViewLink)
+        : null,
       occurred_at: occurredAt,
       source: 'drive',
       metadata: {

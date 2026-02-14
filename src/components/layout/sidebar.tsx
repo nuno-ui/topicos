@@ -10,6 +10,8 @@ import {
   Settings,
   LogOut,
   Zap,
+  Users,
+  Bot,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
@@ -18,6 +20,8 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/topics', label: 'Topics', icon: FolderOpen },
   { href: '/inbox', label: 'Inbox', icon: Inbox },
+  { href: '/contacts', label: 'Contacts', icon: Users },
+  { href: '/agents', label: 'Agents', icon: Bot },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 

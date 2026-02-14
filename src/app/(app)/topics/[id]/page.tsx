@@ -1,7 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { TopicDossierClient } from '@/components/topics/topic-dossier-client';
-import type { Topic, Item, TopicLink, Task } from '@/types/database';
+import type { Topic, Item, TopicLink, Task, Contact } from '@/types/database';
 
 interface TopicPageProps {
   params: Promise<{ id: string }>;
@@ -34,6 +34,28 @@ export default async function TopicPage({ params }: TopicPageProps) {
     .eq('topic_id', id)
     .order('created_at', { ascending: false });
 
+  // Fetch contacts linked to this topic
+  const { data: contactLinks } = await supabase
+    .from('contact_topic_links')
+    .select('*, contacts:contact_id(*)')
+    .eq('topic_id', id);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contacts = (contactLinks ?? []).map((cl: any) => cl.contacts).filter(Boolean) as Contact[];
+
+  // Fetch accounts for action buttons
+  const { data: accounts } = await supabase
+    .from('google_accounts')
+    .select('id, email');
+
+  // Fetch email drafts for this topic
+  const { data: drafts } = await supabase
+    .from('email_drafts')
+    .select('*')
+    .eq('topic_id', id)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const linkedItems = (topicLinks ?? [])
     .map((row: any) => ({
@@ -57,6 +79,9 @@ export default async function TopicPage({ params }: TopicPageProps) {
       topic={topic as Topic}
       linkedItems={linkedItems}
       tasks={(tasks ?? []) as Task[]}
+      contacts={contacts}
+      accounts={(accounts ?? []) as { id: string; email: string }[]}
+      drafts={drafts ?? []}
     />
   );
 }

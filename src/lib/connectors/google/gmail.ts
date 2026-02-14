@@ -14,7 +14,8 @@ export async function fetchGmailMessages(
   accessToken: string,
   refreshToken: string,
   cursor?: string,
-  maxResults: number = DEFAULT_MAX_RESULTS
+  maxResults: number = DEFAULT_MAX_RESULTS,
+  accountEmail?: string
 ): Promise<ConnectorResult> {
   const auth = getGoogleClient(accessToken, refreshToken);
   const gmail = google.gmail({ version: 'v1', auth });
@@ -72,7 +73,9 @@ export async function fetchGmailMessages(
         ).toISOString();
       }
 
-      const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${ref.id}`;
+      const gmailUrl = accountEmail
+        ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(accountEmail)}#inbox/${ref.id}`
+        : `https://mail.google.com/mail/u/0/#inbox/${ref.id}`;
 
       items.push({
         external_id: ref.id,

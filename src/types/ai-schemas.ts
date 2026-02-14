@@ -123,3 +123,127 @@ export const PasteAnalysisOutputSchema = z.object({
   })),
 });
 export type PasteAnalysisOutput = z.infer<typeof PasteAnalysisOutputSchema>;
+
+// Auto-organize (Curator Agent output)
+export const AutoOrganizeItemSchema = z.object({
+  item_id: z.string(),
+  topic_id: z.string().uuid().nullable(),
+  proposed_topic_title: z.string().nullable(),
+  proposed_topic_area: z.enum(['personal', 'career', 'work']).nullable(),
+  proposed_topic_description: z.string().nullable(),
+  confidence: z.number().min(0).max(1),
+  reason: z.string(),
+  triage_status: z.enum(['relevant', 'low_relevance', 'noise']),
+  triage_score: z.number().min(0).max(1),
+  contacts_found: z.array(z.object({
+    email: z.string(),
+    name: z.string().nullable(),
+    organization: z.string().nullable(),
+    role: z.string().nullable(),
+  })),
+});
+
+export const AutoOrganizeOutputSchema = z.object({
+  items: z.array(AutoOrganizeItemSchema),
+  new_topics: z.array(z.object({
+    temp_id: z.string(),
+    title: z.string(),
+    area: z.enum(['personal', 'career', 'work']),
+    description: z.string(),
+  })),
+  summary: z.string(),
+});
+export type AutoOrganizeOutput = z.infer<typeof AutoOrganizeOutputSchema>;
+
+// Triage batch output
+export const TriageBatchOutputSchema = z.object({
+  items: z.array(z.object({
+    item_id: z.string(),
+    triage_status: z.enum(['relevant', 'low_relevance', 'noise']),
+    triage_score: z.number().min(0).max(1),
+    triage_reason: z.string(),
+  })),
+});
+export type TriageBatchOutput = z.infer<typeof TriageBatchOutputSchema>;
+
+// Follow-up detection output
+export const FollowUpDetectionOutputSchema = z.object({
+  follow_ups: z.array(z.object({
+    item_id: z.string(),
+    thread_id: z.string().nullable(),
+    urgency: z.enum(['low', 'medium', 'high', 'critical']),
+    reason: z.string(),
+    suggested_action: z.string(),
+    draft_reply: z.string().nullable(),
+    days_waiting: z.number(),
+  })),
+});
+export type FollowUpDetectionOutput = z.infer<typeof FollowUpDetectionOutputSchema>;
+
+// Meeting prep output
+export const MeetingPrepOutputSchema = z.object({
+  event_id: z.string(),
+  event_title: z.string(),
+  briefing: z.string(),
+  attendee_context: z.array(z.object({
+    email: z.string(),
+    name: z.string().nullable(),
+    recent_interactions: z.string(),
+    open_topics: z.array(z.string()),
+  })),
+  talking_points: z.array(z.string()),
+  open_questions: z.array(z.string()),
+  related_files: z.array(z.object({
+    item_id: z.string(),
+    title: z.string(),
+    relevance: z.string(),
+  })),
+});
+export type MeetingPrepOutput = z.infer<typeof MeetingPrepOutputSchema>;
+
+// Weekly review output
+export const WeeklyReviewOutputSchema = z.object({
+  period: z.string(),
+  summary: z.string(),
+  topics_progressed: z.array(z.object({
+    topic_id: z.string(),
+    title: z.string(),
+    progress_summary: z.string(),
+    status: z.enum(['on_track', 'stalled', 'needs_attention', 'completed']),
+  })),
+  tasks_completed: z.number(),
+  tasks_created: z.number(),
+  items_processed: z.number(),
+  highlights: z.array(z.string()),
+  concerns: z.array(z.string()),
+  priorities_next_week: z.array(z.object({
+    action: z.string(),
+    topic_id: z.string().nullable(),
+    priority: z.enum(['low', 'medium', 'high']),
+    rationale: z.string(),
+  })),
+});
+export type WeeklyReviewOutput = z.infer<typeof WeeklyReviewOutputSchema>;
+
+// Smart compose output
+export const SmartComposeOutputSchema = z.object({
+  subject: z.string(),
+  body_html: z.string(),
+  body_text: z.string(),
+  tone: z.string(),
+  suggestions: z.array(z.string()),
+});
+export type SmartComposeOutput = z.infer<typeof SmartComposeOutputSchema>;
+
+// Contact extract output
+export const ContactExtractOutputSchema = z.object({
+  contacts: z.array(z.object({
+    email: z.string(),
+    name: z.string().nullable(),
+    organization: z.string().nullable(),
+    role: z.string().nullable(),
+    area: z.enum(['personal', 'career', 'work']).nullable(),
+    notes: z.string().nullable(),
+  })),
+});
+export type ContactExtractOutput = z.infer<typeof ContactExtractOutputSchema>;
