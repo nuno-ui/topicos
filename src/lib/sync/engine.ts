@@ -310,6 +310,7 @@ async function upsertItems(
         .update({
           title: item.title,
           snippet: item.snippet,
+          body: item.body,
           metadata: item.metadata,
           occurred_at: item.occurred_at,
         })

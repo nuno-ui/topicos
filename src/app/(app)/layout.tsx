@@ -1,4 +1,9 @@
 import { Sidebar } from '@/components/layout/sidebar';
+import { ToasterProvider } from '@/components/providers/toaster-provider';
+import { KeyboardShortcutsProvider } from '@/components/providers/keyboard-shortcuts-provider';
+import { ComposeEmailModal } from '@/components/actions/compose-email-modal';
+import { CreateEventModal } from '@/components/actions/create-event-modal';
+import { FloatingActionButton } from '@/components/ui/floating-action-button';
 
 export default function AppLayout({
   children,
@@ -13,6 +18,11 @@ export default function AppLayout({
           {children}
         </div>
       </main>
+      <ToasterProvider />
+      <KeyboardShortcutsProvider />
+      <ComposeEmailModal />
+      <CreateEventModal />
+      <FloatingActionButton />
     </div>
   );
 }

@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Topic, Item, Task, TopicLink, Area, TaskStatus, ItemSource, Contact, EmailDraft } from '@/types/database';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import {
   ArrowLeft,
   Pencil,
@@ -150,6 +152,7 @@ export function TopicDossierClient({
   // Compose state
   const [composing, setComposing] = useState(false);
   const [composeError, setComposeError] = useState<string | null>(null);
+  const router = useRouter();
 
   const areaColor = AREA_COLORS[topic.area];
   const urgency = getUrgencyColor(topic.urgency_score);
@@ -283,7 +286,8 @@ export function TopicDossierClient({
         body: JSON.stringify({ topic_id: topic.id }),
       });
       if (res.ok) {
-        window.location.reload();
+        toast.success('Smart compose draft created');
+        router.refresh();
       } else {
         const body = await res.json().catch(() => ({}));
         setComposeError(body.error ?? 'Failed to compose draft');

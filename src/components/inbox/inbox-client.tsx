@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Item, Topic, ItemSource } from '@/types/database';
 import { cn } from '@/lib/utils';
 import { AccountBadge, AccountFilter } from '@/components/ui/account-badge';
+import { toast } from 'sonner';
 import {
   Mail,
   Calendar,
@@ -21,6 +23,9 @@ import {
   Eye,
   EyeOff,
   Filter,
+  CheckSquare,
+  Square,
+  RefreshCw,
 } from 'lucide-react';
 
 /* ---------- Source icon & color mapping ---------- */
@@ -78,7 +83,7 @@ export function InboxClient({
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
-  const [triageFilter, setTriageFilter] = useState<TriageFilter>('untriaged');
+  const [triageFilter, setTriageFilter] = useState<TriageFilter>('all');
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [linkDropdownOpen, setLinkDropdownOpen] = useState<string | null>(null);
   const [linkingItemId, setLinkingItemId] = useState<string | null>(null);
@@ -86,7 +91,9 @@ export function InboxClient({
   const [topicSearch, setTopicSearch] = useState('');
   const [showLinked, setShowLinked] = useState(false);
   const [curatorRunning, setCuratorRunning] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
   // Build an account email map for badges
   const accountMap = useMemo(() => {
@@ -247,12 +254,59 @@ export function InboxClient({
     try {
       const res = await fetch('/api/agents/curator', { method: 'POST' });
       if (res.ok) {
-        window.location.reload();
+        const data = await res.json().catch(() => ({}));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const output = (data as any).output_json ?? {};
+        toast.success(
+          `Curator: ${output.items_processed ?? 0} items processed, ${output.topics_created ?? 0} topics created`
+        );
+        router.refresh();
+      } else {
+        toast.error('Curator agent failed');
       }
     } catch {
-      console.error('Curator error');
+      toast.error('Network error running curator');
     } finally {
       setCuratorRunning(false);
+    }
+  };
+
+  // Bulk selection helpers
+  const handleToggleSelect = (itemId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((i) => i.id)));
+    }
+  };
+
+  const handleBulkMarkNoise = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    try {
+      await Promise.all(
+        ids.map((id) =>
+          fetch('/api/items/triage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ item_id: id, triage_status: 'noise' }),
+          })
+        )
+      );
+      toast.success(`Marked ${ids.length} items as noise`);
+      setSelectedIds(new Set());
+      router.refresh();
+    } catch {
+      toast.error('Failed to mark items');
     }
   };
 
@@ -402,21 +456,57 @@ export function InboxClient({
         </button>
       </div>
 
-      {/* Keyboard hints */}
-      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        <span>
-          <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">↑↓</kbd>{' '}
-          navigate
-        </span>
-        <span>
-          <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">l</kbd>{' '}
-          link
-        </span>
-        <span>
-          <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">esc</kbd>{' '}
-          close
-        </span>
+      {/* Keyboard hints + select all */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <span>
+            <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">↑↓</kbd>{' '}
+            navigate
+          </span>
+          <span>
+            <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">l</kbd>{' '}
+            link
+          </span>
+          <span>
+            <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">esc</kbd>{' '}
+            close
+          </span>
+        </div>
+        {filtered.length > 0 && (
+          <button
+            onClick={handleSelectAll}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {selectedIds.size === filtered.length ? (
+              <CheckSquare className="h-3.5 w-3.5" />
+            ) : (
+              <Square className="h-3.5 w-3.5" />
+            )}
+            Select all
+          </button>
+        )}
       </div>
+
+      {/* Bulk select bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5">
+          <span className="text-sm font-medium text-primary">
+            {selectedIds.size} selected
+          </span>
+          <button
+            onClick={handleBulkMarkNoise}
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            Mark as Noise
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
 
       {/* Items list */}
       <div className="space-y-2">
@@ -424,13 +514,22 @@ export function InboxClient({
           <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-card py-16 text-center">
             <Inbox className="mb-3 h-10 w-10 text-muted-foreground" />
             <p className="font-medium text-foreground">
-              {items.length === 0 ? 'Inbox zero!' : 'No matching items'}
+              {items.length === 0 ? 'No items yet' : 'No matching items'}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {items.length === 0
-                ? 'All items have been organized.'
+                ? 'Sync your accounts to import emails, events, and files.'
                 : 'Try adjusting your filters or search.'}
             </p>
+            {items.length === 0 && (
+              <a
+                href="/settings"
+                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Connect &amp; Sync
+              </a>
+            )}
           </div>
         ) : (
           filtered.map((item, index) => {
@@ -454,6 +553,21 @@ export function InboxClient({
                   isLinkedToTopic && 'opacity-60'
                 )}
               >
+                {/* Bulk checkbox */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleSelect(item.id);
+                  }}
+                  className="mt-1 shrink-0 text-muted-foreground hover:text-primary transition-colors"
+                >
+                  {selectedIds.has(item.id) ? (
+                    <CheckSquare className="h-4 w-4 text-primary" />
+                  ) : (
+                    <Square className="h-4 w-4" />
+                  )}
+                </button>
+
                 {/* Source icon */}
                 <div
                   className={cn(
@@ -490,6 +604,12 @@ export function InboxClient({
                   {item.snippet && (
                     <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
                       {item.snippet}
+                    </p>
+                  )}
+                  {/* Body preview */}
+                  {item.body && !item.snippet && (
+                    <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground/70">
+                      {(item.body as string).slice(0, 120)}
                     </p>
                   )}
                   <div className="mt-1.5 flex items-center gap-2">

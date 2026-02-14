@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Profile, GoogleAccount, SyncRun } from '@/types/database';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import {
   Mail,
   RefreshCw,
@@ -32,6 +34,7 @@ export function SettingsClient({
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [syncingAccount, setSyncingAccount] = useState<string | null>(null);
   const [indexingDepth, setIndexingDepth] = useState<'light' | 'medium' | 'full'>('medium');
+  const router = useRouter();
 
   const handleDisconnect = async (accountId: string) => {
     setDisconnecting(accountId);
@@ -40,10 +43,13 @@ export function SettingsClient({
         method: 'DELETE',
       });
       if (res.ok) {
-        window.location.reload();
+        toast.success('Account disconnected');
+        router.refresh();
+      } else {
+        toast.error('Failed to disconnect account');
       }
     } catch {
-      // ignore
+      toast.error('Network error disconnecting account');
     } finally {
       setDisconnecting(null);
     }
@@ -52,14 +58,19 @@ export function SettingsClient({
   const handleSync = async (accountId: string) => {
     setSyncingAccount(accountId);
     try {
-      await fetch('/api/sync', {
+      const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ account_id: accountId }),
       });
-      window.location.reload();
+      if (res.ok) {
+        toast.success('Sync completed successfully');
+        router.refresh();
+      } else {
+        toast.error('Sync failed');
+      }
     } catch {
-      // ignore
+      toast.error('Network error during sync');
     } finally {
       setSyncingAccount(null);
     }

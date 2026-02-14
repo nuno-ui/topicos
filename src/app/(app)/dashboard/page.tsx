@@ -53,7 +53,7 @@ export default async function DashboardPage() {
     (item: { id: string }) => !linkedIds.has(item.id)
   ).length;
 
-  // Get recent items for dashboard feed (most recently synced, with occurred_at in past or today)
+  // Get recent items for dashboard feed
   const { data: recentItems } = await supabase
     .from('items')
     .select('*')
@@ -61,6 +61,24 @@ export default async function DashboardPage() {
     .lte('occurred_at', new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
     .order('occurred_at', { ascending: false })
     .limit(10);
+
+  // Fetch recent agent runs
+  const { data: agentRuns } = await supabase
+    .from('agent_runs')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('started_at', { ascending: false })
+    .limit(5);
+
+  // Fetch upcoming calendar events
+  const { data: upcomingEvents } = await supabase
+    .from('items')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('source', 'calendar')
+    .gte('occurred_at', new Date().toISOString())
+    .order('occurred_at', { ascending: true })
+    .limit(5);
 
   return (
     <DashboardClient
@@ -70,6 +88,8 @@ export default async function DashboardPage() {
       recentSyncs={recentSyncs ?? []}
       untriagedCount={untriagedCount}
       recentItems={recentItems ?? []}
+      agentRuns={agentRuns ?? []}
+      upcomingEvents={upcomingEvents ?? []}
     />
   );
 }

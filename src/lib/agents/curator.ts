@@ -18,7 +18,7 @@ export class CuratorAgent extends BaseAgent {
       .from('items')
       .select('*')
       .eq('user_id', userId)
-      .eq('triage_status', 'pending')
+      .or('triage_status.eq.pending,triage_status.is.null')
       .order('occurred_at', { ascending: false })
       .limit(100);
 
@@ -80,6 +80,7 @@ export class CuratorAgent extends BaseAgent {
           `[Item ${idx}] id="${item.id}" source=${item.source}`,
           `  Title: ${item.title}`,
           item.snippet ? `  Snippet: ${item.snippet}` : null,
+          item.body ? `  Body: ${(item.body as string).slice(0, 500)}` : null,
           meta?.from ? `  From: ${meta.from}` : null,
           meta?.to ? `  To: ${meta.to}` : null,
           meta?.attendees ? `  Attendees: ${JSON.stringify(meta.attendees)}` : null,
