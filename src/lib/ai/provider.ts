@@ -301,12 +301,12 @@ export class OpenAIProvider implements AIProvider {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function getAIProvider(): AIProvider {
+export function getAIProvider(modelOverride?: string): AIProvider {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) {
     return new AnthropicProvider(
       anthropicKey,
-      process.env.ANTHROPIC_MODEL ?? undefined,
+      modelOverride ?? process.env.ANTHROPIC_MODEL ?? undefined,
     );
   }
 
@@ -314,7 +314,7 @@ export function getAIProvider(): AIProvider {
   if (openaiKey) {
     return new OpenAIProvider(
       openaiKey,
-      process.env.OPENAI_MODEL ?? undefined,
+      modelOverride ?? process.env.OPENAI_MODEL ?? undefined,
     );
   }
 

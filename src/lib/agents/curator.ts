@@ -2,7 +2,14 @@ import { BaseAgent, type AgentResult } from './base';
 import { getAIProvider } from '@/lib/ai/provider';
 import { AutoOrganizeOutputSchema } from '@/types/ai-schemas';
 
-const BATCH_SIZE = 25;
+// Small batches to stay within output token limits and avoid rate limits
+const BATCH_SIZE = 5;
+const MAX_ITEMS = 50;
+const DELAY_BETWEEN_BATCHES_MS = 3000; // 3s delay to avoid rate limits
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class CuratorAgent extends BaseAgent {
   constructor() {
@@ -20,7 +27,7 @@ export class CuratorAgent extends BaseAgent {
       .eq('user_id', userId)
       .or('triage_status.eq.pending,triage_status.is.null')
       .order('occurred_at', { ascending: false })
-      .limit(100);
+      .limit(MAX_ITEMS);
 
     if (fetchError) {
       console.error('Curator: failed to fetch items:', fetchError.message);
@@ -33,7 +40,6 @@ export class CuratorAgent extends BaseAgent {
     }
 
     if (!pendingItems || pendingItems.length === 0) {
-      // Double-check: count ALL items for this user to help debug
       const { count } = await this.supabase
         .from('items')
         .select('*', { count: 'exact', head: true })
@@ -58,8 +64,8 @@ export class CuratorAgent extends BaseAgent {
       .eq('user_id', userId)
       .eq('status', 'active');
 
-    // 3. Process items in batches
-    const provider = getAIProvider();
+    // 3. Process items in batches — use Haiku for cost/speed/rate-limit reasons
+    const provider = getAIProvider('claude-haiku-4-5-20251001');
     let totalProcessed = 0;
     let topicsCreated = 0;
     let topicsMatched = 0;
@@ -67,26 +73,12 @@ export class CuratorAgent extends BaseAgent {
 
     for (let i = 0; i < pendingItems.length; i += BATCH_SIZE) {
       const batch = pendingItems.slice(i, i + BATCH_SIZE);
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
 
-      const systemPrompt = [
-        'You are the Curator Agent for TopicOS, a personal organization system.',
-        'Your job is to analyze incoming items (emails, calendar events, drive files) and:',
-        '1. Classify each item as relevant, low_relevance, or noise',
-        '2. Match items to existing topics or propose new topics',
-        '3. Extract contact information from items',
-        '4. Score relevance/triage for each item (0-1)',
-        '',
-        'IMPORTANT RULES:',
-        '- Match items to existing topics when there is a clear connection (>0.5 confidence)',
-        '- Propose new topics only for truly distinct themes not covered by existing topics',
-        '- When proposing new topics, use temp_id like "new_1", "new_2" and reference them in item assignments',
-        '- Items that are generic newsletters, promotions, or spam should be marked as "noise"',
-        '- Items that are informational but not actionable should be "low_relevance"',
-        '- Items that require attention/action should be "relevant"',
-        '- Extract contacts from email from/to fields and calendar attendees',
-        '',
-        'Return a JSON object matching the schema exactly.',
-      ].join('\n');
+      // Delay between batches to avoid rate limits (skip first batch)
+      if (i > 0) {
+        await sleep(DELAY_BETWEEN_BATCHES_MS);
+      }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const topicsList = (existingTopics ?? []).map((t: any) =>
@@ -94,19 +86,53 @@ export class CuratorAgent extends BaseAgent {
       ).join('\n');
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const itemsList = batch.map((item: any, idx: number) => {
+      const itemsList = batch.map((item: any) => {
         const meta = item.metadata as Record<string, unknown>;
         return [
-          `[Item ${idx}] id="${item.id}" source=${item.source}`,
+          `id="${item.id}" source=${item.source}`,
           `  Title: ${item.title}`,
-          item.snippet ? `  Snippet: ${item.snippet}` : null,
-          item.body ? `  Body: ${(item.body as string).slice(0, 500)}` : null,
+          item.snippet ? `  Snippet: ${(item.snippet as string).slice(0, 200)}` : null,
+          item.body ? `  Body: ${(item.body as string).slice(0, 300)}` : null,
           meta?.from ? `  From: ${meta.from}` : null,
           meta?.to ? `  To: ${meta.to}` : null,
           meta?.attendees ? `  Attendees: ${JSON.stringify(meta.attendees)}` : null,
           `  Date: ${item.occurred_at}`,
         ].filter(Boolean).join('\n');
       }).join('\n\n');
+
+      const systemPrompt = `You are the Curator Agent for TopicOS. Analyze items and return JSON.
+
+RULES:
+- Classify each item: "relevant" (needs attention), "low_relevance" (informational), or "noise" (spam/promotions)
+- Match items to existing topics by their UUID, or propose new topics with temp_id like "new_1"
+- Extract contacts from email from/to fields
+- Score each item 0-1 for relevance
+
+You MUST return EXACTLY this JSON structure:
+{
+  "items": [
+    {
+      "item_id": "the-exact-item-id-from-input",
+      "topic_id": "existing-topic-uuid-or-new_1-or-null",
+      "confidence": 0.8,
+      "reason": "why this classification",
+      "triage_status": "relevant",
+      "triage_score": 0.8,
+      "contacts_found": [{"email": "person@example.com", "name": "Person Name", "organization": null, "role": null}]
+    }
+  ],
+  "new_topics": [
+    {
+      "temp_id": "new_1",
+      "title": "Topic Title",
+      "area": "work",
+      "description": "Brief description"
+    }
+  ],
+  "summary": "Brief summary of what was organized"
+}
+
+CRITICAL: Every item in the input MUST appear in the output "items" array. Use the EXACT item id from the input. The "contacts_found" array can be empty []. The "new_topics" array can be empty [].`;
 
       const userPrompt = [
         'EXISTING TOPICS:',
@@ -125,7 +151,6 @@ export class CuratorAgent extends BaseAgent {
 
         totalTokens += result.tokensUsed;
 
-        // 4. Process the AI output
         const output = result.data;
 
         // Create new topics first
@@ -159,7 +184,7 @@ export class CuratorAgent extends BaseAgent {
         // Process each item result
         for (const itemResult of output.items) {
           // Update triage status
-          await this.supabase
+          const { error: updateError } = await this.supabase
             .from('items')
             .update({
               triage_status: itemResult.triage_status,
@@ -168,6 +193,11 @@ export class CuratorAgent extends BaseAgent {
             })
             .eq('id', itemResult.item_id)
             .eq('user_id', userId);
+
+          if (updateError) {
+            console.error(`Curator: failed to update item ${itemResult.item_id}:`, updateError.message);
+            continue;
+          }
 
           actions.push({
             action: 'triage_item',
@@ -231,14 +261,26 @@ export class CuratorAgent extends BaseAgent {
 
           totalProcessed++;
         }
+
+        actions.push({
+          action: 'batch_complete',
+          target_type: 'batch',
+          description: `Batch ${batchNum}: processed ${output.items.length} items, ${output.new_topics.length} new topics`,
+        });
+
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error(`Curator batch error (batch ${Math.floor(i / BATCH_SIZE) + 1}):`, errMsg);
+        console.error(`Curator batch error (batch ${batchNum}):`, errMsg);
         actions.push({
           action: 'batch_error',
           target_type: 'batch',
-          description: `Batch ${Math.floor(i / BATCH_SIZE) + 1} failed: ${errMsg.slice(0, 300)}`,
+          description: `Batch ${batchNum} failed: ${errMsg.slice(0, 300)}`,
         });
+
+        // If rate limited, wait longer before next batch
+        if (errMsg.includes('rate_limit') || errMsg.includes('429')) {
+          await sleep(15000); // 15s cooldown on rate limit
+        }
         // Continue with next batch
       }
     }
@@ -250,6 +292,8 @@ export class CuratorAgent extends BaseAgent {
         topics_created: topicsCreated,
         topics_matched: topicsMatched,
         contacts_found: contactsFound,
+        batches_total: Math.ceil(pendingItems.length / BATCH_SIZE),
+        items_found: pendingItems.length,
       },
       actions,
       tokensUsed: totalTokens,
