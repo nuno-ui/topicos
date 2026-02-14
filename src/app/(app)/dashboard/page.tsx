@@ -34,11 +34,12 @@ export default async function DashboardPage() {
     .order('started_at', { ascending: false })
     .limit(5);
 
-  // Count untriaged items (items not linked to any topic)
+  // Count untriaged items (items not linked to any topic), excluding deleted
   const { data: allItems } = await supabase
     .from('items')
     .select('id')
-    .eq('user_id', user.id);
+    .eq('user_id', user.id)
+    .neq('triage_status', 'deleted');
 
   const { data: topicLinksData } = await supabase
     .from('topic_links')
@@ -53,11 +54,12 @@ export default async function DashboardPage() {
     (item: { id: string }) => !linkedIds.has(item.id)
   ).length;
 
-  // Get recent items for dashboard feed
+  // Get recent items for dashboard feed, excluding deleted
   const { data: recentItems } = await supabase
     .from('items')
     .select('*')
     .eq('user_id', user.id)
+    .neq('triage_status', 'deleted')
     .lte('occurred_at', new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
     .order('occurred_at', { ascending: false })
     .limit(10);

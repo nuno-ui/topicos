@@ -7,11 +7,12 @@ export default async function InboxPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  // Fetch all items (ordered by date)
+  // Fetch all items (ordered by date), excluding soft-deleted
   const { data: items } = await supabase
     .from('items')
     .select('*')
     .eq('user_id', user.id)
+    .neq('triage_status', 'deleted')
     .order('occurred_at', { ascending: false });
 
   // Fetch topic links to know which items are linked

@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Topic, Area } from '@/types/database';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import {
   Plus,
   X,
@@ -11,6 +13,8 @@ import {
   Briefcase,
   User,
   LayoutGrid,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -55,15 +59,39 @@ interface TopicsListClientProps {
 }
 
 export function TopicsListClient({ topics }: TopicsListClientProps) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
 
   // Form state
   const [title, setTitle] = useState('');
   const [area, setArea] = useState<Area>('personal');
   const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  const handleCleanDuplicates = async () => {
+    setCleaning(true);
+    try {
+      const res = await fetch('/api/topics/cleanup', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.deleted > 0) {
+          toast.success(`Cleaned up ${data.deleted} duplicate topics. ${data.remaining} remaining.`);
+          router.refresh();
+        } else {
+          toast.info('No duplicate topics found.');
+        }
+      } else {
+        toast.error('Failed to clean duplicates');
+      }
+    } catch {
+      toast.error('Network error');
+    } finally {
+      setCleaning(false);
+    }
+  };
 
   const filtered = activeTab === 'all'
     ? topics
@@ -87,12 +115,13 @@ export function TopicsListClient({ topics }: TopicsListClientProps) {
         return;
       }
 
-      // Reset form and reload to show new topic
+      // Reset form and refresh to show new topic
       setTitle('');
       setArea('personal');
       setDescription('');
       setShowForm(false);
-      window.location.reload();
+      toast.success('Topic created');
+      router.refresh();
     } catch {
       setError('Network error. Please try again.');
     } finally {
@@ -110,22 +139,32 @@ export function TopicsListClient({ topics }: TopicsListClientProps) {
             Organize what matters across all areas of your life
           </p>
         </div>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-        >
-          {showForm ? (
-            <>
-              <X className="h-4 w-4" />
-              Cancel
-            </>
-          ) : (
-            <>
-              <Plus className="h-4 w-4" />
-              Create Topic
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleCleanDuplicates}
+            disabled={cleaning}
+            className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-primary/30 disabled:opacity-50"
+          >
+            {cleaning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            Clean Duplicates
+          </button>
+          <button
+            onClick={() => setShowForm((v) => !v)}
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            {showForm ? (
+              <>
+                <X className="h-4 w-4" />
+                Cancel
+              </>
+            ) : (
+              <>
+                <Plus className="h-4 w-4" />
+                Create Topic
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Create Form */}

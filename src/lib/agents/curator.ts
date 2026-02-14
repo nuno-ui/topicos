@@ -153,31 +153,60 @@ CRITICAL: Every item in the input MUST appear in the output "items" array. Use t
 
         const output = result.data;
 
-        // Create new topics first
+        // Create new topics (with deduplication)
         const topicIdMap: Record<string, string> = {};
         for (const newTopic of output.new_topics) {
-          const { data: created } = await this.supabase
-            .from('topics')
-            .insert({
-              user_id: userId,
-              title: newTopic.title,
-              area: newTopic.area,
-              description: newTopic.description,
-              status: 'active',
-              priority: 5,
-            })
-            .select('id')
-            .single();
+          // Check if a similar topic already exists (case-insensitive match)
+          const normalizedTitle = newTopic.title.trim().toLowerCase();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const existingMatch = (existingTopics ?? []).find((t: any) => {
+            const existingTitle = t.title.trim().toLowerCase();
+            return existingTitle === normalizedTitle
+              || existingTitle.includes(normalizedTitle)
+              || normalizedTitle.includes(existingTitle);
+          });
 
-          if (created) {
-            topicIdMap[newTopic.temp_id] = created.id;
-            topicsCreated++;
+          if (existingMatch) {
+            // Reuse existing topic instead of creating a duplicate
+            topicIdMap[newTopic.temp_id] = existingMatch.id;
             actions.push({
-              action: 'create_topic',
+              action: 'reuse_topic',
               target_type: 'topic',
-              target_id: created.id,
-              description: `Created topic "${newTopic.title}" (${newTopic.area})`,
+              target_id: existingMatch.id,
+              description: `Reused existing topic "${existingMatch.title}" instead of creating "${newTopic.title}"`,
             });
+          } else {
+            const { data: created } = await this.supabase
+              .from('topics')
+              .insert({
+                user_id: userId,
+                title: newTopic.title,
+                area: newTopic.area,
+                description: newTopic.description,
+                status: 'active',
+                priority: 5,
+              })
+              .select('id')
+              .single();
+
+            if (created) {
+              topicIdMap[newTopic.temp_id] = created.id;
+              topicsCreated++;
+              // Add to existingTopics to catch duplicates within same batch
+              existingTopics?.push({
+                id: created.id,
+                title: newTopic.title,
+                area: newTopic.area,
+                description: newTopic.description,
+                summary: null,
+              });
+              actions.push({
+                action: 'create_topic',
+                target_type: 'topic',
+                target_id: created.id,
+                description: `Created topic "${newTopic.title}" (${newTopic.area})`,
+              });
+            }
           }
         }
 

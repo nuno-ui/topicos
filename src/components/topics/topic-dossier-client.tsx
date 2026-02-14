@@ -30,6 +30,10 @@ import {
   UserCircle,
   MailPlus,
   Zap,
+  X,
+  Search,
+  Link2,
+  Save,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -152,6 +156,19 @@ export function TopicDossierClient({
   // Compose state
   const [composing, setComposing] = useState(false);
   const [composeError, setComposeError] = useState<string | null>(null);
+
+  // Inline edit state
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(topic.title);
+  const [editDescription, setEditDescription] = useState(topic.description ?? '');
+  const [saving, setSaving] = useState(false);
+
+  // Connect items search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Item[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [linking, setLinking] = useState<string | null>(null);
+
   const router = useRouter();
 
   const areaColor = AREA_COLORS[topic.area];
@@ -299,6 +316,96 @@ export function TopicDossierClient({
     }
   };
 
+  const handleSaveEdit = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: editTitle,
+          description: editDescription,
+        }),
+      });
+      if (res.ok) {
+        toast.success('Topic updated');
+        setEditing(false);
+        router.refresh();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.error ?? 'Failed to update topic');
+      }
+    } catch {
+      toast.error('Network error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSearchItems = async (query: string) => {
+    setSearchQuery(query);
+    if (query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    try {
+      const res = await fetch(`/api/items?q=${encodeURIComponent(query)}&limit=10`);
+      if (res.ok) {
+        const data = await res.json();
+        const linkedIds = new Set(linkedItems.map((li) => li.item.id));
+        setSearchResults(
+          (data.items ?? data).filter((i: Item) => !linkedIds.has(i.id))
+        );
+      }
+    } catch {
+      // silently ignore search errors
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleLinkItem = async (itemId: string) => {
+    setLinking(itemId);
+    try {
+      const res = await fetch('/api/topic-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic_id: topic.id,
+          item_id: itemId,
+          created_by: 'user',
+        }),
+      });
+      if (res.ok) {
+        toast.success('Item linked to topic');
+        setSearchQuery('');
+        setSearchResults([]);
+        router.refresh();
+      } else {
+        toast.error('Failed to link item');
+      }
+    } catch {
+      toast.error('Network error');
+    } finally {
+      setLinking(null);
+    }
+  };
+
+  const handleUnlinkItem = async (linkId: string) => {
+    try {
+      const res = await fetch(`/api/topic-links?id=${linkId}`, { method: 'DELETE' });
+      if (res.ok) {
+        toast.success('Item unlinked');
+        router.refresh();
+      } else {
+        toast.error('Failed to unlink');
+      }
+    } catch {
+      toast.error('Network error');
+    }
+  };
+
   /* ---------- render ---------- */
 
   return (
@@ -345,22 +452,69 @@ export function TopicDossierClient({
                 </span>
               )}
             </div>
-            <h1 className="text-2xl font-bold text-foreground">{topic.title}</h1>
-            {topic.description && (
-              <p className="max-w-2xl text-sm text-muted-foreground">
-                {topic.description}
-              </p>
+
+            {editing ? (
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-xl font-bold text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  placeholder="Topic description..."
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSaveEdit}
+                    disabled={saving}
+                    className="flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    Save
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditing(false);
+                      setEditTitle(topic.title);
+                      setEditDescription(topic.description ?? '');
+                    }}
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <h1 className="text-2xl font-bold text-foreground">{topic.title}</h1>
+                {topic.description && (
+                  <p className="max-w-2xl text-sm text-muted-foreground">
+                    {topic.description}
+                  </p>
+                )}
+              </>
             )}
           </div>
-          <div className="flex items-center gap-2 shrink-0 ml-4">
-            <Link
-              href={`/topics/${topic.id}/edit`}
-              className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
-            >
-              <Pencil className="h-4 w-4" />
-              Edit
-            </Link>
-          </div>
+          {!editing && (
+            <div className="flex items-center gap-2 shrink-0 ml-4">
+              <button
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
+              >
+                <Pencil className="h-4 w-4" />
+                Edit
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Urgency Score Meter */}
@@ -372,7 +526,7 @@ export function TopicDossierClient({
               <span className={cn('text-xs font-medium', urgency.text)}>{urgency.label}</span>
             </div>
             <span className={cn('text-sm font-bold tabular-nums', urgency.text)}>
-              {topic.urgency_score != null ? `${topic.urgency_score}/100` : '—'}
+              {topic.urgency_score != null ? `${topic.urgency_score}/100` : '\u2014'}
             </span>
           </div>
           <div className="h-2 w-full overflow-hidden rounded-full bg-background">
@@ -429,6 +583,196 @@ export function TopicDossierClient({
         )}
       </div>
 
+      {/* Connect Items */}
+      <div className="rounded-lg border border-border bg-card p-5">
+        <h3 className="flex items-center gap-2 font-semibold text-foreground mb-3">
+          <Link2 className="h-4 w-4" />
+          Connect Items
+        </h3>
+        <div className="relative">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => handleSearchItems(e.target.value)}
+              placeholder="Search emails, events, files to link..."
+              className="w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            {searching && (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+            )}
+          </div>
+          {searchResults.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 rounded-md border border-border bg-card shadow-lg z-50 max-h-64 overflow-auto">
+              {searchResults.map((item) => {
+                const Icon = SOURCE_ICONS[item.source] ?? StickyNote;
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between px-3 py-2 hover:bg-muted/50 border-b border-border last:border-0"
+                  >
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{item.title}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {item.snippet?.slice(0, 80)}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleLinkItem(item.id)}
+                      disabled={linking === item.id}
+                      className="ml-2 shrink-0 rounded px-2 py-1 text-xs bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {linking === item.id ? 'Linking...' : 'Link'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {searchQuery.length >= 2 && searchResults.length === 0 && !searching && (
+            <div className="absolute top-full left-0 right-0 mt-1 rounded-md border border-border bg-card shadow-lg z-50 p-3 text-center text-sm text-muted-foreground">
+              No matching items found
+            </div>
+          )}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {linkedItems.length} item{linkedItems.length !== 1 ? 's' : ''} connected
+          {linkedItems.length > 0 ? ' \u00b7 ' : ' \u2014 '}
+          Search to add more
+        </p>
+      </div>
+
+      {/* Linked Items / Timeline section -- prominent, default expanded */}
+      <div className="rounded-lg border-2 border-primary/20 bg-card p-6">
+        <button
+          onClick={() => setTimelineOpen((v) => !v)}
+          className="flex w-full items-center justify-between"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
+              <Link2 className="h-4 w-4 text-primary" />
+            </div>
+            <div className="text-left">
+              <h2 className="text-lg font-semibold text-foreground">
+                Linked Items
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {sortedItems.length} item{sortedItems.length !== 1 ? 's' : ''} in chronological order
+              </p>
+            </div>
+          </div>
+          {timelineOpen ? (
+            <ChevronDown className="h-5 w-5 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+          )}
+        </button>
+
+        {timelineOpen && (
+          <>
+            {sortedItems.length === 0 ? (
+              <div className="mt-4 rounded-md border border-dashed border-border bg-background p-6 text-center">
+                <Link2 className="mx-auto h-8 w-8 text-muted-foreground/50 mb-2" />
+                <p className="text-sm text-muted-foreground">
+                  No linked items yet. Use the search box above to connect emails, events, and files to this topic.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-1">
+                {sortedItems.map(({ link, item }) => {
+                  const SourceIcon = SOURCE_ICONS[item.source as ItemSource] ?? StickyNote;
+                  return (
+                    <div
+                      key={link.id}
+                      className="flex items-center gap-4 rounded-md border border-border bg-background px-4 py-3 transition-colors hover:border-primary/20"
+                    >
+                      <div
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
+                        style={{
+                          backgroundColor: `${areaColor.hex}15`,
+                          color: areaColor.hex,
+                        }}
+                      >
+                        <SourceIcon className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {item.url ? (
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="hover:underline hover:text-primary transition-colors"
+                              >
+                                {item.title}
+                              </a>
+                            ) : (
+                              item.title
+                            )}
+                          </p>
+                          {item.url && (
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="shrink-0 text-muted-foreground hover:text-primary transition-colors"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
+                        </div>
+                        {item.snippet && (
+                          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                            {item.snippet}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+                        {link.confidence != null && (
+                          <span
+                            className={cn(
+                              'rounded-full px-2 py-0.5 text-[10px] font-medium',
+                              link.confidence >= 0.8
+                                ? 'bg-emerald-500/10 text-emerald-400'
+                                : link.confidence >= 0.5
+                                  ? 'bg-amber-500/10 text-amber-400'
+                                  : 'bg-zinc-500/10 text-zinc-400'
+                            )}
+                          >
+                            {Math.round(link.confidence * 100)}%
+                          </span>
+                        )}
+                        {link.created_by !== 'user' && (
+                          <span className="flex items-center gap-0.5 text-purple-400">
+                            <Bot className="h-3 w-3" />
+                          </span>
+                        )}
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" />
+                          {new Date(item.occurred_at).toLocaleDateString()}
+                        </span>
+                        <button
+                          onClick={() => handleUnlinkItem(link.id)}
+                          className="shrink-0 rounded p-1 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+                          title="Unlink from topic"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
       {/* Two-column layout for side-by-side info */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* People Involved */}
@@ -467,7 +811,7 @@ export function TopicDossierClient({
                       {person.email && <span className="truncate">{person.email}</span>}
                       {person.role && (
                         <span className="flex items-center gap-1">
-                          <span className="text-border">·</span> {person.role}
+                          <span className="text-border">&middot;</span> {person.role}
                         </span>
                       )}
                       {person.organization && (
@@ -606,7 +950,7 @@ export function TopicDossierClient({
                       </div>
                       <p className="mt-0.5 text-xs text-muted-foreground truncate">
                         To: {draft.to_addresses.join(', ')}
-                        {draft.cc_addresses.length > 0 && ` · CC: ${draft.cc_addresses.join(', ')}`}
+                        {draft.cc_addresses.length > 0 && ` \u00b7 CC: ${draft.cc_addresses.join(', ')}`}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-3">
@@ -637,116 +981,6 @@ export function TopicDossierClient({
           )}
         </div>
       )}
-
-      {/* Timeline section (collapsible) */}
-      <div className="rounded-lg border border-border bg-card p-6">
-        <button
-          onClick={() => setTimelineOpen((v) => !v)}
-          className="flex w-full items-center justify-between"
-        >
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">Timeline</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {sortedItems.length} linked item{sortedItems.length !== 1 ? 's' : ''} in chronological order
-            </p>
-          </div>
-          {timelineOpen ? (
-            <ChevronDown className="h-5 w-5 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-5 w-5 text-muted-foreground" />
-          )}
-        </button>
-
-        {timelineOpen && (
-          <>
-            {sortedItems.length === 0 ? (
-              <div className="mt-4 rounded-md border border-border bg-background p-6 text-center text-sm text-muted-foreground">
-                No linked items yet. Items will appear here as they are linked to this topic.
-              </div>
-            ) : (
-              <div className="mt-4 space-y-1">
-                {sortedItems.map(({ link, item }) => {
-                  const SourceIcon = SOURCE_ICONS[item.source as ItemSource] ?? StickyNote;
-                  return (
-                    <div
-                      key={link.id}
-                      className="flex items-center gap-4 rounded-md border border-border bg-background px-4 py-3 transition-colors hover:border-primary/20"
-                    >
-                      <div
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
-                        style={{
-                          backgroundColor: `${areaColor.hex}15`,
-                          color: areaColor.hex,
-                        }}
-                      >
-                        <SourceIcon className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="truncate text-sm font-medium text-foreground">
-                            {item.url ? (
-                              <a
-                                href={item.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="hover:underline hover:text-primary transition-colors"
-                              >
-                                {item.title}
-                              </a>
-                            ) : (
-                              item.title
-                            )}
-                          </p>
-                          {item.url && (
-                            <a
-                              href={item.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="shrink-0 text-muted-foreground hover:text-primary transition-colors"
-                            >
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          )}
-                        </div>
-                        {item.snippet && (
-                          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                            {item.snippet}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
-                        {link.confidence != null && (
-                          <span
-                            className={cn(
-                              'rounded-full px-2 py-0.5 text-[10px] font-medium',
-                              link.confidence >= 0.8
-                                ? 'bg-emerald-500/10 text-emerald-400'
-                                : link.confidence >= 0.5
-                                  ? 'bg-amber-500/10 text-amber-400'
-                                  : 'bg-zinc-500/10 text-zinc-400'
-                            )}
-                          >
-                            {Math.round(link.confidence * 100)}%
-                          </span>
-                        )}
-                        {link.created_by !== 'user' && (
-                          <span className="flex items-center gap-0.5 text-purple-400">
-                            <Bot className="h-3 w-3" />
-                          </span>
-                        )}
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3.5 w-3.5" />
-                          {new Date(item.occurred_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        )}
-      </div>
 
       {/* Tasks section */}
       <div className="rounded-lg border border-border bg-card p-6">

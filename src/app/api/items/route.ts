@@ -16,11 +16,16 @@ export async function GET(request: Request) {
   const source = searchParams.get('source');
   const linked = searchParams.get('linked'); // 'true' | 'false'
   const search = searchParams.get('search');
+  const q = searchParams.get('q'); // alternative search param used by Connect Items
+  const limit = parseInt(searchParams.get('limit') ?? '50');
 
   let query = supabase
     .from('items')
     .select('*')
-    .order('occurred_at', { ascending: false });
+    .eq('user_id', user.id)
+    .neq('triage_status', 'deleted')
+    .order('occurred_at', { ascending: false })
+    .limit(limit);
 
   // Filter by source
   if (source) {
@@ -36,9 +41,10 @@ export async function GET(request: Request) {
     }
   }
 
-  // Text search on title/snippet
-  if (search) {
-    query = query.or(`title.ilike.%${search}%,snippet.ilike.%${search}%`);
+  // Text search on title/snippet (support both 'search' and 'q' params)
+  const searchTerm = q ?? search;
+  if (searchTerm) {
+    query = query.or(`title.ilike.%${searchTerm}%,snippet.ilike.%${searchTerm}%`);
   }
 
   const { data: items, error } = await query;
@@ -65,10 +71,10 @@ export async function GET(request: Request) {
       ? (items ?? []).filter((item) => linkedItemIds.has(item.id))
       : (items ?? []).filter((item) => !linkedItemIds.has(item.id));
 
-    return NextResponse.json(filtered);
+    return NextResponse.json({ items: filtered });
   }
 
-  return NextResponse.json(items);
+  return NextResponse.json({ items: items ?? [] });
 }
 
 /* ---------- POST ---------- */

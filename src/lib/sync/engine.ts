@@ -28,6 +28,7 @@ interface SyncSourceResult {
   itemsProcessed: number;
   itemsCreated: number;
   itemsUpdated: number;
+  itemsDeleted?: number;
   error?: string;
 }
 
@@ -188,10 +189,18 @@ async function syncSource(
       items
     );
 
+    // Reconcile deleted items: if this is a fresh sync (no cursor),
+    // soft-delete items that no longer exist in the source
+    let deleted = 0;
+    if (!lastCursor && items.length > 0) {
+      deleted = await reconcileDeleted(supabase, accountId, source, items);
+    }
+
     const stats = {
       itemsProcessed: items.length,
       itemsCreated: created,
       itemsUpdated: updated,
+      itemsDeleted: deleted,
     };
 
     // Update sync_run as completed
@@ -330,4 +339,50 @@ async function upsertItems(
   }
 
   return { created, updated };
+}
+
+/**
+ * Soft-deletes items that exist in DB but were NOT returned by the connector.
+ * Only runs on fresh syncs (no cursor) so we know the connector returned
+ * all current items for the first page.
+ */
+async function reconcileDeleted(
+  supabase: ReturnType<typeof createServiceClient>,
+  accountId: string,
+  source: ItemSource,
+  currentItems: NormalizedItem[]
+): Promise<number> {
+  const currentIds = new Set(currentItems.map((i) => i.external_id));
+
+  // Get all stored external_ids for this account+source that aren't already deleted
+  const { data: storedItems } = await supabase
+    .from('items')
+    .select('id, external_id')
+    .eq('account_id', accountId)
+    .eq('source', source)
+    .neq('triage_status', 'deleted');
+
+  if (!storedItems || storedItems.length === 0) return 0;
+
+  // Find items in DB that are NOT in the current sync batch
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const toDelete = storedItems.filter((item: any) => !currentIds.has(item.external_id));
+
+  if (toDelete.length === 0) return 0;
+
+  // Soft-delete in batches of 50
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ids = toDelete.map((i: any) => i.id);
+  const BATCH = 50;
+
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const batch = ids.slice(i, i + BATCH);
+    await supabase
+      .from('items')
+      .update({ triage_status: 'deleted' })
+      .in('id', batch);
+  }
+
+  console.log(`Reconciled ${toDelete.length} deleted items for account ${accountId} source ${source}`);
+  return toDelete.length;
 }
