@@ -14,7 +14,7 @@ export class CuratorAgent extends BaseAgent {
     let totalTokens = 0;
 
     // 1. Fetch all pending triage items
-    const { data: pendingItems } = await this.supabase
+    const { data: pendingItems, error: fetchError } = await this.supabase
       .from('items')
       .select('*')
       .eq('user_id', userId)
@@ -22,10 +22,30 @@ export class CuratorAgent extends BaseAgent {
       .order('occurred_at', { ascending: false })
       .limit(100);
 
+    if (fetchError) {
+      console.error('Curator: failed to fetch items:', fetchError.message);
+      return {
+        success: false,
+        output: { error: `Failed to fetch items: ${fetchError.message}`, items_processed: 0 },
+        actions: [{ action: 'fetch_error', target_type: 'query', description: fetchError.message }],
+        tokensUsed: 0,
+      };
+    }
+
     if (!pendingItems || pendingItems.length === 0) {
+      // Double-check: count ALL items for this user to help debug
+      const { count } = await this.supabase
+        .from('items')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId);
+
       return {
         success: true,
-        output: { message: 'No pending items to organize', items_processed: 0 },
+        output: {
+          message: `No pending items to organize. Total items for user: ${count ?? 0}. Items may need triage_status set to 'pending'.`,
+          items_processed: 0,
+          total_user_items: count ?? 0,
+        },
         actions,
         tokensUsed: 0,
       };
@@ -212,7 +232,13 @@ export class CuratorAgent extends BaseAgent {
           totalProcessed++;
         }
       } catch (err) {
-        console.error(`Curator batch error:`, err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error(`Curator batch error (batch ${Math.floor(i / BATCH_SIZE) + 1}):`, errMsg);
+        actions.push({
+          action: 'batch_error',
+          target_type: 'batch',
+          description: `Batch ${Math.floor(i / BATCH_SIZE) + 1} failed: ${errMsg.slice(0, 300)}`,
+        });
         // Continue with next batch
       }
     }

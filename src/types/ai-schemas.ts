@@ -127,20 +127,21 @@ export type PasteAnalysisOutput = z.infer<typeof PasteAnalysisOutputSchema>;
 // Auto-organize (Curator Agent output)
 export const AutoOrganizeItemSchema = z.object({
   item_id: z.string(),
-  topic_id: z.string().uuid().nullable(),
-  proposed_topic_title: z.string().nullable(),
-  proposed_topic_area: z.enum(['personal', 'career', 'work']).nullable(),
-  proposed_topic_description: z.string().nullable(),
+  // topic_id can be an existing UUID OR a temp_id like "new_1" for new topics
+  topic_id: z.string().nullable(),
+  proposed_topic_title: z.string().nullable().optional(),
+  proposed_topic_area: z.enum(['personal', 'career', 'work']).nullable().optional(),
+  proposed_topic_description: z.string().nullable().optional(),
   confidence: z.number().min(0).max(1),
   reason: z.string(),
   triage_status: z.enum(['relevant', 'low_relevance', 'noise']),
   triage_score: z.number().min(0).max(1),
   contacts_found: z.array(z.object({
     email: z.string(),
-    name: z.string().nullable(),
-    organization: z.string().nullable(),
-    role: z.string().nullable(),
-  })),
+    name: z.string().nullable().optional(),
+    organization: z.string().nullable().optional(),
+    role: z.string().nullable().optional(),
+  })).default([]),
 });
 
 export const AutoOrganizeOutputSchema = z.object({
@@ -149,9 +150,9 @@ export const AutoOrganizeOutputSchema = z.object({
     temp_id: z.string(),
     title: z.string(),
     area: z.enum(['personal', 'career', 'work']),
-    description: z.string(),
-  })),
-  summary: z.string(),
+    description: z.string().default(''),
+  })).default([]),
+  summary: z.string().default(''),
 });
 export type AutoOrganizeOutput = z.infer<typeof AutoOrganizeOutputSchema>;
 

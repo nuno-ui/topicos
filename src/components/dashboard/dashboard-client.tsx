@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Topic, Task, GoogleAccount, SyncRun, Item, ItemSource, AgentRun } from '@/types/database';
 import { cn } from '@/lib/utils';
 import { useComposeStore } from '@/stores/compose-store';
@@ -71,6 +72,7 @@ export function DashboardClient({
   agentRuns = [],
   upcomingEvents = [],
 }: DashboardClientProps) {
+  const router = useRouter();
   const [syncing, setSyncing] = useState(false);
   const [curatorRunning, setCuratorRunning] = useState(false);
   const openCompose = useComposeStore((s) => s.openCompose);
@@ -82,6 +84,7 @@ export function DashboardClient({
       const res = await fetch('/api/sync', { method: 'POST' });
       if (res.ok) {
         toast.success('Sync completed successfully');
+        router.refresh();
       } else {
         toast.error('Sync failed');
       }
@@ -96,14 +99,23 @@ export function DashboardClient({
     setCuratorRunning(true);
     try {
       const res = await fetch('/api/agents/curator', { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const output = data.output_json ?? {};
-        toast.success(
-          `Curator: ${output.items_processed ?? 0} items processed, ${output.topics_created ?? 0} topics created`
-        );
+      const data = await res.json().catch(() => ({}));
+      const output = data.output ?? data.output_json ?? {};
+
+      if (res.ok && data.success !== false) {
+        const processed = output.items_processed ?? 0;
+        const created = output.topics_created ?? 0;
+        const contacts = output.contacts_found ?? 0;
+        if (processed === 0 && output.message) {
+          toast.info(output.message);
+        } else {
+          toast.success(
+            `Curator: ${processed} items processed, ${created} topics created, ${contacts} contacts found`
+          );
+        }
+        router.refresh();
       } else {
-        toast.error('Curator failed');
+        toast.error(data.error || output.error || 'Curator failed');
       }
     } catch {
       toast.error('Network error running curator');

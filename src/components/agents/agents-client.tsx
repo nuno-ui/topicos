@@ -89,19 +89,19 @@ export function AgentsClient({ runs }: AgentsClientProps) {
     try {
       const endpoint = `/api/agents/${agentType.replace('_', '-')}`;
       const res = await fetch(endpoint, { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const info = AGENT_INFO[agentType];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const output = (data as any).output_json ?? {};
+      const data = await res.json().catch(() => ({}));
+      const info = AGENT_INFO[agentType];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const output = (data as any).output ?? (data as any).output_json ?? {};
+
+      if (res.ok && data.success !== false) {
         const summary = output.items_processed != null
-          ? `${output.items_processed} items processed`
+          ? `${output.items_processed} items processed, ${output.topics_created ?? 0} topics created`
           : output.message ?? 'completed';
         toast.success(`${info?.label ?? agentType}: ${summary}`);
         router.refresh();
       } else {
-        const info = AGENT_INFO[agentType];
-        toast.error(`${info?.label ?? agentType} agent failed`);
+        toast.error(`${info?.label ?? agentType}: ${data.error || output.error || 'failed'}`);
       }
     } catch {
       toast.error(`Network error running ${agentType} agent`);

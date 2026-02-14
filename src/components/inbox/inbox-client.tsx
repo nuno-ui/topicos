@@ -253,16 +253,24 @@ export function InboxClient({
     setCuratorRunning(true);
     try {
       const res = await fetch('/api/agents/curator', { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const output = (data as any).output_json ?? {};
-        toast.success(
-          `Curator: ${output.items_processed ?? 0} items processed, ${output.topics_created ?? 0} topics created`
-        );
+      const data = await res.json().catch(() => ({}));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const output = (data as any).output ?? (data as any).output_json ?? {};
+
+      if (res.ok && data.success !== false) {
+        const processed = output.items_processed ?? 0;
+        const created = output.topics_created ?? 0;
+        const contacts = output.contacts_found ?? 0;
+        if (processed === 0 && output.message) {
+          toast.info(output.message);
+        } else {
+          toast.success(
+            `Curator: ${processed} items processed, ${created} topics created, ${contacts} contacts found`
+          );
+        }
         router.refresh();
       } else {
-        toast.error('Curator agent failed');
+        toast.error(data.error || output.error || 'Curator agent failed');
       }
     } catch {
       toast.error('Network error running curator');
