@@ -27,6 +27,7 @@ import {
   AlertTriangle,
   ExternalLink,
   TrendingUp,
+  MessageSquare,
 } from 'lucide-react';
 import Link from 'next/link';
 import { PasteIn } from './paste-in';
@@ -42,6 +43,7 @@ const SOURCE_ICONS: Record<ItemSource, React.ElementType> = {
   calendar: Calendar,
   drive: FileText,
   manual: StickyNote,
+  slack: MessageSquare,
 };
 
 const SOURCE_COLORS: Record<ItemSource, string> = {
@@ -49,6 +51,7 @@ const SOURCE_COLORS: Record<ItemSource, string> = {
   calendar: 'text-blue-400',
   drive: 'text-yellow-400',
   manual: 'text-emerald-400',
+  slack: 'text-purple-400',
 };
 
 interface DashboardClientProps {

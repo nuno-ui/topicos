@@ -1,7 +1,7 @@
 export type Area = 'personal' | 'career' | 'work';
 export type TopicStatus = 'active' | 'archived' | 'completed';
 export type TaskStatus = 'pending' | 'in_progress' | 'done';
-export type ItemSource = 'gmail' | 'calendar' | 'drive' | 'manual';
+export type ItemSource = 'gmail' | 'calendar' | 'drive' | 'manual' | 'slack';
 export type SyncStatus = 'running' | 'completed' | 'failed';
 export type CreatedBy = 'user' | 'curator' | 'executor';
 export type TriageStatus = 'pending' | 'relevant' | 'low_relevance' | 'noise' | 'archived' | 'deleted';
@@ -45,6 +45,18 @@ export interface GoogleAccount {
   created_at: string;
 }
 
+export interface SlackAccount {
+  id: string;
+  user_id: string;
+  team_id: string;
+  team_name: string;
+  bot_user_id: string | null;
+  access_token: string;
+  scopes: string[];
+  last_sync_at: string | null;
+  created_at: string;
+}
+
 export interface Item {
   id: string;
   user_id: string;
@@ -79,6 +91,33 @@ export interface Topic {
   last_agent_update_at: string | null;
   created_at: string;
   updated_at: string;
+  // Folder / grouping
+  folder: string | null;
+  // Extended project fields
+  start_date: string | null;
+  due_date: string | null;
+  completed_at: string | null;
+  owner: string | null;
+  stakeholders: string[] | null;
+  tags: string[] | null;
+  budget: string | null;
+  currency: string | null;
+  time_estimate_hours: number | null;
+  time_spent_hours: number | null;
+  progress_percent: number | null;
+  risk_level: 'low' | 'medium' | 'high' | 'critical' | null;
+  category: string | null;
+  client: string | null;
+  company: string | null;
+  department: string | null;
+  goal: string | null;
+  outcome: string | null;
+  url: string | null;
+  repo_url: string | null;
+  color: string | null;
+  icon: string | null;
+  notes: string | null;
+  custom_fields: Record<string, unknown> | null;
 }
 
 export interface TopicPerson {
@@ -224,6 +263,12 @@ export interface Database {
         Update: Partial<GoogleAccount>;
         Relationships: [];
       };
+      slack_accounts: {
+        Row: SlackAccount;
+        Insert: Omit<SlackAccount, 'id' | 'created_at'> & { id?: string; created_at?: string };
+        Update: Partial<SlackAccount>;
+        Relationships: [];
+      };
       items: {
         Row: Item;
         Insert: Omit<Item, 'id' | 'created_at' | 'updated_at' | 'triage_status' | 'triage_score' | 'triage_reason'> & { id?: string; created_at?: string; updated_at?: string; triage_status?: TriageStatus; triage_score?: number | null; triage_reason?: string | null };
@@ -232,7 +277,7 @@ export interface Database {
       };
       topics: {
         Row: Topic;
-        Insert: Omit<Topic, 'id' | 'created_at' | 'updated_at' | 'people' | 'next_steps' | 'urgency_score' | 'last_agent_update_at'> & { id?: string; created_at?: string; updated_at?: string; people?: TopicPerson[]; next_steps?: TopicNextStep[]; urgency_score?: number | null; last_agent_update_at?: string | null };
+        Insert: Omit<Topic, 'id' | 'created_at' | 'updated_at' | 'people' | 'next_steps' | 'urgency_score' | 'last_agent_update_at' | 'folder' | 'start_date' | 'due_date' | 'completed_at' | 'owner' | 'stakeholders' | 'tags' | 'budget' | 'currency' | 'time_estimate_hours' | 'time_spent_hours' | 'progress_percent' | 'risk_level' | 'category' | 'client' | 'company' | 'department' | 'goal' | 'outcome' | 'url' | 'repo_url' | 'color' | 'icon' | 'notes' | 'custom_fields'> & { id?: string; created_at?: string; updated_at?: string; people?: TopicPerson[]; next_steps?: TopicNextStep[]; urgency_score?: number | null; last_agent_update_at?: string | null; folder?: string | null; start_date?: string | null; due_date?: string | null; completed_at?: string | null; owner?: string | null; stakeholders?: string[] | null; tags?: string[] | null; budget?: string | null; currency?: string | null; time_estimate_hours?: number | null; time_spent_hours?: number | null; progress_percent?: number | null; risk_level?: 'low' | 'medium' | 'high' | 'critical' | null; category?: string | null; client?: string | null; company?: string | null; department?: string | null; goal?: string | null; outcome?: string | null; url?: string | null; repo_url?: string | null; color?: string | null; icon?: string | null; notes?: string | null; custom_fields?: Record<string, unknown> | null };
         Update: Partial<Topic>;
         Relationships: [];
       };

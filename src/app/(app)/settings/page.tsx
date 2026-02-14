@@ -26,11 +26,18 @@ export default async function SettingsPage() {
     .order('started_at', { ascending: false })
     .limit(10);
 
+  const { data: slackAccounts } = await supabase
+    .from('slack_accounts')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false });
+
   return (
     <SettingsClient
       profile={profile}
       googleAccounts={googleAccounts ?? []}
       recentSyncs={recentSyncs ?? []}
+      slackAccounts={slackAccounts ?? []}
     />
   );
 }

@@ -36,6 +36,18 @@ import {
   Save,
   Trash2,
   Wand2,
+  Hash,
+  MessageSquare,
+  FolderOpen,
+  Target,
+  DollarSign,
+  Timer,
+  Shield,
+  Globe,
+  GitBranch,
+  Palette,
+  Tag,
+  Settings2,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -82,6 +94,7 @@ const SOURCE_ICONS: Record<ItemSource, React.ElementType> = {
   calendar: Calendar,
   drive: FileText,
   manual: StickyNote,
+  slack: MessageSquare,
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -177,6 +190,35 @@ export function TopicDossierClient({
   // Auto-link AI state
   const [autoLinking, setAutoLinking] = useState(false);
   const [autoLinkResult, setAutoLinkResult] = useState<{ linked: number; scanned: number } | null>(null);
+
+  // Project details state
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [details, setDetails] = useState({
+    folder: topic.folder ?? '',
+    start_date: topic.start_date ? topic.start_date.slice(0, 10) : '',
+    due_date: topic.due_date ? topic.due_date.slice(0, 10) : '',
+    owner: topic.owner ?? '',
+    stakeholders: (topic.stakeholders ?? []).join(', '),
+    tags: (topic.tags ?? []).join(', '),
+    budget: topic.budget ?? '',
+    currency: topic.currency ?? 'EUR',
+    time_estimate_hours: topic.time_estimate_hours?.toString() ?? '',
+    time_spent_hours: topic.time_spent_hours?.toString() ?? '',
+    progress_percent: topic.progress_percent?.toString() ?? '',
+    risk_level: topic.risk_level ?? '',
+    category: topic.category ?? '',
+    client: topic.client ?? '',
+    company: topic.company ?? '',
+    department: topic.department ?? '',
+    goal: topic.goal ?? '',
+    outcome: topic.outcome ?? '',
+    url: topic.url ?? '',
+    repo_url: topic.repo_url ?? '',
+    color: topic.color ?? '',
+    notes: topic.notes ?? '',
+  });
 
   const router = useRouter();
 
@@ -465,6 +507,118 @@ export function TopicDossierClient({
     }
   };
 
+  const handleSaveDetails = async () => {
+    setSavingDetails(true);
+    try {
+      const payload: Record<string, unknown> = {
+        folder: details.folder.trim() || null,
+        start_date: details.start_date || null,
+        due_date: details.due_date || null,
+        owner: details.owner.trim() || null,
+        stakeholders: details.stakeholders.trim() ? details.stakeholders.split(',').map(s => s.trim()).filter(Boolean) : null,
+        tags: details.tags.trim() ? details.tags.split(',').map(s => s.trim()).filter(Boolean) : null,
+        budget: details.budget.trim() || null,
+        currency: details.currency.trim() || null,
+        time_estimate_hours: details.time_estimate_hours ? parseFloat(details.time_estimate_hours) : null,
+        time_spent_hours: details.time_spent_hours ? parseFloat(details.time_spent_hours) : null,
+        progress_percent: details.progress_percent ? parseInt(details.progress_percent) : null,
+        risk_level: details.risk_level || null,
+        category: details.category.trim() || null,
+        client: details.client.trim() || null,
+        company: details.company.trim() || null,
+        department: details.department.trim() || null,
+        goal: details.goal.trim() || null,
+        outcome: details.outcome.trim() || null,
+        url: details.url.trim() || null,
+        repo_url: details.repo_url.trim() || null,
+        color: details.color.trim() || null,
+        notes: details.notes.trim() || null,
+      };
+
+      const res = await fetch(`/api/topics/${topic.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        toast.success('Project details updated');
+        setEditingDetails(false);
+        router.refresh();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.error ?? 'Failed to save details');
+      }
+    } catch {
+      toast.error('Network error');
+    } finally {
+      setSavingDetails(false);
+    }
+  };
+
+  const detailField = (label: string, key: keyof typeof details, opts?: { type?: string; placeholder?: string; rows?: number; options?: { value: string; label: string }[] }) => {
+    const value = details[key];
+    if (!editingDetails) {
+      if (!value) return null;
+      return (
+        <div className="flex items-start gap-2 py-1.5">
+          <span className="text-xs font-medium text-muted-foreground w-32 shrink-0 pt-0.5">{label}</span>
+          <span className="text-sm text-foreground break-all">
+            {key === 'url' || key === 'repo_url' ? (
+              <a href={value} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{value}</a>
+            ) : value}
+          </span>
+        </div>
+      );
+    }
+
+    if (opts?.options) {
+      return (
+        <div className="flex items-center gap-2 py-1">
+          <label className="text-xs font-medium text-muted-foreground w-32 shrink-0">{label}</label>
+          <select
+            value={value}
+            onChange={(e) => setDetails(prev => ({ ...prev, [key]: e.target.value }))}
+            className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="">—</option>
+            {opts.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+      );
+    }
+
+    if (opts?.rows) {
+      return (
+        <div className="flex items-start gap-2 py-1">
+          <label className="text-xs font-medium text-muted-foreground w-32 shrink-0 pt-2">{label}</label>
+          <textarea
+            value={value}
+            onChange={(e) => setDetails(prev => ({ ...prev, [key]: e.target.value }))}
+            rows={opts.rows}
+            placeholder={opts?.placeholder ?? ''}
+            className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-2 py-1">
+        <label className="text-xs font-medium text-muted-foreground w-32 shrink-0">{label}</label>
+        <input
+          type={opts?.type ?? 'text'}
+          value={value}
+          onChange={(e) => setDetails(prev => ({ ...prev, [key]: e.target.value }))}
+          placeholder={opts?.placeholder ?? ''}
+          className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+      </div>
+    );
+  };
+
+  // Count filled detail fields (for the badge)
+  const filledDetailsCount = Object.values(details).filter(v => v && v.toString().trim()).length;
+
   /* ---------- render ---------- */
 
   return (
@@ -613,6 +767,143 @@ export function TopicDossierClient({
           className="mt-4 h-1 w-full rounded-full opacity-40"
           style={{ backgroundColor: areaColor.hex }}
         />
+      </div>
+
+      {/* Project Details — Collapsible */}
+      <div className="rounded-lg border border-border bg-card p-5">
+        <button
+          onClick={() => setDetailsOpen(v => !v)}
+          className="flex w-full items-center justify-between"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-amber-500/10">
+              <Settings2 className="h-4 w-4 text-amber-400" />
+            </div>
+            <div className="text-left">
+              <h2 className="text-base font-semibold text-foreground">Project Details</h2>
+              <p className="text-xs text-muted-foreground">
+                {filledDetailsCount} field{filledDetailsCount !== 1 ? 's' : ''} filled
+              </p>
+            </div>
+          </div>
+          {detailsOpen ? (
+            <ChevronDown className="h-5 w-5 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+          )}
+        </button>
+
+        {detailsOpen && (
+          <div className="mt-4 space-y-1">
+            {/* Action buttons */}
+            <div className="flex items-center justify-end gap-2 mb-3">
+              {editingDetails ? (
+                <>
+                  <button
+                    onClick={handleSaveDetails}
+                    disabled={savingDetails}
+                    className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {savingDetails ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setEditingDetails(false)}
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setEditingDetails(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:border-primary/30"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit Details
+                </button>
+              )}
+            </div>
+
+            {/* Grid of fields organized by category */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8">
+              {/* Organization */}
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2 pb-1">
+                  <FolderOpen className="h-3 w-3" /> Organization
+                </div>
+                {detailField('Folder', 'folder', { placeholder: 'e.g. Client Projects' })}
+                {detailField('Category', 'category', { placeholder: 'e.g. Engineering, Marketing' })}
+                {detailField('Tags', 'tags', { placeholder: 'tag1, tag2, tag3' })}
+                {detailField('Color', 'color', { placeholder: '#3b82f6' })}
+              </div>
+
+              {/* Timeline */}
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2 pb-1">
+                  <Calendar className="h-3 w-3" /> Timeline
+                </div>
+                {detailField('Start Date', 'start_date', { type: 'date' })}
+                {detailField('Due Date', 'due_date', { type: 'date' })}
+                {detailField('Progress', 'progress_percent', { type: 'number', placeholder: '0-100' })}
+              </div>
+
+              {/* People */}
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2 pb-1">
+                  <Users className="h-3 w-3" /> People
+                </div>
+                {detailField('Owner', 'owner', { placeholder: 'Project owner name' })}
+                {detailField('Stakeholders', 'stakeholders', { placeholder: 'person1, person2' })}
+                {detailField('Client', 'client', { placeholder: 'Client name' })}
+                {detailField('Company', 'company', { placeholder: 'Company name' })}
+                {detailField('Department', 'department', { placeholder: 'Department name' })}
+              </div>
+
+              {/* Budget & Time */}
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2 pb-1">
+                  <DollarSign className="h-3 w-3" /> Budget & Time
+                </div>
+                {detailField('Budget', 'budget', { placeholder: 'e.g. 50000' })}
+                {detailField('Currency', 'currency', { placeholder: 'EUR' })}
+                {detailField('Time Estimate (h)', 'time_estimate_hours', { type: 'number', placeholder: 'Hours' })}
+                {detailField('Time Spent (h)', 'time_spent_hours', { type: 'number', placeholder: 'Hours' })}
+              </div>
+
+              {/* Risk & Goals */}
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2 pb-1">
+                  <Target className="h-3 w-3" /> Goals & Risk
+                </div>
+                {detailField('Risk Level', 'risk_level', {
+                  options: [
+                    { value: 'low', label: 'Low' },
+                    { value: 'medium', label: 'Medium' },
+                    { value: 'high', label: 'High' },
+                    { value: 'critical', label: 'Critical' },
+                  ]
+                })}
+                {detailField('Goal', 'goal', { rows: 2, placeholder: 'What is the end goal?' })}
+                {detailField('Outcome', 'outcome', { rows: 2, placeholder: 'Expected or actual outcome' })}
+              </div>
+
+              {/* Links */}
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2 pb-1">
+                  <Globe className="h-3 w-3" /> Links
+                </div>
+                {detailField('URL', 'url', { placeholder: 'https://...' })}
+                {detailField('Repository', 'repo_url', { placeholder: 'https://github.com/...' })}
+              </div>
+            </div>
+
+            {/* Notes — full width */}
+            <div className="pt-2">
+              {detailField('Notes', 'notes', { rows: 3, placeholder: 'Additional notes...' })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Quick Actions Bar */}

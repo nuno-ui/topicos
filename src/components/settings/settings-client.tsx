@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Profile, GoogleAccount, SyncRun } from '@/types/database';
+import type { Profile, GoogleAccount, SyncRun, SlackAccount } from '@/types/database';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
@@ -12,12 +12,14 @@ import {
   ExternalLink,
   Settings,
   Shield,
+  MessageSquare,
 } from 'lucide-react';
 
 interface SettingsClientProps {
   profile: Profile | null;
   googleAccounts: GoogleAccount[];
   recentSyncs: SyncRun[];
+  slackAccounts: SlackAccount[];
 }
 
 const SYNC_STATUS_STYLES: Record<string, string> = {
@@ -30,10 +32,12 @@ export function SettingsClient({
   profile,
   googleAccounts,
   recentSyncs,
+  slackAccounts,
 }: SettingsClientProps) {
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [syncingAccount, setSyncingAccount] = useState<string | null>(null);
   const [indexingDepth, setIndexingDepth] = useState<'light' | 'medium' | 'full'>('medium');
+  const [disconnectingSlack, setDisconnectingSlack] = useState<string | null>(null);
   const router = useRouter();
 
   const handleDisconnect = async (accountId: string) => {
@@ -73,6 +77,23 @@ export function SettingsClient({
       toast.error('Network error during sync');
     } finally {
       setSyncingAccount(null);
+    }
+  };
+
+  const handleDisconnectSlack = async (accountId: string) => {
+    setDisconnectingSlack(accountId);
+    try {
+      const res = await fetch(`/api/auth/slack/${accountId}`, { method: 'DELETE' });
+      if (res.ok) {
+        toast.success('Slack workspace disconnected');
+        router.refresh();
+      } else {
+        toast.error('Failed to disconnect Slack');
+      }
+    } catch {
+      toast.error('Network error');
+    } finally {
+      setDisconnectingSlack(null);
     }
   };
 
@@ -165,6 +186,75 @@ export function SettingsClient({
             >
               <ExternalLink className="h-4 w-4" />
               Connect Another Account
+            </a>
+          </div>
+        )}
+      </section>
+
+      {/* Slack Accounts */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-5 w-5 text-primary" />
+          <h2 className="text-lg font-semibold">Slack Workspaces</h2>
+        </div>
+
+        {slackAccounts.length === 0 ? (
+          <div className="rounded-lg border border-border bg-card p-6 text-center">
+            <MessageSquare className="mx-auto h-8 w-8 text-muted-foreground" />
+            <p className="mt-2 text-sm text-muted-foreground">
+              No Slack workspaces connected yet. Connect one to sync channel and DM messages.
+            </p>
+            <a
+              href="/api/auth/slack/connect"
+              className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[#4A154B] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#4A154B]/90"
+            >
+              <MessageSquare className="h-4 w-4" />
+              Connect Slack Workspace
+            </a>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {slackAccounts.map((account) => (
+              <div
+                key={account.id}
+                className="flex items-center justify-between rounded-lg border border-border bg-card p-4"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#4A154B]/10">
+                    <MessageSquare className="h-4 w-4 text-[#4A154B]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">{account.team_name}</p>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span>Team ID: {account.team_id}</span>
+                      <span>
+                        {account.last_sync_at
+                          ? `Last synced ${new Date(account.last_sync_at).toLocaleString()}`
+                          : 'Never synced'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleDisconnectSlack(account.id)}
+                    disabled={disconnectingSlack === account.id}
+                    className="flex items-center gap-1.5 rounded-md border border-red-500/20 px-3 py-1.5 text-xs font-medium text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {disconnectingSlack === account.id ? 'Removing...' : 'Disconnect'}
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <a
+              href="/api/auth/slack/connect"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#4A154B] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#4A154B]/90"
+            >
+              <MessageSquare className="h-4 w-4" />
+              Connect Another Workspace
             </a>
           </div>
         )}

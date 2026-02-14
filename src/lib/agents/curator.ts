@@ -108,6 +108,16 @@ RULES:
 - Extract contacts from email from/to fields
 - Score each item 0-1 for relevance
 
+TOPIC NAMING — CRITICAL:
+- Topics must be SPECIFIC and ACTIONABLE, never generic
+- BAD examples: "Work Updates", "Email Correspondence", "Project Communication", "Team Discussions", "Meeting Notes", "General Updates", "Notifications"
+- GOOD examples: "Q1 2025 Marketing Campaign Launch", "Office Lease Renewal — Lisbon HQ", "React Native App v3.0 Migration", "Hiring Senior Backend Engineer", "Series A Fundraising Process"
+- A topic should represent a REAL project, deal, initiative, goal, or trackable thread of work
+- If an item is a generic newsletter, notification, or promotional email, mark it as "noise" or "low_relevance" — do NOT create a topic for it
+- Only create a new topic if the item clearly belongs to a specific initiative that doesn't match any existing topic
+- When in doubt, assign to an existing topic rather than creating a new one
+- New topics MUST have a description that explains what the project/initiative is about
+
 You MUST return EXACTLY this JSON structure:
 {
   "items": [
@@ -124,15 +134,15 @@ You MUST return EXACTLY this JSON structure:
   "new_topics": [
     {
       "temp_id": "new_1",
-      "title": "Topic Title",
+      "title": "Specific Project or Initiative Name",
       "area": "work",
-      "description": "Brief description"
+      "description": "What this project is about, its goal, and key context"
     }
   ],
   "summary": "Brief summary of what was organized"
 }
 
-CRITICAL: Every item in the input MUST appear in the output "items" array. Use the EXACT item id from the input. The "contacts_found" array can be empty []. The "new_topics" array can be empty [].`;
+CRITICAL: Every item in the input MUST appear in the output "items" array. Use the EXACT item id from the input. The "contacts_found" array can be empty []. The "new_topics" array can be empty []. Prefer assigning to existing topics over creating new ones. Only create a topic when the item clearly represents a distinct trackable initiative.`;
 
       const userPrompt = [
         'EXISTING TOPICS:',

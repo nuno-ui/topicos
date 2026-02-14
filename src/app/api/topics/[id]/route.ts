@@ -39,6 +39,33 @@ const updateTopicSchema = z.object({
   status: z.enum(['active', 'archived', 'completed']).optional(),
   priority: z.number().int().min(0).optional(),
   summary: z.string().max(10000).nullable().optional(),
+  // Folder / grouping
+  folder: z.string().max(100).nullable().optional(),
+  // Extended project fields
+  start_date: z.string().nullable().optional(),
+  due_date: z.string().nullable().optional(),
+  completed_at: z.string().nullable().optional(),
+  owner: z.string().max(200).nullable().optional(),
+  stakeholders: z.array(z.string()).nullable().optional(),
+  tags: z.array(z.string()).nullable().optional(),
+  budget: z.string().max(100).nullable().optional(),
+  currency: z.string().max(10).nullable().optional(),
+  time_estimate_hours: z.number().min(0).nullable().optional(),
+  time_spent_hours: z.number().min(0).nullable().optional(),
+  progress_percent: z.number().int().min(0).max(100).nullable().optional(),
+  risk_level: z.enum(['low', 'medium', 'high', 'critical']).nullable().optional(),
+  category: z.string().max(100).nullable().optional(),
+  client: z.string().max(200).nullable().optional(),
+  company: z.string().max(200).nullable().optional(),
+  department: z.string().max(200).nullable().optional(),
+  goal: z.string().max(2000).nullable().optional(),
+  outcome: z.string().max(2000).nullable().optional(),
+  url: z.string().max(500).nullable().optional(),
+  repo_url: z.string().max(500).nullable().optional(),
+  color: z.string().max(20).nullable().optional(),
+  icon: z.string().max(50).nullable().optional(),
+  notes: z.string().max(10000).nullable().optional(),
+  custom_fields: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
 export async function PATCH(request: Request, { params }: RouteContext) {

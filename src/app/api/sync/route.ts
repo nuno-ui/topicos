@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { syncAccount } from '@/lib/sync/engine';
+import { syncAccount, syncSlackAccount } from '@/lib/sync/engine';
 
 /**
  * POST /api/sync
@@ -93,6 +93,27 @@ export async function POST(request: Request) {
           account_id: account.id,
           error:
             err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
+    }
+
+    // Also sync Slack accounts
+    const { data: slackAccounts } = await supabase
+      .from('slack_accounts')
+      .select('id')
+      .eq('user_id', user.id);
+
+    for (const sa of slackAccounts ?? []) {
+      try {
+        const slackResult = await syncSlackAccount(user.id, sa.id);
+        syncResults.push({
+          account_id: sa.id,
+          results: [slackResult],
+        });
+      } catch (err) {
+        syncResults.push({
+          account_id: sa.id,
+          error: err instanceof Error ? err.message : 'Slack sync error',
         });
       }
     }

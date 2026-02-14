@@ -6,6 +6,7 @@ const createTopicSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   area: z.enum(['personal', 'career', 'work']),
   description: z.string().max(2000).optional().default(''),
+  folder: z.string().max(100).nullable().optional(),
 });
 
 export async function GET() {
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: firstError }, { status: 400 });
   }
 
-  const { title, area, description } = parsed.data;
+  const { title, area, description, folder } = parsed.data;
 
   const { data: topic, error } = await supabase
     .from('topics')
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
       status: 'active',
       priority: 0,
       summary: null,
+      folder: folder ?? null,
     })
     .select()
     .single();

@@ -26,6 +26,7 @@ import {
   CheckSquare,
   Square,
   RefreshCw,
+  MessageSquare,
 } from 'lucide-react';
 
 /* ---------- Source icon & color mapping ---------- */
@@ -35,6 +36,7 @@ const SOURCE_ICONS: Record<ItemSource, React.ElementType> = {
   calendar: Calendar,
   drive: FileText,
   manual: StickyNote,
+  slack: MessageSquare,
 };
 
 const SOURCE_COLORS: Record<ItemSource, string> = {
@@ -42,6 +44,7 @@ const SOURCE_COLORS: Record<ItemSource, string> = {
   calendar: 'text-blue-400',
   drive: 'text-yellow-400',
   manual: 'text-emerald-400',
+  slack: 'text-purple-400',
 };
 
 const SOURCE_LABELS: Record<ItemSource, string> = {
@@ -49,6 +52,7 @@ const SOURCE_LABELS: Record<ItemSource, string> = {
   calendar: 'Events',
   drive: 'Files',
   manual: 'Manual',
+  slack: 'Slack',
 };
 
 type TabKey = 'all' | ItemSource;
@@ -58,6 +62,7 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: 'gmail', label: 'Emails', icon: Mail },
   { key: 'calendar', label: 'Events', icon: Calendar },
   { key: 'drive', label: 'Files', icon: FileText },
+  { key: 'slack', label: 'Slack', icon: MessageSquare },
   { key: 'manual', label: 'Manual', icon: StickyNote },
 ];
 
@@ -142,7 +147,7 @@ export function InboxClient({
 
   // Count items per tab
   const tabCounts = useMemo(() => {
-    const counts: Record<TabKey, number> = { all: 0, gmail: 0, calendar: 0, drive: 0, manual: 0 };
+    const counts: Record<TabKey, number> = { all: 0, gmail: 0, calendar: 0, drive: 0, manual: 0, slack: 0 };
     for (const item of items) {
       const isLinked = linkedIds.has(item.id);
       if (triageFilter === 'untriaged' && isLinked && !showLinked) continue;

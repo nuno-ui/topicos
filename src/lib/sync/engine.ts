@@ -3,6 +3,7 @@ import { refreshAccessToken } from '@/lib/connectors/google/auth';
 import { fetchGmailMessages } from '@/lib/connectors/google/gmail';
 import { fetchCalendarEvents } from '@/lib/connectors/google/calendar';
 import { fetchDriveFiles } from '@/lib/connectors/google/drive';
+import { fetchSlackMessages } from '@/lib/connectors/slack/messages';
 import type { ItemSource } from '@/types/database';
 import type { ConnectorResult, NormalizedItem } from '@/lib/connectors/google/types';
 
@@ -20,6 +21,7 @@ const CONNECTOR_MAP: Record<string, ConnectorFn> = {
   gmail: fetchGmailMessages,
   calendar: fetchCalendarEvents,
   drive: fetchDriveFiles,
+  slack: fetchSlackMessages,
 };
 
 interface SyncSourceResult {
@@ -385,4 +387,137 @@ async function reconcileDeleted(
 
   console.log(`Reconciled ${toDelete.length} deleted items for account ${accountId} source ${source}`);
   return toDelete.length;
+}
+
+/**
+ * Syncs a Slack workspace — fetches messages from all channels/DMs
+ * the bot is part of and upserts them into the items table.
+ */
+export async function syncSlackAccount(
+  userId: string,
+  slackAccountId: string,
+): Promise<SyncSourceResult> {
+  const supabase = createServiceClient();
+
+  // Fetch Slack account
+  const { data: account, error: acctError } = await supabase
+    .from('slack_accounts')
+    .select('*')
+    .eq('id', slackAccountId)
+    .eq('user_id', userId)
+    .single();
+
+  if (acctError || !account) {
+    return {
+      source: 'slack',
+      status: 'failed',
+      itemsProcessed: 0,
+      itemsCreated: 0,
+      itemsUpdated: 0,
+      error: `Slack account not found: ${acctError?.message ?? 'not found'}`,
+    };
+  }
+
+  // Create sync_run
+  const { data: syncRun, error: runError } = await supabase
+    .from('sync_runs')
+    .insert({
+      user_id: userId,
+      account_id: slackAccountId,
+      source: 'slack' as const,
+      status: 'running' as const,
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      cursor: null,
+      stats: {},
+      error: null,
+    })
+    .select()
+    .single();
+
+  if (runError || !syncRun) {
+    return {
+      source: 'slack',
+      status: 'failed',
+      itemsProcessed: 0,
+      itemsCreated: 0,
+      itemsUpdated: 0,
+      error: `Failed to create sync_run: ${runError?.message}`,
+    };
+  }
+
+  try {
+    // Get last cursor
+    const { data: lastRun } = await supabase
+      .from('sync_runs')
+      .select('cursor')
+      .eq('account_id', slackAccountId)
+      .eq('source', 'slack')
+      .eq('status', 'completed')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    const lastCursor = lastRun?.cursor ?? undefined;
+
+    const { items, nextCursor } = await fetchSlackMessages(
+      account.access_token,
+      '', // no refresh token for Slack
+      lastCursor,
+      50,
+      account.team_name,
+    );
+
+    const { created, updated } = await upsertItems(
+      supabase,
+      userId,
+      slackAccountId,
+      'slack',
+      items,
+    );
+
+    const stats = {
+      itemsProcessed: items.length,
+      itemsCreated: created,
+      itemsUpdated: updated,
+    };
+
+    await supabase
+      .from('sync_runs')
+      .update({
+        status: 'completed' as const,
+        cursor: nextCursor,
+        finished_at: new Date().toISOString(),
+        stats,
+      })
+      .eq('id', syncRun.id);
+
+    // Update last_sync_at
+    await supabase
+      .from('slack_accounts')
+      .update({ last_sync_at: new Date().toISOString() })
+      .eq('id', slackAccountId);
+
+    return { source: 'slack', status: 'completed', ...stats };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+
+    await supabase
+      .from('sync_runs')
+      .update({
+        status: 'failed' as const,
+        finished_at: new Date().toISOString(),
+        error: { message: errorMessage },
+      })
+      .eq('id', syncRun.id);
+
+    return {
+      source: 'slack',
+      status: 'failed',
+      itemsProcessed: 0,
+      itemsCreated: 0,
+      itemsUpdated: 0,
+      error: errorMessage,
+    };
+  }
 }
