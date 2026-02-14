@@ -31,12 +31,29 @@ export default async function DashboardPage() {
     .limit(5);
 
   // Count untriaged items (items not linked to any topic)
-  const { count: untriagedCount } = await supabase
+  const { data: allItems } = await supabase
     .from('items')
-    .select('id', { count: 'exact', head: true })
-    .not('id', 'in',
-      supabase.from('topic_links').select('item_id')
-    );
+    .select('id');
+
+  const { data: topicLinksData } = await supabase
+    .from('topic_links')
+    .select('item_id');
+
+  const linkedIds = new Set(
+    (topicLinksData ?? []).map((link: { item_id: string }) => link.item_id)
+  );
+
+  const untriagedCount = (allItems ?? []).filter(
+    (item: { id: string }) => !linkedIds.has(item.id)
+  ).length;
+
+  // Get recent items for dashboard feed (most recently synced, with occurred_at in past or today)
+  const { data: recentItems } = await supabase
+    .from('items')
+    .select('*')
+    .lte('occurred_at', new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
+    .order('occurred_at', { ascending: false })
+    .limit(10);
 
   return (
     <DashboardClient
@@ -44,7 +61,8 @@ export default async function DashboardPage() {
       tasks={tasks ?? []}
       accounts={accounts ?? []}
       recentSyncs={recentSyncs ?? []}
-      untriagedCount={untriagedCount ?? 0}
+      untriagedCount={untriagedCount}
+      recentItems={recentItems ?? []}
     />
   );
 }
