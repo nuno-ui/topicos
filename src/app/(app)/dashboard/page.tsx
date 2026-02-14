@@ -72,12 +72,13 @@ export default async function DashboardPage() {
     .order('started_at', { ascending: false })
     .limit(5);
 
-  // Fetch upcoming calendar events
+  // Fetch upcoming calendar events, excluding deleted
   const { data: upcomingEvents } = await supabase
     .from('items')
     .select('*')
     .eq('user_id', user.id)
     .eq('source', 'calendar')
+    .neq('triage_status', 'deleted')
     .gte('occurred_at', new Date().toISOString())
     .order('occurred_at', { ascending: true })
     .limit(5);
