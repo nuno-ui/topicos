@@ -81,8 +81,9 @@ export async function fetchSlackMessages(
 
   // 3. Fetch recent messages from each channel
   // For cursor-based incremental sync, use the cursor as "oldest" timestamp
-  // For first sync, look back 30 days
-  const oldest = cursor ?? Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000).toString();
+  // For first sync, look back 365 days to capture historical messages
+  const oldest = cursor ?? Math.floor((Date.now() - 365 * 24 * 60 * 60 * 1000) / 1000).toString();
+  console.log(`Slack: fetching messages older than ${new Date(parseInt(oldest) * 1000).toISOString()}`);
 
   for (const channel of memberChannels) {
     try {
@@ -93,6 +94,8 @@ export async function fetchSlackMessages(
       });
 
       const messages = historyRes.messages ?? [];
+      const subtypes = messages.map((m: { subtype?: string }) => m.subtype ?? 'normal');
+      console.log(`Slack: channel ${channel.name ?? channel.id} has ${messages.length} messages, subtypes: ${[...new Set(subtypes)].join(',')}`);
 
       for (const msg of messages) {
         // Skip system/join/leave messages
