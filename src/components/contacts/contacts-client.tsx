@@ -168,7 +168,7 @@ export function ContactsClient({ contacts: initialContacts, contactTopicsMap }: 
           <p className="font-medium text-foreground">No contacts found</p>
           <p className="mt-1 text-sm text-muted-foreground">
             {contacts.length === 0
-              ? 'Click "AI Extract Contacts" to discover contacts from your emails.'
+              ? 'Click "AI Extract Contacts" to discover contacts from your emails and Slack messages.'
               : 'Try adjusting your search or filters.'}
           </p>
         </div>
@@ -231,6 +231,16 @@ export function ContactsClient({ contacts: initialContacts, contactTopicsMap }: 
                           <Clock className="h-3 w-3" />
                           {formatLastInteraction(contact.last_interaction_at)}
                         </span>
+                        {/* Source indicator */}
+                        {(contact.metadata as Record<string, unknown>)?.source === 'slack' ? (
+                          <span className="flex items-center gap-0.5 rounded-md border border-purple-500/20 bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-400">
+                            Slack
+                          </span>
+                        ) : contact.email ? (
+                          <span className="flex items-center gap-0.5 rounded-md border border-red-500/20 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-400">
+                            Email
+                          </span>
+                        ) : null}
                       </div>
 
                       {/* Quick email button */}

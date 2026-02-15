@@ -71,14 +71,7 @@ export async function POST(request: Request) {
       accounts = data ?? [];
     }
 
-    if (accounts.length === 0) {
-      return NextResponse.json(
-        { error: 'No Google accounts connected' },
-        { status: 400 }
-      );
-    }
-
-    // Sync each account
+    // Sync each Google account
     const syncResults = [];
 
     for (const account of accounts) {
@@ -116,6 +109,13 @@ export async function POST(request: Request) {
           error: err instanceof Error ? err.message : 'Slack sync error',
         });
       }
+    }
+
+    if (syncResults.length === 0) {
+      return NextResponse.json(
+        { error: 'No accounts connected. Connect a Google or Slack account first.' },
+        { status: 400 }
+      );
     }
 
     // Return sync results (Curator is now manual-only via the Agents page)

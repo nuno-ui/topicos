@@ -38,7 +38,28 @@ export function SettingsClient({
   const [syncingAccount, setSyncingAccount] = useState<string | null>(null);
   const [indexingDepth, setIndexingDepth] = useState<'light' | 'medium' | 'full'>('medium');
   const [disconnectingSlack, setDisconnectingSlack] = useState<string | null>(null);
+  const [syncingSlack, setSyncingSlack] = useState<string | null>(null);
   const router = useRouter();
+
+  const handleSyncSlack = async (accountId: string) => {
+    setSyncingSlack(accountId);
+    try {
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Slack sync completed`);
+        router.refresh();
+      } else {
+        toast.error('Slack sync failed');
+      }
+    } catch {
+      toast.error('Network error during Slack sync');
+    } finally {
+      setSyncingSlack(null);
+    }
+  };
 
   const handleDisconnect = async (accountId: string) => {
     setDisconnecting(accountId);
@@ -238,6 +259,19 @@ export function SettingsClient({
 
                 <div className="flex items-center gap-2">
                   <button
+                    onClick={() => handleSyncSlack(account.id)}
+                    disabled={syncingSlack === account.id}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={cn(
+                        'h-3.5 w-3.5',
+                        syncingSlack === account.id && 'animate-spin'
+                      )}
+                    />
+                    {syncingSlack === account.id ? 'Syncing...' : 'Sync Now'}
+                  </button>
+                  <button
                     onClick={() => handleDisconnectSlack(account.id)}
                     disabled={disconnectingSlack === account.id}
                     className="flex items-center gap-1.5 rounded-md border border-red-500/20 px-3 py-1.5 text-xs font-medium text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50"
@@ -281,7 +315,9 @@ export function SettingsClient({
               <span>Stats</span>
             </div>
             {recentSyncs.map((run) => {
-              const account = googleAccounts.find((a) => a.id === run.account_id);
+              const googleAccount = googleAccounts.find((a) => a.id === run.account_id);
+              const slackAccount = slackAccounts.find((a) => a.id === run.account_id);
+              const accountLabel = googleAccount?.email ?? slackAccount?.team_name ?? run.account_id.slice(0, 8);
               return (
                 <div
                   key={run.id}
@@ -289,7 +325,7 @@ export function SettingsClient({
                 >
                   <span className="font-medium">{run.source}</span>
                   <span className="text-muted-foreground">
-                    {account?.email ?? run.account_id.slice(0, 8)}
+                    {accountLabel}
                   </span>
                   <span>
                     <span

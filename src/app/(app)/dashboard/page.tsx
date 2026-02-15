@@ -27,6 +27,11 @@ export default async function DashboardPage() {
     .select('id, email, last_sync_at')
     .eq('user_id', user.id);
 
+  const { data: slackAccounts } = await supabase
+    .from('slack_accounts')
+    .select('id, team_name, last_sync_at')
+    .eq('user_id', user.id);
+
   const { data: recentSyncs } = await supabase
     .from('sync_runs')
     .select('*')
@@ -88,6 +93,7 @@ export default async function DashboardPage() {
       topics={topics ?? []}
       tasks={tasks ?? []}
       accounts={accounts ?? []}
+      slackAccounts={slackAccounts ?? []}
       recentSyncs={recentSyncs ?? []}
       untriagedCount={untriagedCount}
       recentItems={recentItems ?? []}

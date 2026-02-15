@@ -58,6 +58,7 @@ interface DashboardClientProps {
   topics: Topic[];
   tasks: Task[];
   accounts: Pick<GoogleAccount, 'id' | 'email' | 'last_sync_at'>[];
+  slackAccounts?: { id: string; team_name: string; last_sync_at: string | null }[];
   recentSyncs: SyncRun[];
   untriagedCount: number;
   recentItems: Item[];
@@ -69,6 +70,7 @@ export function DashboardClient({
   topics,
   tasks,
   accounts,
+  slackAccounts = [],
   recentSyncs,
   untriagedCount,
   recentItems,
@@ -232,14 +234,14 @@ export function DashboardClient({
           </div>
           <p className="mt-1 text-2xl font-bold">{topics.length}</p>
         </Link>
-        <Link href="/inbox" className="rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/20">
+        <Link href="/emails" className="rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/20">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Clock className="h-4 w-4 text-warning" />
             Pending Tasks
           </div>
           <p className="mt-1 text-2xl font-bold">{tasks.length}</p>
         </Link>
-        <Link href="/inbox" className="rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/20 group">
+        <Link href="/emails" className="rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/20 group">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Inbox className="h-4 w-4 text-area-career" />
             Untriaged
@@ -256,7 +258,7 @@ export function DashboardClient({
             <Calendar className="h-4 w-4 text-area-personal" />
             Accounts
           </div>
-          <p className="mt-1 text-2xl font-bold">{accounts.length}</p>
+          <p className="mt-1 text-2xl font-bold">{accounts.length + slackAccounts.length}</p>
         </Link>
       </div>
 
@@ -348,14 +350,14 @@ export function DashboardClient({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Recent Activity</h2>
-              <Link href="/inbox" className="text-sm text-primary hover:underline">
-                View all in Inbox &rarr;
+              <Link href="/emails" className="text-sm text-primary hover:underline">
+                View all &rarr;
               </Link>
             </div>
             {recentItems.length === 0 ? (
               <div className="rounded-lg border border-border bg-card p-6 text-center text-muted-foreground">
                 <p>No items synced yet.</p>
-                <p className="mt-1 text-sm">Click &ldquo;Sync&rdquo; above to pull in your Gmail, Drive &amp; Calendar.</p>
+                <p className="mt-1 text-sm">Click &ldquo;Sync&rdquo; above to pull in your Gmail, Calendar, Drive &amp; Slack data.</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -475,24 +477,42 @@ export function DashboardClient({
           {/* Sync Status */}
           <div className="space-y-3">
             <h2 className="text-lg font-semibold">Sync Status</h2>
-            {accounts.length === 0 ? (
+            {accounts.length === 0 && slackAccounts.length === 0 ? (
               <div className="rounded-lg border border-border bg-card p-4 text-center text-sm text-muted-foreground">
                 <p>No accounts connected</p>
                 <Link href="/settings" className="mt-1 inline-block text-primary hover:underline">
-                  Connect Google
+                  Connect an account
                 </Link>
               </div>
             ) : (
-              accounts.map((acc) => (
-                <div key={acc.id} className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
-                  <span className="text-sm truncate">{acc.email}</span>
-                  <span className="text-xs text-muted-foreground shrink-0 ml-2">
-                    {acc.last_sync_at
-                      ? formatRelativeTime(acc.last_sync_at)
-                      : 'Never'}
-                  </span>
-                </div>
-              ))
+              <>
+                {accounts.map((acc) => (
+                  <div key={acc.id} className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Mail className="h-3.5 w-3.5 shrink-0 text-red-400" />
+                      <span className="text-sm truncate">{acc.email}</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0 ml-2">
+                      {acc.last_sync_at
+                        ? formatRelativeTime(acc.last_sync_at)
+                        : 'Never'}
+                    </span>
+                  </div>
+                ))}
+                {slackAccounts.map((acc) => (
+                  <div key={acc.id} className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <MessageSquare className="h-3.5 w-3.5 shrink-0 text-purple-400" />
+                      <span className="text-sm truncate">{acc.team_name}</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0 ml-2">
+                      {acc.last_sync_at
+                        ? formatRelativeTime(acc.last_sync_at)
+                        : 'Never'}
+                    </span>
+                  </div>
+                ))}
+              </>
             )}
           </div>
         </div>

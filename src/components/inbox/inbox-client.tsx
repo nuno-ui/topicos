@@ -580,26 +580,37 @@ export function InboxClient({
       {/* Items list */}
       <div className="space-y-2">
         {displayItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-card py-16 text-center">
-            <Inbox className="mb-3 h-10 w-10 text-muted-foreground" />
-            <p className="font-medium text-foreground">
-              {items.length === 0 ? 'No items yet' : 'No matching items'}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {items.length === 0
-                ? 'Sync your accounts to import emails, events, and files.'
-                : 'Try adjusting your filters or search.'}
-            </p>
-            {items.length === 0 && (
-              <a
-                href="/settings"
-                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Connect &amp; Sync
-              </a>
-            )}
-          </div>
+          (() => {
+            const source = defaultSource ?? activeTab;
+            const emptyMessages: Record<string, { title: string; desc: string }> = {
+              gmail: { title: 'No emails yet', desc: 'Connect your Google account and run a sync to import emails.' },
+              calendar: { title: 'No events yet', desc: 'Connect your Google account and run a sync to import calendar events.' },
+              drive: { title: 'No files yet', desc: 'Connect your Google account and run a sync to import Drive files.' },
+              slack: { title: 'No Slack messages yet', desc: 'Connect a Slack workspace and run a sync to import channel messages.' },
+              manual: { title: 'No notes yet', desc: 'Use the Paste-In feature on the dashboard to create notes.' },
+              all: { title: 'No items yet', desc: 'Sync your accounts to import emails, events, files, and messages.' },
+            };
+            const msg = items.length === 0
+              ? (emptyMessages[source] ?? emptyMessages.all)
+              : { title: 'No matching items', desc: 'Try adjusting your filters or search.' };
+            const EmptyIcon = source !== 'all' && SOURCE_ICONS[source as ItemSource] ? SOURCE_ICONS[source as ItemSource] : Inbox;
+            return (
+              <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-card py-16 text-center">
+                <EmptyIcon className="mb-3 h-10 w-10 text-muted-foreground" />
+                <p className="font-medium text-foreground">{msg.title}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{msg.desc}</p>
+                {items.length === 0 && (
+                  <a
+                    href="/settings"
+                    className="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Connect &amp; Sync
+                  </a>
+                )}
+              </div>
+            );
+          })()
         ) : (
           displayItems.map((item, index) => {
             const SourceIcon = SOURCE_ICONS[item.source];
@@ -611,6 +622,10 @@ export function InboxClient({
             const accountEmail = item.account_id ? accountMap[item.account_id] : null;
             const triage = triageStatusLabel(item.triage_status);
             const isLinkedToTopic = linkedIds.has(item.id);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const meta = item.metadata as any;
+            const emailDirection = item.source === 'gmail' && meta?.direction ? meta.direction : null;
+            const slackChannel = item.source === 'slack' && meta?.channel_name ? meta.channel_name : null;
 
             return (
               <div
@@ -691,6 +706,23 @@ export function InboxClient({
                     >
                       {SOURCE_LABELS[item.source]}
                     </span>
+                    {/* Email direction badge */}
+                    {emailDirection && (
+                      <span className={cn(
+                        'rounded-md border px-1.5 py-0.5 text-[10px] font-medium',
+                        emailDirection === 'sent'
+                          ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                          : 'bg-green-500/10 text-green-400 border-green-500/20'
+                      )}>
+                        {emailDirection === 'sent' ? 'Sent' : 'Received'}
+                      </span>
+                    )}
+                    {/* Slack channel badge */}
+                    {slackChannel && (
+                      <span className="rounded-md border border-purple-500/20 bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-400">
+                        #{slackChannel}
+                      </span>
+                    )}
                     {/* Triage status badge */}
                     <span
                       className={cn(
