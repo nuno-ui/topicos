@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Search, LayoutDashboard, FolderKanban, Users, Settings, Brain,
-  Sparkles, RefreshCw, Command, X, Zap, ArrowRight
+  Sparkles, RefreshCw, Command, X, Zap, ArrowRight, StickyNote
 } from 'lucide-react';
 
 interface CommandItem {
@@ -34,6 +34,16 @@ export function CommandPalette() {
     { id: 'suggest', label: 'AI Suggest Topics', description: 'Get AI-generated topic ideas', icon: Sparkles, category: 'ai', action: () => runAiAgent('suggest_topics') },
     { id: 'review', label: 'Weekly Review', description: 'Reflect on your productivity', icon: Zap, category: 'ai', action: () => runAiAgent('weekly_review') },
     { id: 'sync', label: 'Sync All Sources', description: 'Pull latest from Gmail, Slack, etc.', icon: RefreshCw, category: 'action', action: () => runSync() },
+    {
+      id: 'add_note',
+      label: 'Add Note',
+      description: 'Create a new note on the current topic',
+      icon: StickyNote,
+      category: 'action',
+      action: () => {
+        window.dispatchEvent(new CustomEvent('topicos:add-note'));
+      },
+    },
   ];
 
   const filteredCommands = query.trim()

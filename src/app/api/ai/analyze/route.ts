@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { callClaude } from '@/lib/ai/provider';
+import { getTopicNoteContext } from '@/lib/ai/note-context';
 
 export async function POST(request: Request) {
   try {
@@ -18,17 +19,13 @@ export async function POST(request: Request) {
 
     const { data: items } = await supabase.from('topic_items').select('*').eq('topic_id', topic_id).order('occurred_at', { ascending: false });
 
-    if (!items || items.length === 0) {
-      return NextResponse.json({ analysis: 'No items linked to this topic yet. Search and link some items to get AI-powered insights.' });
-    }
-
     // Get contacts linked to this topic
     const { data: contactLinks } = await supabase
       .from('contact_topic_links')
       .select('contact_id, role, contacts(name, email, organization)')
       .eq('topic_id', topic_id);
 
-    const system = `You are a brilliant executive assistant analyzing a topic/project and its linked communications, events, and files. Provide actionable intelligence.
+    const system = `You are a brilliant executive assistant analyzing a topic/project and its linked communications, events, and files. Provide actionable intelligence. The topic may include user-written notes that provide direct context, decisions, and observations. Give these notes high importance as they represent the user's own knowledge and perspective.
 
 Your analysis MUST include these sections:
 
@@ -72,6 +69,12 @@ Be specific and reference actual items. Use bullet points. Keep it concise but t
         }).join('\n')
       : '';
 
+    const noteContext = await getTopicNoteContext(topic_id);
+
+    if ((!items || items.length === 0) && !noteContext) {
+      return NextResponse.json({ analysis: 'No items or notes linked to this topic yet. Add notes or search and link items to get AI-powered insights.' });
+    }
+
     const prompt = `Topic: ${topic.title}
 Description: ${topic.description || 'No description provided'}
 Area: ${topic.area}
@@ -79,8 +82,9 @@ Status: ${topic.status}
 Tags: ${(topic.tags || []).join(', ') || 'None'}
 Due date: ${topic.due_date || 'Not set'}
 ${contactsList}
+${noteContext}
 
-Linked Items (${items.length} total):
+Linked Items (${(items || []).length} total):
 ${itemsList}
 
 ${question ? `\nSpecific question: ${question}` : ''}`;
@@ -99,7 +103,7 @@ ${question ? `\nSpecific question: ${question}` : ''}`;
       topic_id: topic.id,
       kind: 'analyze_topic',
       model: 'claude-sonnet-4-5-20250929',
-      input_summary: `Analyzed "${topic.title}" with ${items.length} linked items`,
+      input_summary: `Analyzed "${topic.title}" with ${(items || []).length} linked items`,
       output_json: { analysis_length: text.length },
       tokens_used: tokensUsed,
     });

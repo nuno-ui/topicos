@@ -17,7 +17,8 @@ export async function searchGmail(
   query: string,
   maxResults: number = 20
 ): Promise<SearchResult[]> {
-  const url = GMAIL_API + '?q=' + encodeURIComponent(query) + '&maxResults=' + maxResults;
+  // Search across ALL labels (inbox, sent, drafts, etc.) — no labelIds filter
+  const url = GMAIL_API + '?q=' + encodeURIComponent(query) + '&maxResults=' + maxResults + '&includeSpamTrash=false';
   const authHeader = { Authorization: 'Bearer ' + accessToken };
   const listRes = await fetch(url, { headers: authHeader });
   const listData = await listRes.json();
@@ -44,9 +45,15 @@ export async function searchGmail(
         source_account_id: accountId,
         title: gh('Subject') || '(No subject)',
         snippet: msg.snippet ?? '',
-        url: 'https://mail.google.com/mail/#inbox/' + msg.id,
+        url: 'https://mail.google.com/mail/#all/' + msg.id,
         occurred_at: gh('Date') ? new Date(gh('Date')).toISOString() : new Date(parseInt(msg.internalDate)).toISOString(),
-        metadata: { from: gh('From'), to: gh('To'), labels: msg.labelIds ?? [], threadId: msg.threadId },
+        metadata: {
+          from: gh('From'),
+          to: gh('To'),
+          labels: msg.labelIds ?? [],
+          threadId: msg.threadId,
+          is_sent: (msg.labelIds ?? []).includes('SENT'),
+        },
       });
     }
   }

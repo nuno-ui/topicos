@@ -1,9 +1,11 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { sourceIcon, sourceLabel, formatRelativeDate } from '@/lib/utils';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { NoteEditor } from './note-editor';
+import { NoteCard } from './note-card';
 import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp } from 'lucide-react';
 
 interface TopicItem {
@@ -62,7 +64,7 @@ interface Topic {
   updated_at: string;
 }
 
-const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion'] as const;
+const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion', 'manual'] as const;
 
 export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topic; initialItems: TopicItem[] }) {
   const router = useRouter();
@@ -119,6 +121,17 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   const [showExtractedContacts, setShowExtractedContacts] = useState(false);
   const [threadSummary, setThreadSummary] = useState<string | null>(null);
   const [showThreadSummary, setShowThreadSummary] = useState(false);
+
+  // Note editor state
+  const [showNoteEditor, setShowNoteEditor] = useState(false);
+  const [editingNote, setEditingNote] = useState<Record<string, unknown> | null>(null);
+
+  // Listen for command palette "add note" event
+  useEffect(() => {
+    const handler = () => setShowNoteEditor(true);
+    window.addEventListener('topicos:add-note', handler);
+    return () => window.removeEventListener('topicos:add-note', handler);
+  }, []);
 
   // Run an AI agent
   const runAgent = async (agent: string) => {
@@ -553,6 +566,10 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         </div>
         {!editing && (
           <div className="flex gap-2">
+            <button onClick={() => setShowNoteEditor(true)}
+              className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Add Note">
+              <StickyNote className="w-4 h-4" />
+            </button>
             <button onClick={() => { navigator.clipboard.writeText(window.location.href); toast.success('Link copied to clipboard'); }}
               className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Copy link">
               <Link2 className="w-4 h-4" />
@@ -938,6 +955,10 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-gray-900">Linked Items ({items.length})</h2>
+          <button onClick={() => setShowNoteEditor(true)}
+            className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors flex items-center gap-1.5">
+            <StickyNote className="w-3.5 h-3.5" /> Add Note
+          </button>
         </div>
         {/* Source tabs */}
         <div className="flex gap-1 mb-4 flex-wrap">
@@ -969,37 +990,46 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         ) : (
           <div className="space-y-2">
             {filteredItems.map((item) => (
-              <div key={item.id} className="flex items-start gap-3 p-3 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-sm shadow-sm transition-colors group">
-                <span className="mt-0.5 text-base">{sourceIcon(item.source)}</span>
-                <div className="flex-1 min-w-0">
-                  <a href={item.url} target="_blank" rel="noopener noreferrer"
-                    className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate block">
-                    {item.title}
-                  </a>
-                  {item.snippet && (
-                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.snippet}</p>
-                  )}
-                  <div className="flex gap-2 mt-1 text-xs text-gray-400">
-                    <span>{sourceLabel(item.source)}</span>
-                    <span>{formatRelativeDate(item.occurred_at)}</span>
-                    {item.linked_by === 'ai' && (
-                      <span className="text-purple-500 flex items-center gap-0.5">
-                        <Sparkles className="w-3 h-3" /> AI linked
-                      </span>
+              item.source === 'manual' ? (
+                <NoteCard
+                  key={item.id}
+                  item={item as any}
+                  onEdit={(note) => setEditingNote(note as any)}
+                  onDelete={(itemId) => unlinkItem(itemId)}
+                />
+              ) : (
+                <div key={item.id} className="flex items-start gap-3 p-3 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-sm shadow-sm transition-colors group">
+                  <span className="mt-0.5 text-base">{sourceIcon(item.source)}</span>
+                  <div className="flex-1 min-w-0">
+                    <a href={item.url} target="_blank" rel="noopener noreferrer"
+                      className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate block">
+                      {item.title}
+                    </a>
+                    {item.snippet && (
+                      <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.snippet}</p>
                     )}
+                    <div className="flex gap-2 mt-1 text-xs text-gray-400">
+                      <span>{sourceLabel(item.source)}</span>
+                      <span>{formatRelativeDate(item.occurred_at)}</span>
+                      {item.linked_by === 'ai' && (
+                        <span className="text-purple-500 flex items-center gap-0.5">
+                          <Sparkles className="w-3 h-3" /> AI linked
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <a href={item.url} target="_blank" rel="noopener noreferrer"
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Open in source">
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                    <button onClick={() => unlinkItem(item.id)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Unlink from topic">
+                      <Unlink className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <a href={item.url} target="_blank" rel="noopener noreferrer"
-                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Open in source">
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                  <button onClick={() => unlinkItem(item.id)}
-                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Unlink from topic">
-                    <Unlink className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
+              )
             ))}
           </div>
         )}
@@ -1205,7 +1235,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <StickyNote className="w-4 h-4 text-amber-500" />
-            Notes
+            Quick Notes
+            <span className="text-xs text-gray-400 font-normal ml-1">(included in AI analysis)</span>
           </h2>
           <button onClick={saveNotes} disabled={notesSaving}
             className="px-3 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-100 disabled:opacity-50 flex items-center gap-1.5">
@@ -1222,6 +1253,25 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
           />
         </div>
       </div>
+
+      {/* Note Editor Dialog */}
+      {(showNoteEditor || editingNote) && (
+        <NoteEditor
+          topicId={topic.id}
+          note={editingNote as any || undefined}
+          onSave={(item) => {
+            const fullItem = item as unknown as TopicItem;
+            if (editingNote) {
+              setItems(prev => prev.map(i => i.id === fullItem.id ? fullItem : i));
+            } else {
+              setItems(prev => [fullItem, ...prev]);
+            }
+            setShowNoteEditor(false);
+            setEditingNote(null);
+          }}
+          onClose={() => { setShowNoteEditor(false); setEditingNote(null); }}
+        />
+      )}
     </div>
   );
 }

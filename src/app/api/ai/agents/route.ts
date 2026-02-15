@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { callClaude, callClaudeJSON } from '@/lib/ai/provider';
+import { getTopicNoteContext } from '@/lib/ai/note-context';
 
 export async function POST(request: Request) {
   try {
@@ -23,10 +24,11 @@ export async function POST(request: Request) {
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet').eq('topic_id', topic_id).limit(20);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ tags: string[]; area: string; priority: number }>(
           'Generate relevant tags, suggest the best area (work/personal/career), and priority (1-5) for this topic. Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "priority": 1-5 }',
-          `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string }) => `[${i.source}] ${i.title}`).join('\n')}`
+          `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string }) => `[${i.source}] ${i.title}`).join('\n')}\n${noteContext}`
         );
 
         await supabase.from('topics').update({
@@ -46,10 +48,11 @@ export async function POST(request: Request) {
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         const { data: items } = await supabase.from('topic_items').select('title, source').eq('topic_id', topic_id).limit(10);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ suggestions: string[] }>(
           'Suggest 3 clear, concise titles for this topic based on its content. Return JSON: { "suggestions": ["Title 1", "Title 2", "Title 3"] }',
-          `Current: ${topic.title}\nDescription: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string }) => `[${i.source}] ${i.title}`).join('\n')}`
+          `Current: ${topic.title}\nDescription: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string }) => `[${i.source}] ${i.title}`).join('\n')}\n${noteContext}`
         );
 
         result = { suggestions: data.suggestions };
@@ -62,10 +65,11 @@ export async function POST(request: Request) {
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet').eq('topic_id', topic_id).limit(15);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const noteContext = await getTopicNoteContext(topic_id);
 
         const { text } = await callClaude(
           'Write a concise but comprehensive description (2-4 sentences) for this topic/project that captures its essence, key participants, and objectives.',
-          `Topic: ${topic.title}\nCurrent description: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string }) => `[${i.source}] ${i.title}: ${i.snippet || ''}`).join('\n')}`
+          `Topic: ${topic.title}\nCurrent description: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string }) => `[${i.source}] ${i.title}: ${i.snippet || ''}`).join('\n')}\n${noteContext}`
         );
 
         result = { description: text };
@@ -78,13 +82,14 @@ export async function POST(request: Request) {
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, metadata').eq('topic_id', topic_id).limit(20);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ action_items: Array<{ task: string; assignee: string; due: string; priority: string }> }>(
           'Extract all action items, tasks, and commitments from these communications. Return JSON: { "action_items": [{ "task": "...", "assignee": "person or unknown", "due": "date or TBD", "priority": "high|medium|low" }] }',
           `Topic: ${topic.title}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; metadata: Record<string, unknown> }) => {
             const meta = i.metadata || {};
             return `[${i.source}] ${i.title}\n${i.snippet || ''}\nFrom: ${meta.from || 'unknown'}\nTo: ${meta.to || 'unknown'}`;
-          }).join('\n---\n')}`
+          }).join('\n---\n')}\n${noteContext}`
         );
 
         result = { action_items: data.action_items };
@@ -97,13 +102,14 @@ export async function POST(request: Request) {
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         const { data: items } = await supabase.from('topic_items').select('*').eq('topic_id', topic_id).order('occurred_at', { ascending: true }).limit(30);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const noteContext = await getTopicNoteContext(topic_id);
 
         const { text } = await callClaude(
-          'Create a chronological executive summary of this topic\'s communications. Highlight key decisions, commitments, and open questions. Be concise but thorough.',
+          'Create a chronological executive summary of this topic\'s communications and notes. Highlight key decisions, commitments, and open questions. Be concise but thorough.',
           `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\n\nCommunications (chronological):\n${(items || []).map((i: Record<string, unknown>) => {
             const meta = i.metadata as Record<string, unknown> || {};
             return `[${i.occurred_at}] [${i.source}] ${i.title}\n${i.snippet || ''}\nFrom: ${meta.from || ''} To: ${meta.to || ''}`;
-          }).join('\n---\n')}`
+          }).join('\n---\n')}\n${noteContext}`
         );
 
         result = { summary: text };
@@ -228,13 +234,14 @@ export async function POST(request: Request) {
         const { topic_id } = context;
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, metadata')
           .eq('topic_id', topic_id).limit(20);
+        const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ contacts: Array<{ name: string; email: string; role: string }> }>(
           'Extract all people mentioned in these communications. Return JSON: { "contacts": [{ "name": "Full Name", "email": "email@example.com", "role": "their apparent role" }] }',
           `Items:\n${(items || []).map((i: Record<string, unknown>) => {
             const meta = i.metadata as Record<string, unknown> || {};
             return `[${i.source}] ${i.title}\nFrom: ${meta.from || ''}\nTo: ${meta.to || ''}\nAttendees: ${(meta.attendees as string[] || []).join(', ')}`;
-          }).join('\n---\n')}`
+          }).join('\n---\n')}\n${noteContext}`
         );
 
         result = { contacts: data.contacts };

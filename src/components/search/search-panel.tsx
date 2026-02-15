@@ -35,7 +35,7 @@ interface CategorizedResult {
   confidence: number;
 }
 
-const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion'] as const;
+const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion', 'manual'] as const;
 
 const SORT_OPTIONS = [
   { value: 'relevance', label: 'Relevance' },
@@ -80,6 +80,11 @@ export function SearchPanel() {
 
   // Expanded result preview
   const [expandedResult, setExpandedResult] = useState<string | null>(null);
+
+  // Multi-select state
+  const [selectedResults, setSelectedResults] = useState<Set<string>>(new Set());
+  const [batchLinking, setBatchLinking] = useState(false);
+  const [batchTopicId, setBatchTopicId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/topics').then(r => r.json()).then(data => {
@@ -152,6 +157,7 @@ export function SearchPanel() {
         allItems.push(...(src.items ?? []));
       }
       setResults(allItems);
+      setSelectedResults(new Set());
       setCategorized([]);
       setShowCategorized(false);
       setSearchSummary(null);
@@ -255,6 +261,62 @@ export function SearchPanel() {
       try { localStorage.setItem('topicos_saved_searches', JSON.stringify(next)); } catch {}
       return next;
     });
+  };
+
+  const toggleResultSelection = (key: string) => {
+    setSelectedResults(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const selectAllResults = () => {
+    const allKeys = sortedResults.filter(r => !r.already_linked).map(r => r.source + ':' + r.external_id);
+    setSelectedResults(new Set(allKeys));
+  };
+
+  const clearSelection = () => {
+    setSelectedResults(new Set());
+    setBatchTopicId(null);
+  };
+
+  const batchLinkToTopic = async (topicId: string) => {
+    const toLink = sortedResults.filter(r =>
+      selectedResults.has(r.source + ':' + r.external_id) && !r.already_linked
+    );
+    if (toLink.length === 0) { toast.error('No new items selected'); return; }
+    setBatchLinking(true);
+    let linked = 0;
+    for (const result of toLink) {
+      try {
+        const res = await fetch(`/api/topics/${topicId}/items`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            external_id: result.external_id,
+            source: result.source,
+            source_account_id: result.source_account_id,
+            title: result.title,
+            snippet: result.snippet,
+            url: result.url,
+            occurred_at: result.occurred_at,
+            metadata: result.metadata,
+            linked_by: 'user',
+          }),
+        });
+        if (res.ok) linked++;
+      } catch { /* continue */ }
+    }
+    setResults(prev => prev.map(r =>
+      selectedResults.has(r.source + ':' + r.external_id) ? { ...r, already_linked: true } : r
+    ));
+    setSelectedResults(new Set());
+    setBatchTopicId(null);
+    setBatchLinking(false);
+    const topic = topics.find(t => t.id === topicId);
+    toast.success(`Linked ${linked} item${linked !== 1 ? 's' : ''} to "${topic?.title || 'topic'}"`);
   };
 
   // ========== AI AGENT FUNCTIONS ==========
@@ -564,6 +626,37 @@ export function SearchPanel() {
         </div>
       )}
 
+      {selectedResults.size > 0 && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-3 animate-slide-up">
+          <span className="text-sm font-medium text-blue-700">{selectedResults.size} selected</span>
+          <div className="flex-1 flex items-center gap-2">
+            <select
+              value={batchTopicId || ''}
+              onChange={(e) => setBatchTopicId(e.target.value || null)}
+              className="px-3 py-1.5 border border-blue-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[250px]"
+            >
+              <option value="">Select topic...</option>
+              {topics.map(t => (
+                <option key={t.id} value={t.id}>{t.title}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => batchTopicId && batchLinkToTopic(batchTopicId)}
+              disabled={!batchTopicId || batchLinking}
+              className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+            >
+              {batchLinking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+              Link Selected
+            </button>
+          </div>
+          <div className="flex gap-1">
+            <button onClick={selectAllResults} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Select all</button>
+            <span className="text-blue-300">|</span>
+            <button onClick={clearSelection} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Clear</button>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-2">
         {sortedResults.map((item, index) => {
           const key = item.source + ':' + item.external_id;
@@ -573,13 +666,26 @@ export function SearchPanel() {
               item.already_linked ? 'border-green-200 bg-green-50/50' : 'border-gray-200 hover:border-gray-300'
             }`}>
               <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={selectedResults.has(key)}
+                  onChange={() => toggleResultSelection(key)}
+                  className="mt-1.5 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
+                />
                 <span className="mt-0.5 text-base">{sourceIcon(item.source)}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <a href={item.url} target="_blank" rel="noopener noreferrer"
-                      className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate">
-                      {item.title}
-                    </a>
+                    {item.source === 'manual' ? (
+                      <span onClick={() => window.location.href = item.url}
+                        className="font-medium text-gray-900 hover:text-green-600 text-sm truncate cursor-pointer">
+                        {item.title}
+                      </span>
+                    ) : (
+                      <a href={item.url} target="_blank" rel="noopener noreferrer"
+                        className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate">
+                        {item.title}
+                      </a>
+                    )}
                     {item.already_linked && (
                       <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium flex-shrink-0">Linked</span>
                     )}
@@ -622,10 +728,12 @@ export function SearchPanel() {
                   )}
                 </div>
                 <div className="flex gap-1.5 items-center flex-shrink-0">
-                  <a href={item.url} target="_blank" rel="noopener noreferrer"
-                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
-                    <ExternalLink className="w-4 h-4" />
-                  </a>
+                  {item.source !== 'manual' && (
+                    <a href={item.url} target="_blank" rel="noopener noreferrer"
+                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  )}
                   {!item.already_linked && (
                     <div className="relative">
                       <button

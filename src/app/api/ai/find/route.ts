@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { callClaudeJSON } from '@/lib/ai/provider';
 import { searchAllSources } from '@/lib/search';
+import { getTopicNoteContext } from '@/lib/ai/note-context';
 
 export async function POST(request: Request) {
   try {
@@ -18,6 +19,8 @@ export async function POST(request: Request) {
     if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
 
     const { data: existingItems } = await supabase.from('topic_items').select('title, source, external_id').eq('topic_id', topic_id);
+
+    const noteContext = await getTopicNoteContext(topic_id);
 
     // 2. Generate search queries using AI
     const system = `You are a search query generator. Given a topic/project description, generate optimal search queries for each data source to find relevant communications, events, and files.
@@ -42,7 +45,8 @@ Return JSON format:
 Description: ${topic.description || 'No description'}
 Area: ${topic.area}
 Tags: ${(topic.tags || []).join(', ') || 'None'}
-${existingItems && existingItems.length > 0 ? `\nAlready linked items:\n${existingItems.map((i: { title: string; source: string }) => `- [${i.source}] ${i.title}`).join('\n')}` : ''}`;
+${existingItems && existingItems.length > 0 ? `\nAlready linked items:\n${existingItems.map((i: { title: string; source: string }) => `- [${i.source}] ${i.title}`).join('\n')}` : ''}
+${noteContext}`;
 
     const { data: queries } = await callClaudeJSON<{
       gmail_queries: string[];

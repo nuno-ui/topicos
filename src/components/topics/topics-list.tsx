@@ -3,7 +3,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { formatRelativeDate, sourceIcon } from '@/lib/utils';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote } from 'lucide-react';
 import Link from 'next/link';
 
 interface Topic {
@@ -392,6 +392,11 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                 {t.summary && (
                   <span className="flex items-center gap-1 text-purple-500">
                     <Sparkles className="w-3 h-3" /> Analyzed
+                  </span>
+                )}
+                {t.notes && (
+                  <span className="text-xs text-green-500 flex items-center gap-1">
+                    <StickyNote className="w-3 h-3" /> Notes
                   </span>
                 )}
                 {t.progress_percent != null && (
