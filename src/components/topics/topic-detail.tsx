@@ -4,7 +4,7 @@ import { sourceIcon, sourceLabel, formatRelativeDate } from '@/lib/utils';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2 } from 'lucide-react';
+import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare } from 'lucide-react';
 
 interface TopicItem {
   id: string;
@@ -53,7 +53,7 @@ interface Topic {
   stakeholders: string[];
 }
 
-const SOURCES = ['gmail', 'calendar', 'drive', 'slack'] as const;
+const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion'] as const;
 
 export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topic; initialItems: TopicItem[] }) {
   const router = useRouter();
@@ -96,6 +96,9 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
   // Linking state
   const [linkingItems, setLinkingItems] = useState(false);
+
+  // AI Question state
+  const [aiQuestion, setAiQuestion] = useState('');
 
   // --- SEARCH ---
   const handleSearch = async () => {
@@ -307,7 +310,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   };
 
   // --- AI ANALYSIS ---
-  const runAnalysis = async () => {
+  const runAnalysis = async (question?: string) => {
     if (items.length === 0) {
       toast.error('Link some items first to run AI analysis');
       return;
@@ -318,16 +321,36 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       const res = await fetch('/api/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic_id: topic.id }),
+        body: JSON.stringify({ topic_id: topic.id, question: question || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setAnalysis(data.analysis);
-      toast.success('AI analysis complete');
+      setAiQuestion('');
+      toast.success(question ? 'AI answered your question' : 'AI analysis complete');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Analysis failed');
     }
     setAnalysisLoading(false);
+  };
+
+  // --- SELECT ALL ---
+  const selectAllSearch = () => {
+    const linkable = searchResults.filter(r => !r.already_linked);
+    if (selectedResults.size === linkable.length) {
+      setSelectedResults(new Set());
+    } else {
+      setSelectedResults(new Set(linkable.map(r => r.source + ':' + r.external_id)));
+    }
+  };
+
+  const selectAllAi = () => {
+    const linkable = aiFindResults.filter(r => !r.already_linked);
+    if (selectedAiResults.size === linkable.length) {
+      setSelectedAiResults(new Set());
+    } else {
+      setSelectedAiResults(new Set(linkable.map(r => r.source + ':' + r.external_id)));
+    }
   };
 
   // Filtered items by tab
@@ -504,9 +527,19 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       {searchResults.length > 0 && (
         <div className="bg-white rounded-lg border border-blue-200">
           <div className="px-4 py-3 border-b border-blue-100 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-700">
-              Search Results ({searchResults.length})
-            </h3>
+            <div className="flex items-center gap-3">
+              <h3 className="text-sm font-semibold text-gray-700">
+                Search Results ({searchResults.length})
+              </h3>
+              {searchResults.filter(r => !r.already_linked).length > 0 && (
+                <button onClick={selectAllSearch}
+                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                  {selectedResults.size === searchResults.filter(r => !r.already_linked).length
+                    ? <><CheckSquare className="w-3 h-3" /> Deselect All</>
+                    : <><Square className="w-3 h-3" /> Select All</>}
+                </button>
+              )}
+            </div>
             {selectedResults.size > 0 && (
               <button onClick={linkSelectedSearch} disabled={linkingItems}
                 className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
@@ -552,11 +585,21 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       {showAiResults && (
         <div className="bg-white rounded-lg border border-purple-200">
           <div className="px-4 py-3 border-b border-purple-100 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-purple-500" />
-              AI Find Results
-              {aiFindLoading && <Loader2 className="w-4 h-4 animate-spin text-purple-500" />}
-            </h3>
+            <div className="flex items-center gap-3">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-purple-500" />
+                AI Find Results
+                {aiFindLoading && <Loader2 className="w-4 h-4 animate-spin text-purple-500" />}
+              </h3>
+              {aiFindResults.filter(r => !r.already_linked).length > 0 && !aiFindLoading && (
+                <button onClick={selectAllAi}
+                  className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1">
+                  {selectedAiResults.size === aiFindResults.filter(r => !r.already_linked).length
+                    ? <><CheckSquare className="w-3 h-3" /> Deselect All</>
+                    : <><Square className="w-3 h-3" /> Select All</>}
+                </button>
+              )}
+            </div>
             {selectedAiResults.size > 0 && (
               <button onClick={linkSelectedAi} disabled={linkingItems}
                 className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5">
@@ -688,7 +731,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             <Bot className="w-4 h-4 text-purple-500" />
             Topic Intelligence
           </h2>
-          <button onClick={runAnalysis} disabled={analysisLoading}
+          <button onClick={() => runAnalysis()} disabled={analysisLoading}
             className="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 flex items-center gap-1.5">
             {analysisLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
             {analysis ? 'Refresh' : 'Run'} Analysis
@@ -698,15 +741,28 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
           {analysisLoading ? (
             <div className="flex items-center gap-3 py-6 justify-center">
               <Loader2 className="w-5 h-5 animate-spin text-purple-500" />
-              <span className="text-sm text-gray-500">Analyzing linked items...</span>
+              <span className="text-sm text-gray-500">
+                {aiQuestion ? 'Answering your question...' : 'Analyzing linked items...'}
+              </span>
             </div>
           ) : analysis ? (
             <div className="prose prose-sm max-w-none text-gray-700">
-              {analysis.split('\n').map((line, i) => (
-                <p key={i} className={line.startsWith('#') ? 'font-semibold text-gray-900 mt-3' : 'mt-1'}>
-                  {line}
-                </p>
-              ))}
+              {analysis.split('\n').map((line, i) => {
+                if (line.startsWith('## ')) {
+                  return <h3 key={i} className="font-bold text-gray-900 mt-4 mb-2 text-base">{line.replace('## ', '')}</h3>;
+                }
+                if (line.startsWith('# ')) {
+                  return <h2 key={i} className="font-bold text-gray-900 mt-3 mb-2 text-lg">{line.replace('# ', '')}</h2>;
+                }
+                if (line.startsWith('- ') || line.startsWith('* ')) {
+                  return <li key={i} className="ml-4 text-sm text-gray-700 mt-0.5">{line.slice(2)}</li>;
+                }
+                if (line.startsWith('**') && line.endsWith('**')) {
+                  return <p key={i} className="font-semibold text-gray-800 mt-2">{line.replace(/\*\*/g, '')}</p>;
+                }
+                if (line.trim() === '') return <br key={i} />;
+                return <p key={i} className="text-sm text-gray-700 mt-1">{line}</p>;
+              })}
             </div>
           ) : (
             <p className="text-sm text-gray-400 text-center py-4">
@@ -714,6 +770,33 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                 ? 'Click "Run Analysis" to get AI-powered insights about this topic'
                 : 'Link some items first, then run AI analysis for insights'}
             </p>
+          )}
+
+          {/* Ask AI a question */}
+          {items.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex gap-2">
+                <div className="flex-1 relative">
+                  <MessageSquare className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={aiQuestion}
+                    onChange={e => setAiQuestion(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && aiQuestion.trim() && runAnalysis(aiQuestion)}
+                    placeholder="Ask AI a question about this topic..."
+                    className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    disabled={analysisLoading}
+                  />
+                </div>
+                <button
+                  onClick={() => aiQuestion.trim() && runAnalysis(aiQuestion)}
+                  disabled={analysisLoading || !aiQuestion.trim()}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {analysisLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                  Ask
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

@@ -1,9 +1,10 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { formatRelativeDate } from '@/lib/utils';
+import { formatRelativeDate, sourceIcon } from '@/lib/utils';
 import { toast } from 'sonner';
-import { Plus, Filter, X } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown } from 'lucide-react';
+import Link from 'next/link';
 
 interface Topic {
   id: string;
@@ -16,6 +17,7 @@ interface Topic {
   updated_at: string;
   urgency_score: number | null;
   tags: string[];
+  summary: string | null;
   topic_items: { count: number }[];
 }
 
@@ -25,8 +27,10 @@ export function TopicsList({ initialTopics }: { initialTopics: Topic[] }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [area, setArea] = useState('work');
+  const [dueDate, setDueDate] = useState('');
 
-  // Filters
+  // Search & Filters
+  const [searchQuery, setSearchQuery] = useState('');
   const [filterArea, setFilterArea] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('active');
   const [sortBy, setSortBy] = useState<string>('updated_at');
@@ -40,18 +44,29 @@ export function TopicsList({ initialTopics }: { initialTopics: Topic[] }) {
       title: title.trim(),
       description: description.trim() || null,
       area,
+      due_date: dueDate || null,
       user_id: user!.id,
       status: 'active',
     }).select('*, topic_items(count)').single();
     if (error) { toast.error(error.message); return; }
     setTopics([data, ...topics]);
-    setTitle(''); setDescription(''); setShowCreate(false);
+    setTitle(''); setDescription(''); setDueDate(''); setShowCreate(false);
     toast.success('Topic created');
   };
 
   // Filtered and sorted topics
   const filteredTopics = useMemo(() => {
     let result = [...topics];
+
+    // Search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(t =>
+        t.title.toLowerCase().includes(q) ||
+        (t.description || '').toLowerCase().includes(q) ||
+        (t.tags || []).some(tag => tag.toLowerCase().includes(q))
+      );
+    }
 
     if (filterArea !== 'all') {
       result = result.filter(t => t.area === filterArea);
@@ -81,7 +96,7 @@ export function TopicsList({ initialTopics }: { initialTopics: Topic[] }) {
     });
 
     return result;
-  }, [topics, filterArea, filterStatus, sortBy]);
+  }, [topics, searchQuery, filterArea, filterStatus, sortBy]);
 
   const areaColors: Record<string, string> = {
     work: 'bg-blue-100 text-blue-700',
@@ -95,66 +110,101 @@ export function TopicsList({ initialTopics }: { initialTopics: Topic[] }) {
     archived: 'bg-amber-100 text-amber-700',
   };
 
+  // Area counts for filter badges
+  const areaCounts = useMemo(() => {
+    return topics.reduce((acc, t) => {
+      acc[t.area] = (acc[t.area] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [topics]);
+
   return (
     <div>
-      {/* Actions bar */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex gap-2">
-          <button onClick={() => setShowCreate(!showCreate)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
-            {showCreate ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-            {showCreate ? 'Cancel' : 'New Topic'}
-          </button>
-          <button onClick={() => setShowFilters(!showFilters)}
-            className={`px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 ${
-              showFilters ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-            }`}>
-            <Filter className="w-4 h-4" /> Filters
-          </button>
+      {/* Search + Actions bar */}
+      <div className="flex items-center gap-3 mb-6">
+        <div className="flex-1 relative">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search topics..."
+            className="w-full pl-10 pr-8 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
-        <span className="text-sm text-gray-500">{filteredTopics.length} topic{filteredTopics.length !== 1 ? 's' : ''}</span>
+        <button onClick={() => setShowCreate(!showCreate)}
+          className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors flex-shrink-0">
+          {showCreate ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+          {showCreate ? 'Cancel' : 'New Topic'}
+        </button>
+        <button onClick={() => setShowFilters(!showFilters)}
+          className={`px-3 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors flex-shrink-0 ${
+            showFilters ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+          }`}>
+          <Filter className="w-4 h-4" /> Filters
+        </button>
       </div>
 
       {/* Filters */}
       {showFilters && (
-        <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200 flex gap-4 flex-wrap items-center">
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Area</label>
-            <select value={filterArea} onChange={e => setFilterArea(e.target.value)}
-              className="px-3 py-1.5 border rounded-lg text-sm">
-              <option value="all">All Areas</option>
-              <option value="work">Work</option>
-              <option value="personal">Personal</option>
-              <option value="career">Career</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Status</label>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-              className="px-3 py-1.5 border rounded-lg text-sm">
-              <option value="all">All Statuses</option>
-              <option value="active">Active</option>
-              <option value="completed">Completed</option>
-              <option value="archived">Archived</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Sort by</label>
-            <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-              className="px-3 py-1.5 border rounded-lg text-sm">
-              <option value="updated_at">Last Updated</option>
-              <option value="priority">Priority</option>
-              <option value="due_date">Due Date</option>
-              <option value="items">Item Count</option>
-              <option value="title">Title</option>
-            </select>
+        <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200 space-y-3">
+          <div className="flex gap-4 flex-wrap items-end">
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Area</label>
+              <div className="flex gap-1">
+                <button onClick={() => setFilterArea('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    filterArea === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}>All</button>
+                {(['work', 'personal', 'career'] as const).map(a => (
+                  <button key={a} onClick={() => setFilterArea(a)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      filterArea === a ? 'bg-gray-900 text-white' : `${areaColors[a]} hover:opacity-80`
+                    }`}>
+                    {a} {areaCounts[a] ? `(${areaCounts[a]})` : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Status</label>
+              <div className="flex gap-1">
+                <button onClick={() => setFilterStatus('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    filterStatus === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}>All</button>
+                {(['active', 'completed', 'archived'] as const).map(s => (
+                  <button key={s} onClick={() => setFilterStatus(s)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      filterStatus === s ? 'bg-gray-900 text-white' : `${statusColors[s]} hover:opacity-80`
+                    }`}>{s}</button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 ml-auto">
+              <ArrowUpDown className="w-3 h-3 text-gray-400" />
+              <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+                className="text-xs border rounded-lg px-2 py-1.5 text-gray-600 bg-white">
+                <option value="updated_at">Last Updated</option>
+                <option value="priority">Priority</option>
+                <option value="due_date">Due Date</option>
+                <option value="items">Item Count</option>
+                <option value="title">Title</option>
+              </select>
+            </div>
           </div>
         </div>
       )}
 
       {/* Create form */}
       {showCreate && (
-        <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200 space-y-3">
+        <div className="mb-6 p-4 bg-white rounded-lg border border-blue-200 shadow-sm space-y-3">
+          <h3 className="text-sm font-semibold text-gray-700">Create New Topic</h3>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -166,7 +216,7 @@ export function TopicsList({ initialTopics }: { initialTopics: Topic[] }) {
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Description (optional)"
+            placeholder="Description (optional) — helps AI Find relevant items"
             className="w-full px-3 py-2 border rounded-lg text-sm"
             rows={2}
           />
@@ -176,26 +226,34 @@ export function TopicsList({ initialTopics }: { initialTopics: Topic[] }) {
               <option value="personal">Personal</option>
               <option value="career">Career</option>
             </select>
-            <button onClick={handleCreate} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+            <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+              className="px-3 py-2 border rounded-lg text-sm" placeholder="Due date" />
+            <button onClick={handleCreate} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
               Create Topic
             </button>
           </div>
         </div>
       )}
 
+      {/* Results count */}
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-sm text-gray-500">{filteredTopics.length} topic{filteredTopics.length !== 1 ? 's' : ''}</span>
+      </div>
+
       {/* Topic cards */}
       {filteredTopics.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
-          <p className="text-gray-500">No topics found</p>
-          <button onClick={() => setShowCreate(true)}
+          <p className="text-gray-500">{searchQuery ? `No topics match "${searchQuery}"` : 'No topics found'}</p>
+          <button onClick={() => { setShowCreate(true); setSearchQuery(''); }}
             className="mt-3 text-blue-600 hover:underline text-sm">Create your first topic &rarr;</button>
         </div>
       ) : (
         <div className="grid gap-3">
           {filteredTopics.map((t) => {
             const itemCount = t.topic_items?.[0]?.count || 0;
+            const overdue = t.due_date && new Date(t.due_date) < new Date();
             return (
-              <a key={t.id} href={`/topics/${t.id}`}
+              <Link key={t.id} href={`/topics/${t.id}`}
                 className="p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all block">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
@@ -213,8 +271,8 @@ export function TopicsList({ initialTopics }: { initialTopics: Topic[] }) {
                         {t.area}
                       </span>
                       {t.due_date && (
-                        <span className="text-xs text-gray-400">
-                          Due: {new Date(t.due_date).toLocaleDateString()}
+                        <span className={`text-xs ${overdue ? 'text-red-600 font-medium' : 'text-gray-400'}`}>
+                          {overdue ? 'Overdue: ' : 'Due: '}{new Date(t.due_date).toLocaleDateString()}
                         </span>
                       )}
                       {itemCount > 0 && (
@@ -222,12 +280,17 @@ export function TopicsList({ initialTopics }: { initialTopics: Topic[] }) {
                           {itemCount} item{itemCount !== 1 ? 's' : ''} linked
                         </span>
                       )}
+                      {t.summary && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3" /> AI analyzed
+                        </span>
+                      )}
                       <span className="text-xs text-gray-300">&bull;</span>
                       <span className="text-xs text-gray-400">{formatRelativeDate(t.updated_at)}</span>
                     </div>
                   </div>
                 </div>
-              </a>
+              </Link>
             );
           })}
         </div>

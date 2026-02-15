@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2, Trash2, Plus } from 'lucide-react';
+import { Loader2, Trash2, Plus, Shield, ExternalLink, AlertTriangle } from 'lucide-react';
+import { sourceIcon } from '@/lib/utils';
 
 interface Props {
   googleAccounts: { id: string; email: string }[];
@@ -53,10 +54,15 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
     <div className="space-y-8">
       {/* Google Accounts */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Google Accounts</h2>
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-lg font-semibold text-gray-900">Google Accounts</h2>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600">
+            {sourceIcon('gmail')} {sourceIcon('calendar')} {sourceIcon('drive')}
+          </span>
+        </div>
         <p className="text-sm text-gray-500 mb-4">Connect Google to search Gmail, Calendar, and Drive</p>
         {googleAccounts.length === 0 ? (
-          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 text-center">
+          <div className="p-6 bg-gray-50 rounded-lg border border-gray-200 text-center">
             <p className="text-sm text-gray-500">No Google accounts connected</p>
             <p className="text-xs text-gray-400 mt-1">Connect to search your emails, events, and files</p>
           </div>
@@ -65,18 +71,24 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
             {googleAccounts.map((a) => (
               <div key={a.id} className="p-4 bg-white rounded-lg border border-gray-200 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-600 text-xs font-medium">G</div>
+                  <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-medium">G</div>
                   <div>
                     <p className="text-sm font-medium text-gray-900">{a.email}</p>
-                    <p className="text-xs text-gray-400">Gmail, Calendar, Drive</p>
+                    <div className="flex gap-2 mt-0.5">
+                      <span className="text-xs text-gray-400 flex items-center gap-1">{sourceIcon('gmail')} Email</span>
+                      <span className="text-xs text-gray-400 flex items-center gap-1">{sourceIcon('calendar')} Calendar</span>
+                      <span className="text-xs text-gray-400 flex items-center gap-1">{sourceIcon('drive')} Drive</span>
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-1 rounded-full">Connected</span>
+                  <span className="text-xs text-green-600 font-medium bg-green-50 px-2.5 py-1 rounded-full flex items-center gap-1">
+                    <Shield className="w-3 h-3" /> Connected
+                  </span>
                   <button
                     onClick={() => disconnectGoogle(a.id, a.email)}
                     disabled={disconnecting === a.id}
-                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
                     title="Disconnect"
                   >
                     {disconnecting === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
@@ -87,17 +99,35 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
           </div>
         )}
         <button onClick={connectGoogle}
-          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
+          className="mt-3 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors">
           <Plus className="w-4 h-4" /> Connect Google Account
         </button>
+
+        {/* Scopes info */}
+        {googleAccounts.length > 0 && (
+          <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
+            <p className="text-xs font-medium text-blue-700 mb-1">Granted Permissions</p>
+            <div className="flex gap-2 flex-wrap text-xs text-blue-600">
+              <span className="px-2 py-0.5 bg-blue-100 rounded-full">Read Gmail</span>
+              <span className="px-2 py-0.5 bg-blue-100 rounded-full">Read Calendar</span>
+              <span className="px-2 py-0.5 bg-blue-100 rounded-full">Read Drive</span>
+              <span className="px-2 py-0.5 bg-blue-100 rounded-full">User Email</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Slack Workspaces */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Slack Workspaces</h2>
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-lg font-semibold text-gray-900">Slack Workspaces</h2>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600">
+            {sourceIcon('slack')}
+          </span>
+        </div>
         <p className="text-sm text-gray-500 mb-4">Connect Slack to search messages across channels and DMs</p>
         {slackAccounts.length === 0 ? (
-          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 text-center">
+          <div className="p-6 bg-gray-50 rounded-lg border border-gray-200 text-center">
             <p className="text-sm text-gray-500">No Slack workspaces connected</p>
             <p className="text-xs text-gray-400 mt-1">Connect to search your Slack messages</p>
           </div>
@@ -106,18 +136,20 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
             {slackAccounts.map((a) => (
               <div key={a.id} className="p-4 bg-white rounded-lg border border-gray-200 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 text-xs font-medium">S</div>
+                  <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-medium">S</div>
                   <div>
                     <p className="text-sm font-medium text-gray-900">{a.team_name}</p>
-                    <p className="text-xs text-gray-400">Messages, channels, DMs</p>
+                    <span className="text-xs text-gray-400 flex items-center gap-1">{sourceIcon('slack')} Messages, channels, DMs</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-1 rounded-full">Connected</span>
+                  <span className="text-xs text-green-600 font-medium bg-green-50 px-2.5 py-1 rounded-full flex items-center gap-1">
+                    <Shield className="w-3 h-3" /> Connected
+                  </span>
                   <button
                     onClick={() => disconnectSlack(a.id, a.team_name)}
                     disabled={disconnecting === a.id}
-                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
                     title="Disconnect"
                   >
                     {disconnecting === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
@@ -128,9 +160,59 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
           </div>
         )}
         <button onClick={connectSlack}
-          className="mt-3 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 flex items-center gap-2">
+          className="mt-3 px-4 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 flex items-center gap-2 transition-colors">
           <Plus className="w-4 h-4" /> Connect Slack Workspace
         </button>
+
+        {slackAccounts.length > 0 && (
+          <div className="mt-3 p-3 bg-purple-50 rounded-lg border border-purple-100">
+            <p className="text-xs font-medium text-purple-700 mb-1">Granted Permissions</p>
+            <div className="flex gap-2 flex-wrap text-xs text-purple-600">
+              <span className="px-2 py-0.5 bg-purple-100 rounded-full">Search Messages</span>
+              <span className="px-2 py-0.5 bg-purple-100 rounded-full">Read Channels</span>
+              <span className="px-2 py-0.5 bg-purple-100 rounded-full">Read DMs</span>
+              <span className="px-2 py-0.5 bg-purple-100 rounded-full">User Info</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Notion (coming soon) */}
+      <div>
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-lg font-semibold text-gray-900">Notion</h2>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-600">Coming soon</span>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">Connect Notion to search pages and databases linked to your topics</p>
+        <div className="p-6 bg-amber-50/50 rounded-lg border border-amber-200 text-center">
+          <p className="text-sm text-amber-700">{sourceIcon('notion')} Notion integration is coming soon</p>
+          <p className="text-xs text-amber-600 mt-1">Search Notion pages, databases, and wiki content directly from TopicOS</p>
+        </div>
+      </div>
+
+      {/* About */}
+      <div className="pt-4 border-t border-gray-200">
+        <h2 className="text-lg font-semibold text-gray-900 mb-3">About TopicOS</h2>
+        <div className="p-4 bg-white rounded-lg border border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-900">TopicOS v3</p>
+              <p className="text-xs text-gray-500 mt-0.5">Search-first topic-centric productivity</p>
+            </div>
+            <div className="text-right text-xs text-gray-400">
+              <p>Powered by Claude AI</p>
+              <p className="mt-0.5">Built with Next.js, Supabase, Tailwind</p>
+            </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-gray-100 flex gap-4 text-xs text-gray-500">
+            <span className="flex items-center gap-1">
+              <Shield className="w-3 h-3" /> Your data stays private
+            </span>
+            <span className="flex items-center gap-1">
+              {sourceIcon('gmail')} {sourceIcon('calendar')} {sourceIcon('drive')} {sourceIcon('slack')} {sourceIcon('notion')} Multi-source search
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );

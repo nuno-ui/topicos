@@ -31,6 +31,7 @@ export function sourceIcon(source: string) {
     case 'calendar': return '📅';
     case 'drive': return '📁';
     case 'slack': return '💬';
+    case 'notion': return '📓';
     case 'manual': return '📝';
     default: return '📄';
   }
@@ -42,7 +43,25 @@ export function sourceLabel(source: string) {
     case 'calendar': return 'Event';
     case 'drive': return 'File';
     case 'slack': return 'Message';
+    case 'notion': return 'Page';
     case 'manual': return 'Note';
     default: return source;
   }
+}
+
+export function sourceColor(source: string) {
+  switch (source) {
+    case 'gmail': return 'text-red-600 bg-red-50';
+    case 'calendar': return 'text-blue-600 bg-blue-50';
+    case 'drive': return 'text-yellow-600 bg-yellow-50';
+    case 'slack': return 'text-purple-600 bg-purple-50';
+    case 'notion': return 'text-gray-800 bg-gray-100';
+    case 'manual': return 'text-green-600 bg-green-50';
+    default: return 'text-gray-600 bg-gray-50';
+  }
+}
+
+export function truncateText(text: string, maxLength: number = 100): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength).trim() + '...';
 }
