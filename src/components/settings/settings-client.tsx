@@ -44,28 +44,24 @@ export function SettingsClient({
   const handleSyncSlack = async (accountId: string) => {
     setSyncingSlack(accountId);
     try {
-      const res = await fetch('/api/sync', {
+      const res = await fetch('/api/sync/slack', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: accountId }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        const slackResult = (data.accounts ?? []).find(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (a: any) => a.account_id === accountId
-        );
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const results = slackResult?.results?.[0] ?? slackResult?.results ?? {};
-        const created = results.itemsCreated ?? 0;
-        const updated = results.itemsUpdated ?? 0;
-        if (slackResult?.error) {
-          toast.error(`Slack sync failed: ${slackResult.error}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const result = data.accounts?.[0] ?? {};
+        const created = result.itemsCreated ?? 0;
+        const updated = result.itemsUpdated ?? 0;
+        if (result.error) {
+          toast.error(`Slack sync failed: ${result.error}`);
         } else {
-          toast.success(`Slack sync completed: ${created} new, ${updated} updated messages`);
+          toast.success(`Slack sync: ${created} new, ${updated} updated messages`);
         }
         router.refresh();
       } else {
-        const errData = await res.json().catch(() => ({}));
-        toast.error(errData.error ?? 'Slack sync failed');
+        toast.error(data.error ?? 'Slack sync failed');
       }
     } catch {
       toast.error('Network error during Slack sync');
