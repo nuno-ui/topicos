@@ -1,23 +1,18 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
-
-const inter = Inter({ subsets: ['latin'] });
+import { Toaster } from 'sonner';
 
 export const metadata: Metadata = {
   title: 'TopicOS',
-  description: 'AI-powered self-organization platform',
+  description: 'Topic-centric productivity platform',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${inter.className} antialiased`}>
+    <html lang="en">
+      <body className="antialiased">
         {children}
+        <Toaster position="bottom-right" />
       </body>
     </html>
   );

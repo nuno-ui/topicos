@@ -1,17 +1,22 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
-import { TopicsListClient } from '@/components/topics/topics-list-client';
+import { TopicsList } from '@/components/topics/topics-list';
 
 export default async function TopicsPage() {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
 
   const { data: topics } = await supabase
     .from('topics')
-    .select('*')
-    .eq('user_id', user.id)
+    .select('*, topic_items(count)')
+    .eq('user_id', user!.id)
     .order('updated_at', { ascending: false });
 
-  return <TopicsListClient topics={topics ?? []} />;
+  return (
+    <div className="p-8 max-w-5xl">
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-2xl font-bold text-gray-900">Topics</h1>
+      </div>
+      <TopicsList initialTopics={topics ?? []} />
+    </div>
+  );
 }
