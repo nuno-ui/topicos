@@ -37,13 +37,17 @@ export async function GET(request: Request) {
     }
 
     const service = createServiceClient();
-    await service.from('slack_accounts').upsert({
+    const { error: upsertError } = await service.from('slack_accounts').upsert({
       user_id: user.id,
       team_id: tokenData.team?.id ?? '',
       team_name: tokenData.team?.name ?? '',
       access_token: userToken,
       scopes: userScopes.split(',').filter(Boolean),
     }, { onConflict: 'user_id, team_id' });
+    if (upsertError) {
+      console.error('Slack upsert error:', upsertError);
+      throw new Error('Failed to save Slack account: ' + upsertError.message);
+    }
 
     return NextResponse.redirect(process.env.NEXT_PUBLIC_APP_URL! + '/settings?success=slack_connected');
   } catch (err) {

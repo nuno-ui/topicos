@@ -36,13 +36,22 @@ export async function GET(request: Request) {
     const service = createServiceClient();
     const expiresAt = new Date(Date.now() + (tokenData.expires_in ?? 3600) * 1000).toISOString();
 
-    await service.from('google_accounts').upsert({
+    const upsertData: Record<string, unknown> = {
       user_id: user.id,
       email: userInfo.email,
       access_token: tokenData.access_token,
-      refresh_token: tokenData.refresh_token,
       token_expires_at: expiresAt,
-    }, { onConflict: 'user_id, email' });
+    };
+    // refresh_token is only provided on first consent; don't overwrite with null on re-auth
+    if (tokenData.refresh_token) {
+      upsertData.refresh_token = tokenData.refresh_token;
+    }
+
+    const { error: upsertError } = await service.from('google_accounts').upsert(upsertData, { onConflict: 'user_id, email' });
+    if (upsertError) {
+      console.error('Google upsert error:', upsertError);
+      throw new Error('Failed to save Google account: ' + upsertError.message);
+    }
 
     return NextResponse.redirect(process.env.NEXT_PUBLIC_APP_URL! + '/settings?success=google_connected');
   } catch (err) {
