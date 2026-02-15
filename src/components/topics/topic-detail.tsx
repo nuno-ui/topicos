@@ -4,7 +4,7 @@ import { sourceIcon, sourceLabel, formatRelativeDate } from '@/lib/utils';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap } from 'lucide-react';
+import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp } from 'lucide-react';
 
 interface TopicItem {
   id: string;
@@ -528,11 +528,19 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                   topic.status === 'completed' ? 'bg-gray-100 text-gray-600' :
                   'bg-amber-100 text-amber-700'
                 }`}>{topic.status}</span>
-                {topic.due_date && (
-                  <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
-                    Due: {new Date(topic.due_date).toLocaleDateString()}
-                  </span>
-                )}
+                {topic.due_date && (() => {
+                  const daysLeft = Math.ceil((new Date(topic.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                  const isOverdue = daysLeft < 0;
+                  const isUrgent = daysLeft >= 0 && daysLeft <= 3;
+                  const isSoon = daysLeft > 3 && daysLeft <= 7;
+                  const colorClass = isOverdue ? 'bg-red-100 text-red-700 font-medium' : isUrgent ? 'bg-amber-100 text-amber-700 font-medium' : isSoon ? 'bg-yellow-50 text-yellow-700' : 'bg-gray-100 text-gray-600';
+                  const label = isOverdue ? `Overdue by ${Math.abs(daysLeft)}d` : daysLeft === 0 ? 'Due today' : daysLeft === 1 ? 'Due tomorrow' : `${daysLeft}d left`;
+                  return (
+                    <span className={`text-xs px-2 py-1 rounded-full ${colorClass}`}>
+                      {label}
+                    </span>
+                  );
+                })()}
                 {/* Source counts */}
                 {Object.entries(sourceCounts).map(([src, count]) => (
                   <span key={src} className="text-xs px-2 py-1 rounded-full bg-gray-50 text-gray-500">
@@ -604,6 +612,32 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
               <p className="text-sm text-gray-700">{topic.goal}</p>
             </div>
           )}
+          {/* Topic Health Score */}
+          {(() => {
+            let score = 100;
+            const daysSinceUpdate = Math.floor((Date.now() - new Date(topic.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+            if (daysSinceUpdate > 14) score -= 30;
+            else if (daysSinceUpdate > 7) score -= 15;
+            if (!topic.description) score -= 10;
+            if (items.length === 0) score -= 20;
+            if (topic.due_date && new Date(topic.due_date) < new Date()) score -= 25;
+            if (!topic.tags || topic.tags.length === 0) score -= 5;
+            score = Math.max(0, Math.min(100, score));
+            const color = score >= 80 ? 'text-green-600' : score >= 50 ? 'text-amber-600' : 'text-red-600';
+            const bg = score >= 80 ? 'bg-green-50' : score >= 50 ? 'bg-amber-50' : 'bg-red-50';
+            const barColor = score >= 80 ? 'bg-green-500' : score >= 50 ? 'bg-amber-500' : 'bg-red-500';
+            return (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs text-gray-500 flex items-center gap-1"><Heart className="w-3 h-3" /> Health</p>
+                  <span className={`text-xs font-bold ${color}`}>{score}%</span>
+                </div>
+                <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${score}%` }} />
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Timeline */}

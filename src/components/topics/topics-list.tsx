@@ -3,7 +3,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { formatRelativeDate, sourceIcon } from '@/lib/utils';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart } from 'lucide-react';
 import Link from 'next/link';
 
 interface Topic {
@@ -62,6 +62,10 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   const [sortBy, setSortBy] = useState<string>('updated_at');
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'folders' | 'flat'>('folders');
+
+  // Bulk selection state
+  const [selectedTopics, setSelectedTopics] = useState<Set<string>>(new Set());
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
   // AI state
   const [aiLoading, setAiLoading] = useState<string | null>(null);
@@ -143,6 +147,38 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
       else next.add(folderId);
       return next;
     });
+  };
+
+  // Bulk actions
+  const toggleTopicSelection = (topicId: string) => {
+    setSelectedTopics(prev => {
+      const next = new Set(prev);
+      if (next.has(topicId)) next.delete(topicId);
+      else next.add(topicId);
+      return next;
+    });
+  };
+
+  const bulkChangeStatus = async (newStatus: string) => {
+    if (selectedTopics.size === 0) return;
+    setBulkActionLoading(true);
+    let success = 0;
+    for (const topicId of selectedTopics) {
+      try {
+        const res = await fetch(`/api/topics/${topicId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        });
+        if (res.ok) {
+          setTopics(prev => prev.map(t => t.id === topicId ? { ...t, status: newStatus } : t));
+          success++;
+        }
+      } catch {}
+    }
+    setSelectedTopics(new Set());
+    setBulkActionLoading(false);
+    toast.success(`Updated ${success} topic${success !== 1 ? 's' : ''} to ${newStatus}`);
   };
 
   // AI Agents
@@ -260,6 +296,40 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
   const areaCounts = useMemo(() => topics.reduce((acc, t) => { acc[t.area] = (acc[t.area] || 0) + 1; return acc; }, {} as Record<string, number>), [topics]);
 
+  // Topic health score calculation
+  const getTopicHealth = useCallback((t: Topic) => {
+    let score = 100;
+    let issues: string[] = [];
+    const daysSinceUpdate = Math.floor((Date.now() - new Date(t.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+    const itemCount = t.topic_items?.[0]?.count || 0;
+
+    // Stale check
+    if (daysSinceUpdate > 14) { score -= 30; issues.push('Stale (14+ days)'); }
+    else if (daysSinceUpdate > 7) { score -= 15; issues.push('Getting stale'); }
+
+    // Missing description
+    if (!t.description) { score -= 10; issues.push('No description'); }
+
+    // No items linked
+    if (itemCount === 0) { score -= 20; issues.push('No linked items'); }
+
+    // Overdue
+    if (t.due_date && new Date(t.due_date) < new Date()) { score -= 25; issues.push('Overdue'); }
+
+    // No tags
+    if (!t.tags || t.tags.length === 0) { score -= 5; issues.push('No tags'); }
+
+    // No progress tracking
+    if (t.progress_percent === null || t.progress_percent === undefined) { score -= 5; }
+
+    score = Math.max(0, Math.min(100, score));
+    const color = score >= 80 ? 'text-green-500' : score >= 50 ? 'text-amber-500' : 'text-red-500';
+    const bgColor = score >= 80 ? 'bg-green-50' : score >= 50 ? 'bg-amber-50' : 'bg-red-50';
+    const label = score >= 80 ? 'Healthy' : score >= 50 ? 'Needs Attention' : 'Critical';
+
+    return { score, issues, color, bgColor, label };
+  }, []);
+
   // Render a topic card (enhanced)
   const renderTopicCard = (t: Topic) => {
     const itemCount = t.topic_items?.[0]?.count || 0;
@@ -268,6 +338,12 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
     return (
       <div key={t.id} className="group relative">
+        <div className="absolute top-4 left-4 z-10">
+          <input type="checkbox" checked={selectedTopics.has(t.id)}
+            onChange={(e) => { e.stopPropagation(); toggleTopicSelection(t.id); }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 opacity-0 group-hover:opacity-100 checked:opacity-100 transition-opacity cursor-pointer" />
+        </div>
         <Link href={`/topics/${t.id}`}
           className="block p-4 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all shadow-sm">
           <div className="flex items-start justify-between gap-3">
@@ -336,6 +412,20 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               }`} title={`Priority ${t.priority}`} />
             )}
           </div>
+          {/* Topic health indicator */}
+          {(() => {
+            const health = getTopicHealth(t);
+            if (health.score < 80) {
+              return (
+                <div className={`mt-2 pt-2 border-t border-gray-100 flex items-center gap-2 text-xs ${health.color}`}>
+                  <Heart className="w-3 h-3" />
+                  <span className="font-medium">{health.label}</span>
+                  <span className="text-gray-400">— {health.issues.slice(0, 2).join(', ')}</span>
+                </div>
+              );
+            }
+            return null;
+          })()}
         </Link>
         {/* Move to folder button */}
         {movingTopic === t.id ? (
@@ -458,6 +548,20 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
           {aiLoading === 'suggest_topics' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
           AI Suggest Topics
         </button>
+        {(() => {
+          const staleCount = topics.filter(t => {
+            const daysSince = Math.floor((Date.now() - new Date(t.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+            return daysSince > 7 && t.status === 'active';
+          }).length;
+          if (staleCount > 0) return (
+            <button onClick={() => { setSearchQuery(''); setFilterStatus('active'); setSortBy('updated_at'); }}
+              className="px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              {staleCount} Stale Topic{staleCount !== 1 ? 's' : ''}
+            </button>
+          );
+          return null;
+        })()}
         <button onClick={() => setViewMode(viewMode === 'folders' ? 'flat' : 'folders')}
           className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 border ${
             viewMode === 'folders' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-gray-600 border-gray-200'
@@ -581,9 +685,43 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
         </div>
       )}
 
+      {/* Bulk actions toolbar */}
+      {selectedTopics.size > 0 && (
+        <div className="mb-3 p-3 bg-blue-50 rounded-xl border border-blue-200 flex items-center gap-3 animate-fade-in">
+          <span className="text-sm font-medium text-blue-700">{selectedTopics.size} selected</span>
+          <div className="flex gap-2">
+            <button onClick={() => bulkChangeStatus('completed')} disabled={bulkActionLoading}
+              className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-xs font-medium hover:bg-green-200 disabled:opacity-50">
+              Mark Complete
+            </button>
+            <button onClick={() => bulkChangeStatus('archived')} disabled={bulkActionLoading}
+              className="px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-xs font-medium hover:bg-amber-200 disabled:opacity-50">
+              Archive
+            </button>
+            <button onClick={() => bulkChangeStatus('active')} disabled={bulkActionLoading}
+              className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-200 disabled:opacity-50">
+              Reactivate
+            </button>
+          </div>
+          <button onClick={() => setSelectedTopics(new Set())} className="ml-auto text-xs text-blue-600 hover:text-blue-800">
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {/* Results count */}
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-gray-500">{filteredTopics.length} topic{filteredTopics.length !== 1 ? 's' : ''}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-500">{filteredTopics.length} topic{filteredTopics.length !== 1 ? 's' : ''}</span>
+          {filteredTopics.length > 0 && (
+            <button onClick={() => {
+              if (selectedTopics.size === filteredTopics.length) setSelectedTopics(new Set());
+              else setSelectedTopics(new Set(filteredTopics.map(t => t.id)));
+            }} className="text-xs text-blue-600 hover:text-blue-800">
+              {selectedTopics.size === filteredTopics.length ? 'Deselect all' : 'Select all'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Topic list */}

@@ -463,7 +463,46 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
               <p className="text-sm font-medium text-red-900">Export Your Data</p>
               <p className="text-xs text-red-600/70 mt-0.5">Download all your topics, items, and contacts as JSON</p>
             </div>
-            <button className="px-4 py-2 bg-white border border-red-200 text-red-700 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors">
+            <button onClick={async () => {
+              toast.info('Preparing data export...');
+              try {
+                const [topicsRes, contactsRes, itemsRes] = await Promise.all([
+                  fetch('/api/topics'),
+                  fetch('/api/contacts'),
+                  fetch('/api/topics').then(r => r.json()).then(async d => {
+                    const items: unknown[] = [];
+                    for (const t of (d.topics || []).slice(0, 50)) {
+                      try {
+                        const res = await fetch(`/api/topics/${t.id}/items`);
+                        const data = await res.json();
+                        items.push(...(data.items || []));
+                      } catch {}
+                    }
+                    return items;
+                  }),
+                ]);
+                const topics = await topicsRes.json();
+                const contacts = await contactsRes.json();
+                const exportData = {
+                  exported_at: new Date().toISOString(),
+                  version: 'TopicOS v3',
+                  topics: topics.topics || [],
+                  contacts: contacts.contacts || [],
+                  items: itemsRes,
+                };
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `topicos-export-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                toast.success('Data exported successfully');
+              } catch (err) {
+                toast.error('Export failed');
+              }
+            }}
+              className="px-4 py-2 bg-white border border-red-200 text-red-700 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors">
               Export Data
             </button>
           </div>

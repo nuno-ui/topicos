@@ -81,3 +81,41 @@ export function truncateText(text: string, maxLength: number = 100): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength).trim() + '...';
 }
+
+export function slugify(text: string): string {
+  return text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').trim();
+}
+
+export function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+export function pluralize(count: number, singular: string, plural?: string): string {
+  return count === 1 ? singular : (plural || singular + 's');
+}
+
+export function getDaysUntil(date: string | Date): number {
+  return Math.ceil((new Date(date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+}
+
+export function getTopicHealthScore(topic: {
+  updated_at: string;
+  description: string | null;
+  due_date: string | null;
+  tags: string[];
+  progress_percent: number | null;
+}, itemCount: number): { score: number; label: string; color: string } {
+  let score = 100;
+  const daysSinceUpdate = Math.floor((Date.now() - new Date(topic.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+  if (daysSinceUpdate > 14) score -= 30;
+  else if (daysSinceUpdate > 7) score -= 15;
+  if (!topic.description) score -= 10;
+  if (itemCount === 0) score -= 20;
+  if (topic.due_date && new Date(topic.due_date) < new Date()) score -= 25;
+  if (!topic.tags || topic.tags.length === 0) score -= 5;
+  if (topic.progress_percent === null) score -= 5;
+  score = Math.max(0, Math.min(100, score));
+  const label = score >= 80 ? 'Healthy' : score >= 50 ? 'Needs Attention' : 'Critical';
+  const color = score >= 80 ? 'green' : score >= 50 ? 'amber' : 'red';
+  return { score, label, color };
+}

@@ -65,6 +65,21 @@ export default async function DashboardPage() {
     return 'Good evening';
   };
 
+  const productivityTip = () => {
+    const tips = [
+      { tip: 'Try using ⌘K to quickly navigate with the command palette', icon: '⌨️' },
+      { tip: 'Link items to topics to build a knowledge graph of your work', icon: '🔗' },
+      { tip: 'Use AI Find to automatically discover relevant items for your topics', icon: '🤖' },
+      { tip: 'Run the Daily Briefing to get an AI summary of what matters today', icon: '📋' },
+      { tip: 'Set due dates on topics to track deadlines and see urgency indicators', icon: '⏰' },
+      { tip: 'Use keyboard shortcuts 1-5 to quickly navigate between sections', icon: '🚀' },
+      { tip: 'Extract contacts from your topics to build your relationship network', icon: '👥' },
+      { tip: 'Create folders to organize your topics into projects or categories', icon: '📁' },
+    ];
+    const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24));
+    return tips[dayOfYear % tips.length];
+  };
+
   const sourceCounts = recentItems.reduce((acc, item) => {
     acc[item.source] = (acc[item.source] || 0) + 1;
     return acc;
@@ -79,6 +94,10 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{greeting()}, {displayName}</h1>
           <p className="text-gray-500 mt-1">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+          <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
+            <span>{productivityTip().icon}</span>
+            <span>{productivityTip().tip}</span>
+          </div>
         </div>
         <div className="flex gap-4">
           <div className="text-center px-4 py-3 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[90px]">
@@ -93,6 +112,24 @@ export default async function DashboardPage() {
             <p className="text-2xl font-bold text-purple-600">{aiRuns.length}</p>
             <p className="text-[11px] text-gray-500 font-medium">AI Runs</p>
           </div>
+          {aiRuns.length > 0 && (() => {
+            const dates = new Set(aiRuns.map(r => new Date(r.created_at).toDateString()));
+            const today = new Date();
+            let streak = 0;
+            for (let i = 0; i < 30; i++) {
+              const d = new Date(today);
+              d.setDate(d.getDate() - i);
+              if (dates.has(d.toDateString())) streak++;
+              else if (i > 0) break;
+            }
+            if (streak > 0) return (
+              <div className="text-center px-4 py-3 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-200 shadow-sm min-w-[90px]">
+                <p className="text-2xl font-bold text-amber-600">{streak}🔥</p>
+                <p className="text-[11px] text-amber-600 font-medium">Day Streak</p>
+              </div>
+            );
+            return null;
+          })()}
         </div>
       </div>
 

@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { sourceIcon, sourceLabel, formatRelativeDate } from '@/lib/utils';
-import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, Clock, ArrowUpDown, Calendar, X, Sparkles, Brain, Tags, Wand2 } from 'lucide-react';
+import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, ChevronUp, Clock, ArrowUpDown, Calendar, X, Sparkles, Brain, Tags, Wand2, Bookmark, BookmarkCheck, Eye } from 'lucide-react';
 
 interface SearchResult {
   external_id: string;
@@ -75,6 +75,12 @@ export function SearchPanel() {
   const [searchSummary, setSearchSummary] = useState<string | null>(null);
   const [showSummary, setShowSummary] = useState(false);
 
+  // Saved searches
+  const [savedSearches, setSavedSearches] = useState<Array<{ query: string; sources: string[]; dateFrom?: string; dateTo?: string }>>([]);
+
+  // Expanded result preview
+  const [expandedResult, setExpandedResult] = useState<string | null>(null);
+
   useEffect(() => {
     fetch('/api/topics').then(r => r.json()).then(data => {
       setTopics(data.topics || []);
@@ -83,6 +89,10 @@ export function SearchPanel() {
     try {
       const saved = localStorage.getItem('topicos_recent_searches');
       if (saved) setRecentSearches(JSON.parse(saved));
+    } catch {}
+    try {
+      const savedFilters = localStorage.getItem('topicos_saved_searches');
+      if (savedFilters) setSavedSearches(JSON.parse(savedFilters));
     } catch {}
   }, []);
 
@@ -220,6 +230,33 @@ export function SearchPanel() {
     setShowDateFilters(false);
   };
 
+  const saveCurrentSearch = () => {
+    if (!query.trim()) { toast.error('Enter a search query first'); return; }
+    const newSaved = { query: query.trim(), sources: Array.from(sources), dateFrom: dateFrom || undefined, dateTo: dateTo || undefined };
+    setSavedSearches(prev => {
+      const next = [newSaved, ...prev.filter(s => s.query !== query.trim())].slice(0, 10);
+      try { localStorage.setItem('topicos_saved_searches', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    toast.success('Search saved');
+  };
+
+  const loadSavedSearch = (saved: { query: string; sources: string[]; dateFrom?: string; dateTo?: string }) => {
+    setQuery(saved.query);
+    setSources(new Set(saved.sources));
+    if (saved.dateFrom) setDateFrom(saved.dateFrom);
+    if (saved.dateTo) setDateTo(saved.dateTo);
+    toast.info('Search loaded — click Search to run');
+  };
+
+  const removeSavedSearch = (queryToRemove: string) => {
+    setSavedSearches(prev => {
+      const next = prev.filter(s => s.query !== queryToRemove);
+      try { localStorage.setItem('topicos_saved_searches', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
   // ========== AI AGENT FUNCTIONS ==========
 
   const runSmartSearch = async () => {
@@ -332,6 +369,12 @@ export function SearchPanel() {
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
             Search
           </button>
+          {query.trim() && (
+            <button onClick={saveCurrentSearch} title="Save this search"
+              className="p-3 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl border border-gray-200 transition-colors">
+              {savedSearches.some(s => s.query === query.trim()) ? <BookmarkCheck className="w-4 h-4 text-amber-500" /> : <Bookmark className="w-4 h-4" />}
+            </button>
+          )}
         </div>
 
         {/* Source filters + date + sort */}
@@ -383,6 +426,25 @@ export function SearchPanel() {
             {(dateFrom || dateTo) && (
               <button onClick={clearDateFilters} className="text-xs text-amber-600 hover:text-amber-800">Clear</button>
             )}
+          </div>
+        )}
+
+        {/* Saved searches */}
+        {savedSearches.length > 0 && !query && results.length === 0 && (
+          <div className="flex gap-2 items-center flex-wrap">
+            <Bookmark className="w-3 h-3 text-amber-400" />
+            <span className="text-xs text-amber-500 font-medium">Saved:</span>
+            {savedSearches.map((s, i) => (
+              <span key={i} className="inline-flex items-center gap-1">
+                <button onClick={() => loadSavedSearch(s)}
+                  className="text-xs px-2 py-1 bg-amber-50 text-amber-700 rounded-full hover:bg-amber-100 transition-colors font-medium">
+                  {s.query}
+                </button>
+                <button onClick={() => removeSavedSearch(s.query)} className="text-amber-300 hover:text-amber-600">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
           </div>
         )}
 
@@ -522,7 +584,13 @@ export function SearchPanel() {
                       <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium flex-shrink-0">Linked</span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.snippet}</p>
+                  <p className={`text-xs text-gray-500 mt-0.5 ${expandedResult === key ? '' : 'line-clamp-2'}`}>{item.snippet}</p>
+                  {item.snippet && item.snippet.length > 100 && (
+                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpandedResult(expandedResult === key ? null : key); }}
+                      className="text-xs text-blue-500 hover:text-blue-700 mt-0.5 flex items-center gap-0.5">
+                      {expandedResult === key ? <><ChevronUp className="w-3 h-3" /> Less</> : <><Eye className="w-3 h-3" /> More</>}
+                    </button>
+                  )}
                   <div className="flex gap-2 mt-1.5 text-xs text-gray-400">
                     <span>{sourceLabel(item.source)}</span>
                     <span>{formatRelativeDate(item.occurred_at)}</span>

@@ -1,7 +1,7 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Plus, X, Users, Mail, Building, StickyNote, ChevronRight, Loader2, Search, Edit3, Save, Trash2, Sparkles, Brain, UserPlus, Network, Wand2 } from 'lucide-react';
+import { Plus, X, Users, Mail, Building, StickyNote, ChevronRight, Loader2, Search, Edit3, Save, Trash2, Sparkles, Brain, UserPlus, Network, Wand2, ExternalLink, Clock, TrendingUp, Activity } from 'lucide-react';
 
 interface Contact {
   id: string;
@@ -124,6 +124,28 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       toast.error(err instanceof Error ? err.message : 'Update failed');
     }
     setSaving(false);
+  };
+
+  const deleteContact = async (contactId: string) => {
+    if (!confirm('Delete this contact? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`/api/contacts/${contactId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete');
+      setContacts(prev => prev.filter(c => c.id !== contactId));
+      setSelectedContact(null);
+      toast.success('Contact deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Delete failed');
+    }
+  };
+
+  // Calculate interaction score based on topic links
+  const getInteractionScore = (c: Contact) => {
+    const topicCount = c.contact_topic_links?.length || 0;
+    if (topicCount >= 5) return { label: 'Very Active', color: 'text-green-600 bg-green-50', score: 5 };
+    if (topicCount >= 3) return { label: 'Active', color: 'text-blue-600 bg-blue-50', score: 3 };
+    if (topicCount >= 1) return { label: 'Connected', color: 'text-amber-600 bg-amber-50', score: 1 };
+    return { label: 'New', color: 'text-gray-500 bg-gray-50', score: 0 };
   };
 
   const initials = (name: string) => {
@@ -476,6 +498,12 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                         {c.contact_topic_links.length} topic{c.contact_topic_links.length !== 1 ? 's' : ''}
                       </span>
                     )}
+                    {c.email && (
+                      <a href={`mailto:${c.email}`} onClick={e => e.stopPropagation()}
+                        className="p-1 text-gray-300 hover:text-green-600 hover:bg-green-50 rounded transition-colors" title="Send email">
+                        <Mail className="w-3.5 h-3.5" />
+                      </a>
+                    )}
                     <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${selectedContact === c.id ? 'rotate-90' : ''}`} />
                   </div>
                 </div>
@@ -523,7 +551,26 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                             {agentLoading === `enrich_${c.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
                             AI Enrich
                           </button>
+                          {c.email && (
+                            <a href={`mailto:${c.email}`}
+                              className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1">
+                              <Mail className="w-3 h-3" /> Quick Email
+                            </a>
+                          )}
+                          <button onClick={() => deleteContact(c.id)}
+                            className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1">
+                            <Trash2 className="w-3 h-3" /> Delete
+                          </button>
                         </div>
+                        {(() => {
+                          const interaction = getInteractionScore(c);
+                          return (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${interaction.color}`}>
+                              <Activity className="w-3 h-3 inline mr-0.5" />
+                              {interaction.label}
+                            </span>
+                          );
+                        })()}
                       </div>
 
                       {/* Enriched profile banner */}

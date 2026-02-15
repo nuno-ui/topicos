@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, FolderKanban, Search, Users, Settings, LogOut, Keyboard, Command, Sparkles } from 'lucide-react';
+import { LayoutDashboard, FolderKanban, Search, Users, Settings, LogOut, Keyboard, Command, Sparkles, Inbox } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -119,7 +119,7 @@ export function Sidebar({ user }: { user: User }) {
         </nav>
 
         {/* Keyboard shortcuts hint */}
-        <div className="px-3 pb-2 border-t border-gray-100 pt-2">
+        <div className="px-3 pb-2 border-t border-gray-100 pt-2 space-y-1">
           <button
             onClick={() => setShowShortcuts(prev => !prev)}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
@@ -127,6 +127,10 @@ export function Sidebar({ user }: { user: User }) {
             <Keyboard className="w-3 h-3" />
             Press ? for shortcuts
           </button>
+          <div className="flex items-center justify-center gap-1.5 px-3 py-1 text-[10px] text-gray-300">
+            <Command className="w-2.5 h-2.5" />
+            <span>⌘K for command palette</span>
+          </div>
         </div>
 
         {/* User section */}
@@ -179,6 +183,13 @@ export function Sidebar({ user }: { user: User }) {
                 <div className="flex items-center justify-between py-2 px-2 rounded-lg hover:bg-gray-50">
                   <span className="text-sm text-gray-700">Toggle shortcuts</span>
                   <kbd className="text-xs px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-lg font-mono text-gray-600 shadow-sm">?</kbd>
+                </div>
+                <div className="flex items-center justify-between py-2 px-2 rounded-lg hover:bg-gray-50">
+                  <span className="text-sm text-gray-700 flex items-center gap-2.5">
+                    <Command className="w-4 h-4 text-gray-400" />
+                    Command Palette
+                  </span>
+                  <kbd className="text-xs px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-lg font-mono text-gray-600 shadow-sm">⌘K</kbd>
                 </div>
               </div>
             </div>
