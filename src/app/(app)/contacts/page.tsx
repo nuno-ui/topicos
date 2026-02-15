@@ -6,7 +6,7 @@ export default async function ContactsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   const { data: contacts } = await supabase
     .from('contacts')
-    .select('*')
+    .select('*, contact_topic_links(topic_id, role, topics(title))')
     .eq('user_id', user!.id)
     .order('name', { ascending: true });
 

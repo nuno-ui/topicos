@@ -8,7 +8,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from('contacts')
-    .select('*')
+    .select('*, contact_topic_links(topic_id, role, topics(title))')
     .eq('user_id', user.id)
     .order('name', { ascending: true });
 
@@ -22,12 +22,17 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json();
-  const { name, email, notes } = body;
+  const { name, email, organization, role, notes } = body;
   if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
-  const { data, error } = await supabase.from('contacts').insert({
-    name, email: email || null, notes: notes || null, user_id: user.id,
-  }).select().single();
+  const { data, error } = await supabase.from('contacts').upsert({
+    name,
+    email: email || null,
+    organization: organization || null,
+    role: role || null,
+    notes: notes || null,
+    user_id: user.id,
+  }, { onConflict: 'user_id, email' }).select().single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ contact: data }, { status: 201 });
