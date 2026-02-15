@@ -49,10 +49,23 @@ export function SettingsClient({
       });
       if (res.ok) {
         const data = await res.json();
-        toast.success(`Slack sync completed`);
+        const slackResult = (data.accounts ?? []).find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (a: any) => a.account_id === accountId
+        );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const results = slackResult?.results?.[0] ?? slackResult?.results ?? {};
+        const created = results.itemsCreated ?? 0;
+        const updated = results.itemsUpdated ?? 0;
+        if (slackResult?.error) {
+          toast.error(`Slack sync failed: ${slackResult.error}`);
+        } else {
+          toast.success(`Slack sync completed: ${created} new, ${updated} updated messages`);
+        }
         router.refresh();
       } else {
-        toast.error('Slack sync failed');
+        const errData = await res.json().catch(() => ({}));
+        toast.error(errData.error ?? 'Slack sync failed');
       }
     } catch {
       toast.error('Network error during Slack sync');
@@ -89,10 +102,17 @@ export function SettingsClient({
         body: JSON.stringify({ account_id: accountId }),
       });
       if (res.ok) {
-        toast.success('Sync completed successfully');
+        const data = await res.json();
+        const results = data.accounts?.[0]?.results ?? [];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const totalCreated = results.reduce((sum: number, r: any) => sum + (r.itemsCreated ?? 0), 0);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const totalUpdated = results.reduce((sum: number, r: any) => sum + (r.itemsUpdated ?? 0), 0);
+        toast.success(`Sync completed: ${totalCreated} new, ${totalUpdated} updated items`);
         router.refresh();
       } else {
-        toast.error('Sync failed');
+        const errData = await res.json().catch(() => ({}));
+        toast.error(errData.error ?? 'Sync failed');
       }
     } catch {
       toast.error('Network error during sync');
