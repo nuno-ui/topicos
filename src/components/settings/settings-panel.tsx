@@ -1,17 +1,19 @@
 'use client';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2, Trash2, Plus, Shield, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Loader2, Trash2, Plus, Shield } from 'lucide-react';
 import { sourceIcon } from '@/lib/utils';
 
 interface Props {
   googleAccounts: { id: string; email: string }[];
   slackAccounts: { id: string; team_name: string }[];
+  notionAccounts: { id: string; workspace_name: string | null; workspace_icon: string | null }[];
 }
 
-export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: initialSlack }: Props) {
+export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: initialSlack, notionAccounts: initialNotion }: Props) {
   const [googleAccounts, setGoogleAccounts] = useState(initialGoogle);
   const [slackAccounts, setSlackAccounts] = useState(initialSlack);
+  const [notionAccounts, setNotionAccounts] = useState(initialNotion);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
 
   const connectGoogle = () => {
@@ -20,6 +22,10 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
 
   const connectSlack = () => {
     window.location.href = '/api/auth/slack/connect';
+  };
+
+  const connectNotion = () => {
+    window.location.href = '/api/auth/notion/connect';
   };
 
   const disconnectGoogle = async (id: string, email: string) => {
@@ -44,6 +50,20 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
       if (!res.ok) throw new Error('Failed to disconnect');
       setSlackAccounts(prev => prev.filter(a => a.id !== id));
       toast.success(`Disconnected ${teamName}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Disconnect failed');
+    }
+    setDisconnecting(null);
+  };
+
+  const disconnectNotion = async (id: string, workspaceName: string) => {
+    if (!confirm(`Disconnect Notion workspace "${workspaceName}"? This will remove search access to pages and databases in this workspace.`)) return;
+    setDisconnecting(id);
+    try {
+      const res = await fetch(`/api/auth/notion/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to disconnect');
+      setNotionAccounts(prev => prev.filter(a => a.id !== id));
+      toast.success(`Disconnected ${workspaceName}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Disconnect failed');
     }
@@ -177,17 +197,65 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
         )}
       </div>
 
-      {/* Notion (coming soon) */}
+      {/* Notion Workspaces */}
       <div>
         <div className="flex items-center gap-2 mb-1">
-          <h2 className="text-lg font-semibold text-gray-900">Notion</h2>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-600">Coming soon</span>
+          <h2 className="text-lg font-semibold text-gray-900">Notion Workspaces</h2>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+            {sourceIcon('notion')}
+          </span>
         </div>
         <p className="text-sm text-gray-500 mb-4">Connect Notion to search pages and databases linked to your topics</p>
-        <div className="p-6 bg-amber-50/50 rounded-lg border border-amber-200 text-center">
-          <p className="text-sm text-amber-700">{sourceIcon('notion')} Notion integration is coming soon</p>
-          <p className="text-xs text-amber-600 mt-1">Search Notion pages, databases, and wiki content directly from TopicOS</p>
-        </div>
+        {notionAccounts.length === 0 ? (
+          <div className="p-6 bg-gray-50 rounded-lg border border-gray-200 text-center">
+            <p className="text-sm text-gray-500">No Notion workspaces connected</p>
+            <p className="text-xs text-gray-400 mt-1">Connect to search your Notion pages, databases, and wikis</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {notionAccounts.map((a) => (
+              <div key={a.id} className="p-4 bg-white rounded-lg border border-gray-200 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-700 font-medium text-lg">
+                    {a.workspace_icon || 'N'}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{a.workspace_name || 'Notion Workspace'}</p>
+                    <span className="text-xs text-gray-400 flex items-center gap-1">{sourceIcon('notion')} Pages, databases, wikis</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-green-600 font-medium bg-green-50 px-2.5 py-1 rounded-full flex items-center gap-1">
+                    <Shield className="w-3 h-3" /> Connected
+                  </span>
+                  <button
+                    onClick={() => disconnectNotion(a.id, a.workspace_name || 'Notion Workspace')}
+                    disabled={disconnecting === a.id}
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
+                    title="Disconnect"
+                  >
+                    {disconnecting === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <button onClick={connectNotion}
+          className="mt-3 px-4 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 flex items-center gap-2 transition-colors">
+          <Plus className="w-4 h-4" /> Connect Notion Workspace
+        </button>
+
+        {notionAccounts.length > 0 && (
+          <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+            <p className="text-xs font-medium text-gray-700 mb-1">Granted Permissions</p>
+            <div className="flex gap-2 flex-wrap text-xs text-gray-600">
+              <span className="px-2 py-0.5 bg-gray-100 rounded-full">Search Content</span>
+              <span className="px-2 py-0.5 bg-gray-100 rounded-full">Read Pages</span>
+              <span className="px-2 py-0.5 bg-gray-100 rounded-full">Read Databases</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* About */}

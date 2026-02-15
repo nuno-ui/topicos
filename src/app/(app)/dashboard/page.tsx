@@ -6,7 +6,7 @@ export default async function DashboardPage() {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const [topicsRes, googleRes, slackRes, recentItemsRes, aiRunsRes] = await Promise.all([
+  const [topicsRes, googleRes, slackRes, notionRes, recentItemsRes, aiRunsRes] = await Promise.all([
     supabase
       .from('topics')
       .select('*, topic_items(count)')
@@ -21,6 +21,10 @@ export default async function DashboardPage() {
     supabase
       .from('slack_accounts')
       .select('id, team_name')
+      .eq('user_id', user!.id),
+    supabase
+      .from('notion_accounts')
+      .select('id, workspace_name')
       .eq('user_id', user!.id),
     supabase
       .from('topic_items')
@@ -39,10 +43,12 @@ export default async function DashboardPage() {
   const topics = topicsRes.data ?? [];
   const googleAccounts = googleRes.data ?? [];
   const slackAccounts = slackRes.data ?? [];
+  const notionAccounts = notionRes.data ?? [];
   const recentItems = recentItemsRes.data ?? [];
   const aiRuns = aiRunsRes.data ?? [];
   const hasGoogle = googleAccounts.length > 0;
   const hasSlack = slackAccounts.length > 0;
+  const hasNotion = notionAccounts.length > 0;
 
   const greeting = () => {
     const hour = new Date().getHours();
@@ -84,7 +90,7 @@ export default async function DashboardPage() {
       <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-gray-700">Connected Sources</h2>
-          {(!hasGoogle || !hasSlack) && (
+          {(!hasGoogle || !hasSlack || !hasNotion) && (
             <Link href="/settings" className="text-xs text-blue-600 hover:underline">Connect more &rarr;</Link>
           )}
         </div>
@@ -101,8 +107,8 @@ export default async function DashboardPage() {
           <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${hasSlack ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
             {sourceIcon('slack')} Slack {hasSlack ? '\u2713' : '\u2014'}
           </span>
-          <span className="px-3 py-1.5 rounded-full text-sm font-medium bg-amber-50 text-amber-600 border border-amber-200">
-            {sourceIcon('notion')} Notion (coming soon)
+          <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${hasNotion ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+            {sourceIcon('notion')} Notion {hasNotion ? '\u2713' : '\u2014'}
           </span>
         </div>
       </div>

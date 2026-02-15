@@ -3,6 +3,7 @@ import { searchGmail, type SearchResult } from './gmail';
 import { searchCalendar } from './calendar';
 import { searchDrive } from './drive';
 import { searchSlack } from './slack';
+import { searchNotion } from './notion';
 import { createServiceClient } from '@/lib/supabase/server';
 
 export type { SearchResult };
@@ -27,12 +28,14 @@ export async function searchAllSources(userId: string, request: SearchRequest): 
   const maxResults = request.max_results ?? 20;
   const results: SourceSearchResult[] = [];
 
-  const [googleRes, slackRes] = await Promise.all([
+  const [googleRes, slackRes, notionRes] = await Promise.all([
     supabase.from('google_accounts').select('id').eq('user_id', userId),
     supabase.from('slack_accounts').select('id, access_token').eq('user_id', userId),
+    supabase.from('notion_accounts').select('id, access_token').eq('user_id', userId),
   ]);
   const googleAccounts = googleRes.data ?? [];
   const slackAccounts = slackRes.data ?? [];
+  const notionAccounts = notionRes.data ?? [];
 
   let linkedIds = new Set<string>();
   if (request.topic_id) {
@@ -88,6 +91,18 @@ export async function searchAllSources(userId: string, request: SearchRequest): 
         results.push({ source: 'slack', items });
       } catch (err) {
         results.push({ source: 'slack', items: [], error: err instanceof Error ? err.message : 'Slack search failed' });
+      }
+    }
+  }
+
+  // Search Notion
+  if (request.sources.includes('notion') && notionAccounts.length > 0) {
+    for (const account of notionAccounts) {
+      try {
+        const items = await searchNotion(account.access_token, account.id, request.query, maxResults);
+        results.push({ source: 'notion', items });
+      } catch (err) {
+        results.push({ source: 'notion', items: [], error: err instanceof Error ? err.message : 'Notion search failed' });
       }
     }
   }
