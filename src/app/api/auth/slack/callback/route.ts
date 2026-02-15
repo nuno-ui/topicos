@@ -44,12 +44,20 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${appUrl}/settings?error=slack_token_${tokenData.error}`);
     }
 
-    const accessToken = tokenData.access_token;
+    // With user_scope, the user token is in authed_user.access_token
+    // The top-level access_token is the bot token (if bot scopes were requested)
+    const userToken = tokenData.authed_user?.access_token;
+    const accessToken = userToken ?? tokenData.access_token;
     const teamId = tokenData.team?.id ?? '';
     const teamName = tokenData.team?.name ?? '';
     const botUserId = tokenData.bot_user_id ?? null;
-    const scopes = (tokenData.scope ?? '').split(',');
+    const userScopes = tokenData.authed_user?.scope
+      ? (tokenData.authed_user.scope as string).split(',')
+      : (tokenData.scope ?? '').split(',');
     const userId = state;
+
+    console.log('Slack OAuth: got token type:', userToken ? 'user' : 'bot',
+      'team:', teamName, 'scopes:', userScopes.join(','));
 
     // Upsert into slack_accounts
     const supabase = createServiceClient();
@@ -62,7 +70,7 @@ export async function GET(request: Request) {
           team_name: teamName,
           bot_user_id: botUserId,
           access_token: accessToken,
-          scopes,
+          scopes: userScopes,
         },
         { onConflict: 'user_id,team_id' },
       );

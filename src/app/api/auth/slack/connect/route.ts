@@ -17,8 +17,9 @@ export async function GET() {
   const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}/api/auth/slack/callback`;
   const state = user.id;
 
-  // Request scopes for reading channels, messages, users
-  const scopes = [
+  // User scopes — these let us read the user's own DMs, group messages,
+  // and channels on their behalf (not as a bot)
+  const userScopes = [
     'channels:history',
     'channels:read',
     'groups:history',
@@ -34,7 +35,7 @@ export async function GET() {
 
   const authUrl = new URL('https://slack.com/oauth/v2/authorize');
   authUrl.searchParams.set('client_id', clientId);
-  authUrl.searchParams.set('scope', scopes);
+  authUrl.searchParams.set('user_scope', userScopes);
   authUrl.searchParams.set('redirect_uri', redirectUri);
   authUrl.searchParams.set('state', state);
 
