@@ -315,7 +315,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       </div>
 
       {/* AI Assistants Panel */}
-      <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200">
+      <div className="mb-6 p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
         <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
           <Sparkles className="w-4 h-4 text-purple-500" />
           AI Contact Assistants
@@ -399,7 +399,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
       {/* Create form */}
       {showCreate && (
-        <div className="mb-6 p-4 bg-white rounded-lg border border-blue-200 shadow-sm space-y-3">
+        <div className="mb-6 p-4 bg-white rounded-xl border border-blue-200 shadow-sm space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Add New Contact</h3>
           <div className="grid grid-cols-2 gap-3">
             <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Name *"
@@ -424,7 +424,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
       {/* Contact list */}
       {filteredContacts.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
+        <div className="text-center py-16 bg-white rounded-xl border border-gray-100 shadow-sm">
           <Users className="w-8 h-8 text-gray-300 mx-auto mb-3" />
           <p className="text-gray-500">{searchQuery ? `No contacts match "${searchQuery}"` : 'No contacts yet'}</p>
           <p className="text-gray-400 text-xs mt-1">Contacts will be auto-extracted when you link items to topics, or add them manually.</p>
@@ -445,7 +445,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
             <div key={c.id}>
               <button
                 onClick={() => setSelectedContact(selectedContact === c.id ? null : c.id)}
-                className="w-full p-4 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors text-left"
+                className="w-full p-4 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all shadow-sm text-left"
               >
                 <div className="flex items-center gap-3">
                   {/* Avatar */}
@@ -483,7 +483,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
               {/* Expanded detail */}
               {selectedContact === c.id && (
-                <div className="ml-13 mt-1 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="mt-1 ml-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
                   {editingContact === c.id ? (
                     <div className="space-y-3">
                       <div className="grid grid-cols-2 gap-3">

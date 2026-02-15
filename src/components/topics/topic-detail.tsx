@@ -479,8 +479,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <Link href="/topics" className="text-sm text-blue-600 hover:underline mb-2 inline-block">
-            &larr; Back to Topics
+          <Link href="/topics" className="text-sm text-blue-600 hover:text-blue-800 mb-2 inline-flex items-center gap-1.5 font-medium transition-colors">
+            <span>&larr;</span> Back to Topics
           </Link>
           {editing ? (
             <div className="space-y-3 mt-2">
@@ -545,6 +545,10 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         </div>
         {!editing && (
           <div className="flex gap-2">
+            <button onClick={() => { navigator.clipboard.writeText(window.location.href); toast.success('Link copied to clipboard'); }}
+              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Copy link">
+              <Link2 className="w-4 h-4" />
+            </button>
             <button onClick={() => { setEditing(true); setEditTitle(topic.title); setEditDescription(topic.description || ''); setEditArea(topic.area); setEditStatus(topic.status); setEditDueDate(topic.due_date || ''); }}
               className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Edit">
               <Edit3 className="w-4 h-4" />
@@ -564,7 +568,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       {/* Topic Info Dashboard */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Key Metrics */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="bg-gradient-to-br from-white to-blue-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Overview</h3>
           <div className="grid grid-cols-2 gap-3">
             <div className="text-center p-2 bg-blue-50 rounded-lg">
@@ -603,7 +607,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         </div>
 
         {/* Timeline */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="bg-gradient-to-br from-white to-purple-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1">
             <Clock className="w-3 h-3" /> Timeline
           </h3>
@@ -644,7 +648,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         </div>
 
         {/* People & Contacts */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="bg-gradient-to-br from-white to-teal-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1">
             <Users className="w-3 h-3" /> People Involved
           </h3>
@@ -718,7 +722,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* Search Panel */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm">
         <button onClick={() => setShowSearch(!showSearch)}
           className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50">
           <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
@@ -768,7 +772,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
       {/* Search Results */}
       {searchResults.length > 0 && (
-        <div className="bg-white rounded-lg border border-blue-200">
+        <div className="bg-white rounded-xl border border-blue-200">
           <div className="px-4 py-3 border-b border-blue-100 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <h3 className="text-sm font-semibold text-gray-700">
@@ -826,7 +830,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
       {/* AI Find Results */}
       {showAiResults && (
-        <div className="bg-white rounded-lg border border-purple-200">
+        <div className="bg-white rounded-xl border border-purple-200">
           <div className="px-4 py-3 border-b border-purple-100 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
@@ -919,7 +923,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
           ))}
         </div>
         {filteredItems.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+          <div className="text-center py-12 bg-white rounded-xl border border-gray-100 shadow-sm">
             <Search className="w-8 h-8 text-gray-300 mx-auto mb-3" />
             <p className="text-gray-500 text-sm">No items linked yet</p>
             <p className="text-gray-400 text-xs mt-1">Use the search panel above to find and link items from your sources</p>
@@ -931,7 +935,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         ) : (
           <div className="space-y-2">
             {filteredItems.map((item) => (
-              <div key={item.id} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors group">
+              <div key={item.id} className="flex items-start gap-3 p-3 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-sm shadow-sm transition-colors group">
                 <span className="mt-0.5 text-base">{sourceIcon(item.source)}</span>
                 <div className="flex-1 min-w-0">
                   <a href={item.url} target="_blank" rel="noopener noreferrer"
@@ -968,7 +972,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* AI Analysis */}
-      <div className="bg-white rounded-lg border border-gray-200">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
         <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <Bot className="w-4 h-4 text-purple-500" />
@@ -1045,13 +1049,13 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* AI Agents */}
-      <div className="bg-white rounded-lg border border-gray-200">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
         <div className="px-4 py-3 border-b border-gray-100">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
             <Zap className="w-4 h-4 text-amber-500" />
             AI Agents
           </h2>
-          <div className="flex gap-2 flex-wrap">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <button onClick={() => runAgent('auto_tag')} disabled={!!agentLoading}
               className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 flex items-center gap-1.5">
               {agentLoading === 'auto_tag' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Tag className="w-3 h-3" />}
@@ -1163,7 +1167,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* Notes */}
-      <div className="bg-white rounded-lg border border-gray-200">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
         <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <StickyNote className="w-4 h-4 text-amber-500" />

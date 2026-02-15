@@ -269,7 +269,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     return (
       <div key={t.id} className="group relative">
         <Link href={`/topics/${t.id}`}
-          className="block p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all">
+          className="block p-4 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
@@ -493,7 +493,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
       {/* Filters */}
       {showFilters && (
-        <div className="mb-4 p-4 bg-white rounded-lg border border-gray-200 space-y-3">
+        <div className="mb-4 p-4 bg-white rounded-xl border border-gray-100 shadow-sm space-y-3">
           <div className="flex gap-4 flex-wrap items-end">
             <div>
               <label className="text-xs text-gray-500 block mb-1">Area</label>
@@ -554,7 +554,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
       {/* Create topic form */}
       {showCreate && (
-        <div className="mb-4 p-4 bg-white rounded-lg border border-blue-200 shadow-sm space-y-3">
+        <div className="mb-4 p-4 bg-white rounded-xl border border-blue-200 shadow-sm space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Create New Topic</h3>
           <input value={title} onChange={e => setTitle(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleCreate()}
@@ -588,7 +588,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
       {/* Topic list */}
       {filteredTopics.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
+        <div className="text-center py-16 bg-white rounded-xl border border-gray-100 shadow-sm">
           <p className="text-gray-500">{searchQuery ? `No topics match "${searchQuery}"` : 'No topics found'}</p>
           <button onClick={() => { setShowCreate(true); setSearchQuery(''); }}
             className="mt-3 text-blue-600 hover:underline text-sm">Create your first topic &rarr;</button>

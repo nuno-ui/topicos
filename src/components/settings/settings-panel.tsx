@@ -154,7 +154,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
   return (
     <div className="space-y-8">
       {/* AI Platform Assistants */}
-      <div className="p-4 bg-white rounded-lg border border-gray-200">
+      <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
         <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
           <Sparkles className="w-4 h-4 text-purple-500" />
           AI Platform Assistants
@@ -260,7 +260,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
         ) : (
           <div className="space-y-2">
             {googleAccounts.map((a) => (
-              <div key={a.id} className="p-4 bg-white rounded-lg border border-gray-200 flex items-center justify-between">
+              <div key={a.id} className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-medium">G</div>
                   <div>
@@ -290,7 +290,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
           </div>
         )}
         <button onClick={connectGoogle}
-          className="mt-3 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors">
+          className="mt-3 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors">
           <Plus className="w-4 h-4" /> Connect Google Account
         </button>
 
@@ -325,7 +325,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
         ) : (
           <div className="space-y-2">
             {slackAccounts.map((a) => (
-              <div key={a.id} className="p-4 bg-white rounded-lg border border-gray-200 flex items-center justify-between">
+              <div key={a.id} className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-medium">S</div>
                   <div>
@@ -351,7 +351,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
           </div>
         )}
         <button onClick={connectSlack}
-          className="mt-3 px-4 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 flex items-center gap-2 transition-colors">
+          className="mt-3 px-4 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-medium hover:bg-purple-700 flex items-center gap-2 transition-colors">
           <Plus className="w-4 h-4" /> Connect Slack Workspace
         </button>
 
@@ -385,7 +385,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
         ) : (
           <div className="space-y-2">
             {notionAccounts.map((a) => (
-              <div key={a.id} className="p-4 bg-white rounded-lg border border-gray-200 flex items-center justify-between">
+              <div key={a.id} className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-700 font-medium text-lg">
                     {a.workspace_icon || 'N'}
@@ -413,7 +413,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
           </div>
         )}
         <button onClick={connectNotion}
-          className="mt-3 px-4 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 flex items-center gap-2 transition-colors">
+          className="mt-3 px-4 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 flex items-center gap-2 transition-colors">
           <Plus className="w-4 h-4" /> Connect Notion Workspace
         </button>
 
@@ -432,7 +432,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
       {/* About */}
       <div className="pt-4 border-t border-gray-200">
         <h2 className="text-lg font-semibold text-gray-900 mb-3">About TopicOS</h2>
-        <div className="p-4 bg-white rounded-lg border border-gray-200">
+        <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-900">TopicOS v3</p>
@@ -450,6 +450,22 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
             <span className="flex items-center gap-1">
               {sourceIcon('gmail')} {sourceIcon('calendar')} {sourceIcon('drive')} {sourceIcon('slack')} {sourceIcon('notion')} Multi-source search
             </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Danger Zone */}
+      <div className="pt-4 border-t border-red-200">
+        <h2 className="text-lg font-semibold text-red-600 mb-3">Danger Zone</h2>
+        <div className="p-4 bg-red-50 rounded-xl border border-red-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-red-900">Export Your Data</p>
+              <p className="text-xs text-red-600/70 mt-0.5">Download all your topics, items, and contacts as JSON</p>
+            </div>
+            <button className="px-4 py-2 bg-white border border-red-200 text-red-700 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors">
+              Export Data
+            </button>
           </div>
         </div>
       </div>

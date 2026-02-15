@@ -315,7 +315,7 @@ export function SearchPanel() {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               placeholder="Search across all connected sources..."
-              className="w-full px-4 py-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
             />
             {query && (
               <button onClick={() => { setQuery(''); setResults([]); }}
@@ -327,7 +327,7 @@ export function SearchPanel() {
           <button
             onClick={handleSearch}
             disabled={loading}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition-colors"
+            className="px-6 py-3 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition-colors"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
             Search
@@ -402,7 +402,7 @@ export function SearchPanel() {
       </div>
 
       {/* AI Assistants Panel */}
-      <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200">
+      <div className="mb-6 p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
         <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
           <Sparkles className="w-4 h-4 text-purple-500" />
           AI Search Assistants
@@ -494,7 +494,7 @@ export function SearchPanel() {
           <h2 className="text-sm font-semibold text-gray-700">{sortedResults.length} results found</h2>
           <div className="flex gap-2 text-xs text-gray-400">
             {[...new Set(sortedResults.map(r => r.source))].map(src => (
-              <span key={src} className="flex items-center gap-1">
+              <span key={src} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
                 {sourceIcon(src)} {sortedResults.filter(r => r.source === src).length}
               </span>
             ))}
@@ -507,7 +507,7 @@ export function SearchPanel() {
           const key = item.source + ':' + item.external_id;
           const cat = getCategoryForResult(index);
           return (
-            <div key={key} className={`p-4 bg-white rounded-lg border transition-colors ${
+            <div key={key} className={`p-4 bg-white rounded-xl border transition-colors ${
               item.already_linked ? 'border-green-200 bg-green-50/50' : 'border-gray-200 hover:border-gray-300'
             }`}>
               <div className="flex items-start gap-3">
@@ -636,7 +636,7 @@ export function SearchPanel() {
 
       {!loading && results.length === 0 && !query && (
         <div className="text-center py-16">
-          <Search className="w-10 h-10 text-gray-200 mx-auto mb-4" />
+          <Search className="w-12 h-12 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-500 text-sm">Search across your connected sources</p>
           <p className="text-gray-400 text-xs mt-1">Find emails, events, files, messages, and Notion pages — then link them to your topics</p>
         </div>
