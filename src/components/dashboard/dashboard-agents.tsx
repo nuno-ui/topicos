@@ -119,7 +119,7 @@ export function DashboardAgents() {
 
       {/* Daily Briefing */}
       {showBriefing && briefing && (
-        <div className="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border border-purple-200 shadow-sm">
+        <div className="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border border-purple-200 shadow-sm animate-slide-up">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-purple-800 flex items-center gap-2">
               <div className="w-6 h-6 bg-purple-100 rounded-lg flex items-center justify-center">
@@ -137,7 +137,7 @@ export function DashboardAgents() {
 
       {/* Weekly Review */}
       {showReview && review && (
-        <div className="p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-200 shadow-sm">
+        <div className="p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-200 shadow-sm animate-slide-up">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-green-800 flex items-center gap-2">
               <div className="w-6 h-6 bg-green-100 rounded-lg flex items-center justify-center">
@@ -155,7 +155,7 @@ export function DashboardAgents() {
 
       {/* Topic Suggestions */}
       {showSuggestions && suggestions.length > 0 && (
-        <div className="p-4 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl border border-blue-200 shadow-sm">
+        <div className="p-4 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl border border-blue-200 shadow-sm animate-slide-up">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
               <div className="w-6 h-6 bg-blue-100 rounded-lg flex items-center justify-center">

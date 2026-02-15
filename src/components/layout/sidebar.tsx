@@ -58,6 +58,7 @@ export function Sidebar({ user }: { user: User }) {
         case '4': router.push('/contacts'); break;
         case '5': router.push('/settings'); break;
         case '?': setShowShortcuts(prev => !prev); break;
+        case 'Escape': setShowShortcuts(false); break;
       }
     };
 
@@ -118,7 +119,7 @@ export function Sidebar({ user }: { user: User }) {
         </nav>
 
         {/* Keyboard shortcuts hint */}
-        <div className="px-3 pb-2">
+        <div className="px-3 pb-2 border-t border-gray-100 pt-2">
           <button
             onClick={() => setShowShortcuts(prev => !prev)}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
@@ -150,7 +151,7 @@ export function Sidebar({ user }: { user: User }) {
       {/* Keyboard shortcuts modal */}
       {showShortcuts && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center" onClick={() => setShowShortcuts(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-96 p-6 border border-gray-100" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-2xl w-96 p-6 border border-gray-100 animate-scale-in" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2.5">
                 <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center">

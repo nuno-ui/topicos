@@ -1,6 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { sourceIcon, sourceColor, formatRelativeDate } from '@/lib/utils';
+import { Zap, Clock, BarChart3, FolderKanban, Newspaper, PieChart } from 'lucide-react';
 import { DashboardAgents } from '@/components/dashboard/dashboard-agents';
 
 export default async function DashboardPage() {
@@ -72,7 +73,7 @@ export default async function DashboardPage() {
   const totalSourceCount = Object.values(sourceCounts).reduce((a, b) => a + b, 0);
 
   return (
-    <div className="p-8 max-w-6xl">
+    <div className="p-8 max-w-6xl animate-fade-in">
       {/* Welcome + Stats */}
       <div className="mb-8 flex items-start justify-between">
         <div>
@@ -116,7 +117,7 @@ export default async function DashboardPage() {
             }`}>
               {sourceIcon(s.icon)} {s.label}
               {s.connected ? (
-                <span className="ml-1 w-1.5 h-1.5 bg-green-500 rounded-full" />
+                <span className="ml-1 w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse-dot" />
               ) : (
                 <span className="text-[10px] text-gray-400 ml-1">--</span>
               )}
@@ -148,7 +149,7 @@ export default async function DashboardPage() {
         <div className="lg:col-span-2 space-y-6">
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Active Topics</h2>
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FolderKanban className="w-5 h-5 text-blue-500" /> Active Topics</h2>
               <Link href="/topics" className="text-sm text-blue-600 hover:underline font-medium">View all &rarr;</Link>
             </div>
             {topics.length === 0 ? (
@@ -230,7 +231,7 @@ export default async function DashboardPage() {
           {/* AI Activity */}
           {aiRuns.length > 0 && (
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent AI Activity</h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"><Zap className="w-5 h-5 text-purple-500" /> Recent AI Activity</h2>
               <div className="space-y-2">
                 {aiRuns.map((run) => (
                   <div key={run.id} className="p-3.5 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-purple-200 transition-colors">
@@ -264,7 +265,7 @@ export default async function DashboardPage() {
         <div className="space-y-6">
           {/* Recent Activity */}
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Items</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"><Newspaper className="w-5 h-5 text-emerald-500" /> Recent Items</h2>
             {recentItems.length === 0 ? (
               <div className="text-center py-10 bg-white rounded-xl border border-gray-100 shadow-sm">
                 <div className="w-10 h-10 mx-auto bg-gray-50 rounded-lg flex items-center justify-center mb-2">
@@ -300,7 +301,7 @@ export default async function DashboardPage() {
           {/* Source breakdown */}
           {Object.keys(sourceCounts).length > 0 && (
             <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Items by Source</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><PieChart className="w-4 h-4 text-blue-500" /> Items by Source</h3>
               <div className="space-y-3">
                 {Object.entries(sourceCounts).sort(([,a], [,b]) => b - a).map(([src, count]) => {
                   const pct = totalSourceCount > 0 ? (count / totalSourceCount * 100) : 0;

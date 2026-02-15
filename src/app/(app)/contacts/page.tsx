@@ -11,7 +11,7 @@ export default async function ContactsPage() {
     .order('name', { ascending: true });
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-8 max-w-5xl animate-fade-in">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Contacts</h1>
         <p className="text-gray-500 mt-1 text-sm">People from your topics, emails, and connected sources</p>

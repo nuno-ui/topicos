@@ -66,7 +66,7 @@ export function LoginForm() {
           <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
             placeholder="your@email.com" required
-            className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder:text-gray-400" />
+            className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder:text-gray-400" />
         </div>
         <button type="submit" disabled={loading}
           className="w-full py-3 brand-gradient text-white rounded-xl font-semibold text-sm hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
@@ -77,7 +77,7 @@ export function LoginForm() {
 
       {/* Status message */}
       {message && (
-        <div className={`flex items-center gap-2.5 p-3.5 rounded-xl text-sm ${
+        <div className={`flex items-center gap-2.5 p-3.5 rounded-xl text-sm animate-fade-in ${
           status === 'success' ? 'bg-green-50 text-green-700 border border-green-200' :
           status === 'error' ? 'bg-red-50 text-red-700 border border-red-200' :
           'bg-gray-50 text-gray-600'

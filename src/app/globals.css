@@ -100,3 +100,47 @@
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
+
+/* ===== Staggered animation delays ===== */
+
+.animate-delay-100 {
+  animation-delay: 100ms;
+  animation-fill-mode: both;
+}
+
+.animate-delay-200 {
+  animation-delay: 200ms;
+  animation-fill-mode: both;
+}
+
+.animate-delay-300 {
+  animation-delay: 300ms;
+  animation-fill-mode: both;
+}
+
+.animate-delay-400 {
+  animation-delay: 400ms;
+  animation-fill-mode: both;
+}
+
+/* ===== Pulse animation for live indicators ===== */
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* ===== Scale-in animation ===== */
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out;
+}

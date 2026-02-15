@@ -30,7 +30,7 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <div className="space-y-5">
+          <div className="space-y-5 animate-slide-up">
             {features.map((f, i) => (
               <div key={i} className="flex items-start gap-4 group">
                 <div className="w-10 h-10 bg-white/15 backdrop-blur-sm rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-white/25 transition-colors">
@@ -52,7 +52,7 @@ export default function LoginPage() {
       </div>
 
       {/* Right panel - login form */}
-      <div className="flex-1 flex items-center justify-center bg-gray-50 px-6">
+      <div className="flex-1 flex items-center justify-center bg-gray-50 px-6 animate-fade-in">
         <div className="max-w-sm w-full">
           {/* Mobile logo */}
           <div className="lg:hidden text-center mb-8">

@@ -15,7 +15,7 @@ export default function Error({
   }, [error]);
 
   return (
-    <div className="flex items-center justify-center min-h-[60vh] p-8">
+    <div className="flex items-center justify-center min-h-[60vh] p-8 animate-fade-in">
       <div className="text-center max-w-md">
         <div className="w-16 h-16 mx-auto bg-red-50 rounded-2xl flex items-center justify-center mb-5">
           <AlertTriangle className="w-8 h-8 text-red-500" />
