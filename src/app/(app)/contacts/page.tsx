@@ -12,7 +12,10 @@ export default async function ContactsPage() {
 
   return (
     <div className="p-8 max-w-5xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-8">Contacts</h1>
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-gray-900">Contacts</h1>
+        <p className="text-gray-500 mt-1 text-sm">People from your topics, emails, and connected sources</p>
+      </div>
       <ContactsList initialContacts={contacts ?? []} />
     </div>
   );

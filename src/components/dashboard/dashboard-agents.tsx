@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Brain, Sparkles, BarChart3, Loader2, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { Brain, Sparkles, BarChart3, Loader2, X } from 'lucide-react';
 
 export function DashboardAgents() {
   const [loading, setLoading] = useState<string | null>(null);
@@ -72,41 +72,62 @@ export function DashboardAgents() {
     });
   };
 
+  const agents = [
+    {
+      id: 'daily_briefing',
+      label: 'Daily Briefing',
+      desc: 'Get an AI summary of your day',
+      icon: Brain,
+      colors: 'bg-gradient-to-br from-purple-50 to-indigo-50 text-purple-700 border-purple-200 hover:from-purple-100 hover:to-indigo-100',
+      iconBg: 'bg-purple-100',
+    },
+    {
+      id: 'suggest_topics',
+      label: 'Suggest Topics',
+      desc: 'AI-generated topic ideas',
+      icon: Sparkles,
+      colors: 'bg-gradient-to-br from-blue-50 to-cyan-50 text-blue-700 border-blue-200 hover:from-blue-100 hover:to-cyan-100',
+      iconBg: 'bg-blue-100',
+    },
+    {
+      id: 'weekly_review',
+      label: 'Weekly Review',
+      desc: 'Reflect on your week',
+      icon: BarChart3,
+      colors: 'bg-gradient-to-br from-green-50 to-emerald-50 text-green-700 border-green-200 hover:from-green-100 hover:to-emerald-100',
+      iconBg: 'bg-green-100',
+    },
+  ];
+
   return (
     <div className="space-y-4">
-      {/* Agent Buttons */}
-      <div className="p-4 bg-white rounded-lg border border-gray-200">
-        <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
-          <Sparkles className="w-4 h-4 text-purple-500" />
-          AI Assistants
-        </h2>
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={() => runAgent('daily_briefing')} disabled={!!loading}
-            className="px-3 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 flex items-center gap-1.5">
-            {loading === 'daily_briefing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
-            Daily Briefing
+      {/* Agent Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {agents.map((agent) => (
+          <button key={agent.id} onClick={() => runAgent(agent.id)} disabled={!!loading}
+            className={`p-4 rounded-xl border text-left transition-all disabled:opacity-50 shadow-sm ${agent.colors}`}>
+            <div className="flex items-center gap-3 mb-2">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${agent.iconBg}`}>
+                {loading === agent.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <agent.icon className="w-4 h-4" />}
+              </div>
+              <span className="font-semibold text-sm">{agent.label}</span>
+            </div>
+            <p className="text-xs opacity-70">{agent.desc}</p>
           </button>
-          <button onClick={() => runAgent('suggest_topics')} disabled={!!loading}
-            className="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 flex items-center gap-1.5">
-            {loading === 'suggest_topics' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            Suggest Topics
-          </button>
-          <button onClick={() => runAgent('weekly_review')} disabled={!!loading}
-            className="px-3 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 disabled:opacity-50 flex items-center gap-1.5">
-            {loading === 'weekly_review' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BarChart3 className="w-3.5 h-3.5" />}
-            Weekly Review
-          </button>
-        </div>
+        ))}
       </div>
 
       {/* Daily Briefing */}
       {showBriefing && briefing && (
-        <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
-          <div className="flex items-center justify-between mb-2">
+        <div className="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border border-purple-200 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-purple-800 flex items-center gap-2">
-              <Brain className="w-4 h-4" /> Daily Briefing
+              <div className="w-6 h-6 bg-purple-100 rounded-lg flex items-center justify-center">
+                <Brain className="w-3.5 h-3.5" />
+              </div>
+              Daily Briefing
             </h3>
-            <button onClick={() => setShowBriefing(false)} className="p-1 text-purple-400 hover:text-purple-600">
+            <button onClick={() => setShowBriefing(false)} className="p-1 text-purple-400 hover:text-purple-600 hover:bg-purple-100 rounded-lg transition-colors">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -116,12 +137,15 @@ export function DashboardAgents() {
 
       {/* Weekly Review */}
       {showReview && review && (
-        <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-          <div className="flex items-center justify-between mb-2">
+        <div className="p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-200 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-green-800 flex items-center gap-2">
-              <BarChart3 className="w-4 h-4" /> Weekly Review
+              <div className="w-6 h-6 bg-green-100 rounded-lg flex items-center justify-center">
+                <BarChart3 className="w-3.5 h-3.5" />
+              </div>
+              Weekly Review
             </h3>
-            <button onClick={() => setShowReview(false)} className="p-1 text-green-400 hover:text-green-600">
+            <button onClick={() => setShowReview(false)} className="p-1 text-green-400 hover:text-green-600 hover:bg-green-100 rounded-lg transition-colors">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -131,25 +155,28 @@ export function DashboardAgents() {
 
       {/* Topic Suggestions */}
       {showSuggestions && suggestions.length > 0 && (
-        <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-          <div className="flex items-center justify-between mb-2">
+        <div className="p-4 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl border border-blue-200 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
-              <Sparkles className="w-4 h-4" /> Suggested Topics
+              <div className="w-6 h-6 bg-blue-100 rounded-lg flex items-center justify-center">
+                <Sparkles className="w-3.5 h-3.5" />
+              </div>
+              Suggested Topics
             </h3>
-            <button onClick={() => setShowSuggestions(false)} className="p-1 text-blue-400 hover:text-blue-600">
+            <button onClick={() => setShowSuggestions(false)} className="p-1 text-blue-400 hover:text-blue-600 hover:bg-blue-100 rounded-lg transition-colors">
               <X className="w-4 h-4" />
             </button>
           </div>
           <div className="space-y-2">
             {suggestions.map((s, i) => (
-              <div key={i} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-blue-100">
+              <div key={i} className="flex items-start gap-3 p-3 bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900">{s.title}</p>
                   <p className="text-xs text-gray-500 mt-0.5">{s.description}</p>
                   <p className="text-xs text-blue-600 mt-1 italic">{s.reason}</p>
                 </div>
                 <button onClick={() => createSuggestedTopic(s)}
-                  className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 flex-shrink-0">
+                  className="px-3 py-1.5 brand-gradient text-white rounded-lg text-xs font-medium hover:opacity-90 transition-all flex-shrink-0 shadow-sm">
                   Create
                 </button>
               </div>

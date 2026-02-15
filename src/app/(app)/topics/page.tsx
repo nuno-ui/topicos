@@ -20,8 +20,11 @@ export default async function TopicsPage() {
 
   return (
     <div className="p-8 max-w-6xl">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Topics</h1>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Topics</h1>
+          <p className="text-gray-500 mt-1 text-sm">Organize your work, projects, and personal matters into topic clusters</p>
+        </div>
       </div>
       <TopicsList
         initialTopics={topicsRes.data ?? []}

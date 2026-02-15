@@ -12,7 +12,10 @@ export default async function SettingsPage() {
 
   return (
     <div className="p-8 max-w-3xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-8">Settings</h1>
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+        <p className="text-gray-500 mt-1 text-sm">Manage your connected accounts, preferences, and AI configuration</p>
+      </div>
       <SettingsPanel
         googleAccounts={googleRes.data ?? []}
         slackAccounts={slackRes.data ?? []}

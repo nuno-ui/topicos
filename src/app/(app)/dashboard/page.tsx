@@ -1,13 +1,13 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import Link from 'next/link';
-import { sourceIcon, formatRelativeDate } from '@/lib/utils';
+import { sourceIcon, sourceColor, formatRelativeDate } from '@/lib/utils';
 import { DashboardAgents } from '@/components/dashboard/dashboard-agents';
 
 export default async function DashboardPage() {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const [topicsRes, googleRes, slackRes, notionRes, recentItemsRes, aiRunsRes] = await Promise.all([
+  const [topicsRes, googleRes, slackRes, notionRes, recentItemsRes, aiRunsRes, allItemsCountRes] = await Promise.all([
     supabase
       .from('topics')
       .select('*, topic_items(count)')
@@ -39,6 +39,10 @@ export default async function DashboardPage() {
       .eq('user_id', user!.id)
       .order('created_at', { ascending: false })
       .limit(5),
+    supabase
+      .from('topic_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user!.id),
   ]);
 
   const topics = topicsRes.data ?? [];
@@ -47,10 +51,12 @@ export default async function DashboardPage() {
   const notionAccounts = notionRes.data ?? [];
   const recentItems = recentItemsRes.data ?? [];
   const aiRuns = aiRunsRes.data ?? [];
+  const totalItems = allItemsCountRes.count ?? 0;
   const hasGoogle = googleAccounts.length > 0;
   const hasSlack = slackAccounts.length > 0;
   const hasNotion = notionAccounts.length > 0;
 
+  const displayName = user!.user_metadata?.full_name || user!.email?.split('@')[0] || 'there';
   const greeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Good morning';
@@ -63,64 +69,72 @@ export default async function DashboardPage() {
     return acc;
   }, {} as Record<string, number>);
 
+  const totalSourceCount = Object.values(sourceCounts).reduce((a, b) => a + b, 0);
+
   return (
     <div className="p-8 max-w-6xl">
       {/* Welcome + Stats */}
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{greeting()}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{greeting()}, {displayName}</h1>
           <p className="text-gray-500 mt-1">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
         </div>
-        <div className="flex gap-6">
-          <div className="text-center">
+        <div className="flex gap-4">
+          <div className="text-center px-4 py-3 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[90px]">
             <p className="text-2xl font-bold text-blue-600">{topics.length}</p>
-            <p className="text-xs text-gray-500">Active Topics</p>
+            <p className="text-[11px] text-gray-500 font-medium">Active Topics</p>
           </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-green-600">{recentItems.length}</p>
-            <p className="text-xs text-gray-500">Recent Items</p>
+          <div className="text-center px-4 py-3 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[90px]">
+            <p className="text-2xl font-bold text-emerald-600">{totalItems}</p>
+            <p className="text-[11px] text-gray-500 font-medium">Total Items</p>
           </div>
-          <div className="text-center">
+          <div className="text-center px-4 py-3 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[90px]">
             <p className="text-2xl font-bold text-purple-600">{aiRuns.length}</p>
-            <p className="text-xs text-gray-500">AI Runs</p>
+            <p className="text-[11px] text-gray-500 font-medium">AI Runs</p>
           </div>
         </div>
       </div>
 
       {/* Connected Sources */}
-      <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200">
+      <div className="mb-6 p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-gray-700">Connected Sources</h2>
           {(!hasGoogle || !hasSlack || !hasNotion) && (
-            <Link href="/settings" className="text-xs text-blue-600 hover:underline">Connect more &rarr;</Link>
+            <Link href="/settings" className="text-xs text-blue-600 hover:underline font-medium">Connect more &rarr;</Link>
           )}
         </div>
         <div className="flex gap-3 flex-wrap">
-          <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${hasGoogle ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-            {sourceIcon('gmail')} Email {hasGoogle ? '\u2713' : '\u2014'}
-          </span>
-          <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${hasGoogle ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-            {sourceIcon('calendar')} Calendar {hasGoogle ? '\u2713' : '\u2014'}
-          </span>
-          <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${hasGoogle ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-            {sourceIcon('drive')} Drive {hasGoogle ? '\u2713' : '\u2014'}
-          </span>
-          <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${hasSlack ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-            {sourceIcon('slack')} Slack {hasSlack ? '\u2713' : '\u2014'}
-          </span>
-          <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${hasNotion ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-            {sourceIcon('notion')} Notion {hasNotion ? '\u2713' : '\u2014'}
-          </span>
+          {[
+            { connected: hasGoogle, icon: 'gmail', label: 'Email', color: 'border-red-200 bg-red-50 text-red-700' },
+            { connected: hasGoogle, icon: 'calendar', label: 'Calendar', color: 'border-blue-200 bg-blue-50 text-blue-700' },
+            { connected: hasGoogle, icon: 'drive', label: 'Drive', color: 'border-amber-200 bg-amber-50 text-amber-700' },
+            { connected: hasSlack, icon: 'slack', label: 'Slack', color: 'border-purple-200 bg-purple-50 text-purple-700' },
+            { connected: hasNotion, icon: 'notion', label: 'Notion', color: 'border-gray-300 bg-gray-50 text-gray-700' },
+          ].map((s) => (
+            <span key={s.label} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+              s.connected ? s.color : 'bg-gray-50 text-gray-400 border-gray-200'
+            }`}>
+              {sourceIcon(s.icon)} {s.label}
+              {s.connected ? (
+                <span className="ml-1 w-1.5 h-1.5 bg-green-500 rounded-full" />
+              ) : (
+                <span className="text-[10px] text-gray-400 ml-1">--</span>
+              )}
+            </span>
+          ))}
         </div>
       </div>
 
       {/* Quick Actions */}
       <div className="flex gap-3 mb-6">
-        <Link href="/topics" className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
-          + New Topic
+        <Link href="/topics" className="px-4 py-2.5 brand-gradient text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-all shadow-sm flex items-center gap-2">
+          <span className="text-base">+</span> New Topic
         </Link>
-        <Link href="/search" className="px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
-          Search Sources
+        <Link href="/search" className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm flex items-center gap-2">
+          <span className="text-base">&#128269;</span> Search Sources
+        </Link>
+        <Link href="/contacts" className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm flex items-center gap-2">
+          <span className="text-base">&#128101;</span> Contacts
         </Link>
       </div>
 
@@ -135,45 +149,74 @@ export default async function DashboardPage() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900">Active Topics</h2>
-              <Link href="/topics" className="text-sm text-blue-600 hover:underline">View all &rarr;</Link>
+              <Link href="/topics" className="text-sm text-blue-600 hover:underline font-medium">View all &rarr;</Link>
             </div>
             {topics.length === 0 ? (
-              <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-                <p className="text-gray-500">No topics yet</p>
-                <Link href="/topics" className="text-blue-600 hover:underline text-sm mt-2 inline-block">Create your first topic &rarr;</Link>
+              <div className="text-center py-16 bg-white rounded-xl border border-gray-100 shadow-sm">
+                <div className="w-12 h-12 mx-auto bg-blue-50 rounded-xl flex items-center justify-center mb-3">
+                  <span className="text-xl">&#128203;</span>
+                </div>
+                <p className="text-gray-500 font-medium">No topics yet</p>
+                <p className="text-sm text-gray-400 mt-1">Create your first topic to get started</p>
+                <Link href="/topics" className="inline-flex items-center gap-1.5 mt-4 px-4 py-2 brand-gradient text-white rounded-lg text-sm font-medium hover:opacity-90 transition-all">
+                  + Create topic
+                </Link>
               </div>
             ) : (
               <div className="space-y-3">
                 {topics.map((topic) => {
                   const itemCount = topic.topic_items?.[0]?.count || 0;
                   const overdue = topic.due_date && new Date(topic.due_date) < new Date();
+                  const progress = topic.progress_percent;
                   return (
                     <Link key={topic.id} href={`/topics/${topic.id}`}
-                      className="block p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all">
+                      className="block p-4 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all shadow-sm group">
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-gray-900">{topic.title}</h3>
-                          {topic.description && <p className="text-sm text-gray-500 mt-1 line-clamp-1">{topic.description}</p>}
-                          <div className="flex gap-2 mt-2 flex-wrap items-center">
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">{topic.title}</h3>
+                            {topic.priority >= 4 && (
+                              <span className="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-700 rounded-md font-bold uppercase">Urgent</span>
+                            )}
+                            {topic.priority === 3 && (
+                              <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-md font-bold uppercase">High</span>
+                            )}
+                          </div>
+                          {topic.description && <p className="text-sm text-gray-500 mt-0.5 line-clamp-1">{topic.description}</p>}
+                          <div className="flex gap-2 mt-2.5 flex-wrap items-center">
+                            <span className={`text-xs px-2 py-0.5 rounded-lg font-medium ${
                               topic.area === 'work' ? 'bg-blue-100 text-blue-700' :
                               topic.area === 'personal' ? 'bg-green-100 text-green-700' :
                               'bg-purple-100 text-purple-700'
                             }`}>{topic.area}</span>
                             {itemCount > 0 && (
-                              <span className="text-xs text-gray-400">{itemCount} item{itemCount !== 1 ? 's' : ''}</span>
+                              <span className="text-xs text-gray-400 flex items-center gap-1">
+                                <span className="text-[10px]">&#128206;</span> {itemCount} item{itemCount !== 1 ? 's' : ''}
+                              </span>
                             )}
                             {topic.due_date && (
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              <span className={`text-xs px-2 py-0.5 rounded-lg ${
                                 overdue ? 'bg-red-50 text-red-600 font-medium' : 'bg-gray-100 text-gray-500'
                               }`}>
                                 {overdue ? 'Overdue: ' : 'Due: '}{new Date(topic.due_date).toLocaleDateString()}
                               </span>
                             )}
                             {topic.summary && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600">AI analyzed</span>
+                              <span className="text-xs px-2 py-0.5 rounded-lg bg-purple-50 text-purple-600 font-medium flex items-center gap-1">
+                                <span className="text-[10px]">&#10024;</span> AI analyzed
+                              </span>
                             )}
                           </div>
+                          {/* Progress bar */}
+                          {progress != null && progress > 0 && (
+                            <div className="mt-2.5 flex items-center gap-2">
+                              <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full transition-all ${progress >= 100 ? 'bg-green-500' : progress >= 60 ? 'bg-blue-500' : 'bg-amber-500'}`}
+                                  style={{ width: `${Math.min(progress, 100)}%` }} />
+                              </div>
+                              <span className="text-[11px] text-gray-400 font-medium">{progress}%</span>
+                            </div>
+                          )}
                         </div>
                         <span className="text-xs text-gray-400 ml-3 flex-shrink-0">{formatRelativeDate(topic.updated_at)}</span>
                       </div>
@@ -190,18 +233,22 @@ export default async function DashboardPage() {
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent AI Activity</h2>
               <div className="space-y-2">
                 {aiRuns.map((run) => (
-                  <div key={run.id} className="p-3 bg-white rounded-lg border border-gray-200">
-                    <div className="flex items-start gap-2">
-                      <span className="text-purple-500 text-sm mt-0.5">
-                        {run.kind === 'ai_find' ? '\uD83D\uDD0D' : run.kind === 'analyze_topic' ? '\uD83E\uDDE0' : '\uD83E\uDD16'}
-                      </span>
+                  <div key={run.id} className="p-3.5 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-purple-200 transition-colors">
+                    <div className="flex items-start gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        run.kind === 'ai_find' ? 'bg-blue-50' : run.kind === 'analyze_topic' ? 'bg-purple-50' : 'bg-indigo-50'
+                      }`}>
+                        <span className="text-sm">
+                          {run.kind === 'ai_find' ? '\uD83D\uDD0D' : run.kind === 'analyze_topic' ? '\uD83E\uDDE0' : '\uD83E\uDD16'}
+                        </span>
+                      </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-900">
-                          {run.kind === 'ai_find' ? 'AI Find' : run.kind === 'analyze_topic' ? 'AI Analysis' : run.kind}
+                        <p className="text-sm font-medium text-gray-900">
+                          {run.kind === 'ai_find' ? 'AI Find' : run.kind === 'analyze_topic' ? 'AI Analysis' : run.kind.replace(/_/g, ' ')}
                         </p>
                         <p className="text-xs text-gray-500 mt-0.5 truncate">{run.input_summary}</p>
-                        <div className="flex gap-2 mt-1 text-xs text-gray-400">
-                          {run.tokens_used ? <span>{run.tokens_used.toLocaleString()} tokens</span> : null}
+                        <div className="flex gap-3 mt-1.5 text-xs text-gray-400">
+                          {run.tokens_used ? <span className="flex items-center gap-1"><span className="text-[10px]">&#9889;</span> {run.tokens_used.toLocaleString()} tokens</span> : null}
                           <span>{formatRelativeDate(run.created_at)}</span>
                         </div>
                       </div>
@@ -219,21 +266,26 @@ export default async function DashboardPage() {
           <div>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Items</h2>
             {recentItems.length === 0 ? (
-              <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
-                <p className="text-sm text-gray-400">No recent activity</p>
-                <p className="text-xs text-gray-300 mt-1">Link items to topics to see activity here</p>
+              <div className="text-center py-10 bg-white rounded-xl border border-gray-100 shadow-sm">
+                <div className="w-10 h-10 mx-auto bg-gray-50 rounded-lg flex items-center justify-center mb-2">
+                  <span className="text-base">&#128240;</span>
+                </div>
+                <p className="text-sm text-gray-400 font-medium">No recent activity</p>
+                <p className="text-xs text-gray-300 mt-1">Connect sources to see items here</p>
               </div>
             ) : (
               <div className="space-y-2">
                 {recentItems.map((item) => (
-                  <div key={item.id} className="p-3 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors">
-                    <div className="flex items-start gap-2">
-                      <span className="text-sm">{sourceIcon(item.source)}</span>
+                  <div key={item.id} className="p-3 bg-white rounded-xl border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all shadow-sm">
+                    <div className="flex items-start gap-2.5">
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs ${sourceColor(item.source)}`}>
+                        {sourceIcon(item.source)}
+                      </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
                         <div className="flex gap-2 mt-0.5 text-xs text-gray-400">
                           <span className="truncate">
-                            {(item.topics as unknown as { title: string } | null)?.title || 'Unknown topic'}
+                            {(item.topics as unknown as { title: string } | null)?.title || 'Unlinked'}
                           </span>
                           <span className="flex-shrink-0">{formatRelativeDate(item.occurred_at)}</span>
                         </div>
@@ -247,17 +299,26 @@ export default async function DashboardPage() {
 
           {/* Source breakdown */}
           {Object.keys(sourceCounts).length > 0 && (
-            <div className="p-4 bg-white rounded-lg border border-gray-200">
+            <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-700 mb-3">Items by Source</h3>
-              <div className="space-y-2">
-                {Object.entries(sourceCounts).sort(([,a], [,b]) => b - a).map(([src, count]) => (
-                  <div key={src} className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600 flex items-center gap-2">
-                      {sourceIcon(src)} {src === 'gmail' ? 'Email' : src === 'calendar' ? 'Calendar' : src === 'drive' ? 'Drive' : src === 'slack' ? 'Slack' : src === 'notion' ? 'Notion' : src}
-                    </span>
-                    <span className="text-sm font-medium text-gray-900">{count}</span>
-                  </div>
-                ))}
+              <div className="space-y-3">
+                {Object.entries(sourceCounts).sort(([,a], [,b]) => b - a).map(([src, count]) => {
+                  const pct = totalSourceCount > 0 ? (count / totalSourceCount * 100) : 0;
+                  const barColor = src === 'gmail' ? 'bg-red-400' : src === 'calendar' ? 'bg-blue-400' : src === 'drive' ? 'bg-amber-400' : src === 'slack' ? 'bg-purple-400' : src === 'notion' ? 'bg-gray-400' : 'bg-gray-300';
+                  return (
+                    <div key={src}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm text-gray-600 flex items-center gap-2">
+                          {sourceIcon(src)} {src === 'gmail' ? 'Email' : src === 'calendar' ? 'Calendar' : src === 'drive' ? 'Drive' : src === 'slack' ? 'Slack' : src === 'notion' ? 'Notion' : src}
+                        </span>
+                        <span className="text-sm font-semibold text-gray-900">{count}</span>
+                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
