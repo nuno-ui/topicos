@@ -22,15 +22,27 @@ export async function GET(request: Request) {
       }),
     });
     const tokenData = await tokenRes.json();
+    console.log('Slack OAuth response keys:', Object.keys(tokenData));
     if (!tokenData.ok) throw new Error(tokenData.error || 'Slack OAuth failed');
+
+    // CRITICAL: User tokens are in authed_user, NOT at the top level
+    // tokenData.access_token = bot token (xoxb-...)
+    // tokenData.authed_user.access_token = user token (xoxp-...)
+    const userToken = tokenData.authed_user?.access_token;
+    const userScopes = tokenData.authed_user?.scope || '';
+
+    if (!userToken) {
+      console.error('No user token received. Full response:', JSON.stringify(tokenData));
+      throw new Error('No user token received from Slack. Make sure user_scope is set.');
+    }
 
     const service = createServiceClient();
     await service.from('slack_accounts').upsert({
       user_id: user.id,
       team_id: tokenData.team?.id ?? '',
       team_name: tokenData.team?.name ?? '',
-      access_token: tokenData.access_token,
-      scope: tokenData.scope ?? '',
+      access_token: userToken,
+      scopes: userScopes.split(',').filter(Boolean),
     }, { onConflict: 'user_id, team_id' });
 
     return NextResponse.redirect(process.env.NEXT_PUBLIC_APP_URL! + '/settings?success=slack_connected');
