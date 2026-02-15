@@ -1,7 +1,7 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Plus, X, Users, Mail, Building, StickyNote, ChevronRight, Loader2, Search, Edit3, Save, Trash2 } from 'lucide-react';
+import { Plus, X, Users, Mail, Building, StickyNote, ChevronRight, Loader2, Search, Edit3, Save, Trash2, Sparkles, Brain, UserPlus, Network, Wand2 } from 'lucide-react';
 
 interface Contact {
   id: string;
@@ -15,6 +15,20 @@ interface Contact {
     role: string | null;
     topics: { title: string } | null;
   }>;
+}
+
+interface ExtractedContact {
+  name: string;
+  email: string;
+  role: string;
+}
+
+interface EnrichedProfile {
+  organization: string;
+  role: string;
+  relationship_summary: string;
+  interaction_frequency: string;
+  key_topics: string[];
 }
 
 export function ContactsList({ initialContacts }: { initialContacts: Contact[] }) {
@@ -39,6 +53,15 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
   const [editRole, setEditRole] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // AI Agent state
+  const [agentLoading, setAgentLoading] = useState<string | null>(null);
+  const [enrichedProfile, setEnrichedProfile] = useState<EnrichedProfile | null>(null);
+  const [enrichedContactId, setEnrichedContactId] = useState<string | null>(null);
+  const [extractedContacts, setExtractedContacts] = useState<ExtractedContact[]>([]);
+  const [showExtracted, setShowExtracted] = useState(false);
+  const [dedupeResults, setDedupeResults] = useState<string | null>(null);
+  const [showDedupe, setShowDedupe] = useState(false);
 
   const handleCreate = async () => {
     if (!newName.trim()) { toast.error('Name is required'); return; }
@@ -137,6 +160,126 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     return avatarColors[hash % avatarColors.length];
   };
 
+  // ========== AI AGENT FUNCTIONS ==========
+
+  const runEnrichContact = async (contactId: string) => {
+    setAgentLoading(`enrich_${contactId}`);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'enrich_contact', context: { contact_id: contactId } }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setEnrichedProfile(data.result);
+      setEnrichedContactId(contactId);
+      // Update the contact in the local state
+      const enriched = data.result;
+      setContacts(prev => prev.map(c => c.id === contactId ? {
+        ...c,
+        organization: enriched.organization || c.organization,
+        notes: enriched.relationship_summary || c.notes,
+      } : c));
+      toast.success('Contact profile enriched');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Enrich failed');
+    }
+    setAgentLoading(null);
+  };
+
+  const runExtractContacts = async () => {
+    setAgentLoading('extract');
+    try {
+      // First get topics
+      const topicsRes = await fetch('/api/topics');
+      const topicsData = await topicsRes.json();
+      const topics = topicsData.topics || [];
+      if (topics.length === 0) {
+        toast.error('No topics found - create topics with linked items first');
+        setAgentLoading(null);
+        return;
+      }
+      // Extract from first topic that has items (could iterate more)
+      const allExtracted: ExtractedContact[] = [];
+      for (const topic of topics.slice(0, 3)) {
+        try {
+          const res = await fetch('/api/ai/agents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agent: 'find_contacts', context: { topic_id: topic.id } }),
+          });
+          const data = await res.json();
+          if (res.ok && data.result.contacts) {
+            allExtracted.push(...data.result.contacts);
+          }
+        } catch { /* skip failed topics */ }
+      }
+      // Deduplicate by email
+      const seen = new Set<string>();
+      const unique = allExtracted.filter(c => {
+        const key = c.email?.toLowerCase() || c.name.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        // Also filter out contacts we already have
+        const existingEmails = new Set(contacts.map(ec => ec.email?.toLowerCase()).filter(Boolean));
+        return !existingEmails.has(c.email?.toLowerCase());
+      });
+      setExtractedContacts(unique);
+      setShowExtracted(true);
+      toast.success(`Found ${unique.length} new contacts across topics`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Extract failed');
+    }
+    setAgentLoading(null);
+  };
+
+  const addExtractedContact = async (ec: ExtractedContact) => {
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: ec.name,
+          email: ec.email || null,
+          role: ec.role || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setContacts(prev => [...prev, data.contact].sort((a, b) => a.name.localeCompare(b.name)));
+      setExtractedContacts(prev => prev.filter(c => c.email !== ec.email));
+      toast.success(`Added ${ec.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Add failed');
+    }
+  };
+
+  const runDedupeAnalysis = async () => {
+    if (contacts.length < 2) { toast.error('Need at least 2 contacts to check for duplicates'); return; }
+    setAgentLoading('dedupe');
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: 'dedupe_contacts',
+          context: {
+            contacts: contacts.map(c => ({ name: c.name, email: c.email, organization: c.organization })),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDedupeResults(data.result.analysis || data.result.insights || 'No duplicates found');
+      setShowDedupe(true);
+      toast.success('Duplicate analysis complete');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Analysis failed');
+    }
+    setAgentLoading(null);
+  };
+
   return (
     <div>
       {/* Search + Actions */}
@@ -171,6 +314,89 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
         )}
       </div>
 
+      {/* AI Assistants Panel */}
+      <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200">
+        <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+          <Sparkles className="w-4 h-4 text-purple-500" />
+          AI Contact Assistants
+        </h2>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={runExtractContacts} disabled={!!agentLoading}
+            className="px-3 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 flex items-center gap-1.5">
+            {agentLoading === 'extract' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+            Extract from Topics
+          </button>
+          <button onClick={runDedupeAnalysis} disabled={!!agentLoading || contacts.length < 2}
+            className="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 flex items-center gap-1.5">
+            {agentLoading === 'dedupe' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Network className="w-3.5 h-3.5" />}
+            Find Duplicates
+          </button>
+          <span className="text-xs text-gray-400 flex items-center gap-1">
+            <Wand2 className="w-3 h-3" /> Enrich individual contacts from their expanded view
+          </span>
+        </div>
+      </div>
+
+      {/* Extracted Contacts Panel */}
+      {showExtracted && extractedContacts.length > 0 && (
+        <div className="mb-6 p-4 bg-purple-50 rounded-lg border border-purple-200">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-purple-800 flex items-center gap-2">
+              <UserPlus className="w-4 h-4" /> Discovered Contacts ({extractedContacts.length})
+            </h3>
+            <button onClick={() => setShowExtracted(false)} className="p-1 text-purple-400 hover:text-purple-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="space-y-2">
+            {extractedContacts.map((ec, i) => (
+              <div key={i} className="flex items-center gap-3 p-3 bg-white rounded-lg border border-purple-100">
+                <div className={`w-8 h-8 rounded-full text-xs font-medium flex items-center justify-center ${getAvatarColor(ec.name)}`}>
+                  {initials(ec.name)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">{ec.name}</p>
+                  <div className="flex gap-2 text-xs text-gray-500">
+                    {ec.email && <span>{ec.email}</span>}
+                    {ec.role && <span className="text-gray-400">{ec.role}</span>}
+                  </div>
+                </div>
+                <button onClick={() => addExtractedContact(ec)}
+                  className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 flex-shrink-0">
+                  Add
+                </button>
+              </div>
+            ))}
+            <button onClick={() => {
+              extractedContacts.forEach(ec => addExtractedContact(ec));
+            }} className="w-full py-2 text-xs text-purple-600 font-medium hover:text-purple-800 text-center">
+              Add All ({extractedContacts.length})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Dedupe Results Panel */}
+      {showDedupe && dedupeResults && (
+        <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+              <Network className="w-4 h-4" /> Duplicate Analysis
+            </h3>
+            <button onClick={() => setShowDedupe(false)} className="p-1 text-blue-400 hover:text-blue-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="text-sm text-gray-700 prose prose-sm max-w-none">
+            {dedupeResults.split('\n').map((line, i) => {
+              if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-sm text-gray-700 mt-0.5">{line.slice(2)}</li>;
+              if (line.trim() === '') return <br key={i} />;
+              return <p key={i} className="text-sm text-gray-700 mt-1">{line}</p>;
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Create form */}
       {showCreate && (
         <div className="mb-6 p-4 bg-white rounded-lg border border-blue-200 shadow-sm space-y-3">
@@ -203,8 +429,14 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           <p className="text-gray-500">{searchQuery ? `No contacts match "${searchQuery}"` : 'No contacts yet'}</p>
           <p className="text-gray-400 text-xs mt-1">Contacts will be auto-extracted when you link items to topics, or add them manually.</p>
           {!searchQuery && (
-            <button onClick={() => setShowCreate(true)}
-              className="mt-3 text-blue-600 hover:underline text-sm">Add your first contact &rarr;</button>
+            <div className="flex gap-3 justify-center mt-4">
+              <button onClick={() => setShowCreate(true)}
+                className="text-blue-600 hover:underline text-sm">Add your first contact &rarr;</button>
+              <button onClick={runExtractContacts} disabled={!!agentLoading}
+                className="text-purple-600 hover:underline text-sm flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> Auto-extract from topics
+              </button>
+            </div>
           )}
         </div>
       ) : (
@@ -280,11 +512,50 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                   ) : (
                     <>
                       <div className="flex items-center justify-between mb-3">
-                        <button onClick={() => startEdit(c)}
-                          className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
-                          <Edit3 className="w-3 h-3" /> Edit
-                        </button>
+                        <div className="flex gap-2">
+                          <button onClick={() => startEdit(c)}
+                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                            <Edit3 className="w-3 h-3" /> Edit
+                          </button>
+                          <button onClick={() => runEnrichContact(c.id)}
+                            disabled={agentLoading === `enrich_${c.id}`}
+                            className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 disabled:opacity-50">
+                            {agentLoading === `enrich_${c.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
+                            AI Enrich
+                          </button>
+                        </div>
                       </div>
+
+                      {/* Enriched profile banner */}
+                      {enrichedContactId === c.id && enrichedProfile && (
+                        <div className="mb-3 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                          <h4 className="text-xs font-semibold text-purple-700 mb-2 flex items-center gap-1">
+                            <Sparkles className="w-3 h-3" /> AI Enriched Profile
+                          </h4>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-gray-500">Organization:</span>
+                              <span className="ml-1 text-gray-800">{enrichedProfile.organization}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Role:</span>
+                              <span className="ml-1 text-gray-800">{enrichedProfile.role}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Frequency:</span>
+                              <span className="ml-1 text-gray-800">{enrichedProfile.interaction_frequency}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Key Topics:</span>
+                              <span className="ml-1 text-gray-800">{enrichedProfile.key_topics?.join(', ') || 'None'}</span>
+                            </div>
+                          </div>
+                          {enrichedProfile.relationship_summary && (
+                            <p className="mt-2 text-xs text-gray-700 italic">{enrichedProfile.relationship_summary}</p>
+                          )}
+                        </div>
+                      )}
+
                       {c.notes && (
                         <div className="mb-3">
                           <h4 className="text-xs font-semibold text-gray-500 mb-1 flex items-center gap-1">
@@ -308,7 +579,15 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                         </div>
                       )}
                       {!c.notes && (!c.contact_topic_links || c.contact_topic_links.length === 0) && (
-                        <p className="text-xs text-gray-400">No additional details. Link items to topics involving this contact to see more.</p>
+                        <div className="text-center py-2">
+                          <p className="text-xs text-gray-400">No additional details yet.</p>
+                          <button onClick={() => runEnrichContact(c.id)}
+                            disabled={agentLoading === `enrich_${c.id}`}
+                            className="mt-1 text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 mx-auto disabled:opacity-50">
+                            {agentLoading === `enrich_${c.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                            Use AI to enrich this profile
+                          </button>
+                        </div>
                       )}
                     </>
                   )}

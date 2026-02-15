@@ -1,0 +1,57 @@
+import { NextResponse } from 'next/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
+
+export async function GET() {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data, error } = await supabase
+    .from('folders')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('position', { ascending: true });
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ folders: data });
+}
+
+export async function POST(request: Request) {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const body = await request.json();
+  const { name, parent_id, color, icon } = body;
+  if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+
+  // Validate nesting depth (max 5 levels)
+  if (parent_id) {
+    let depth = 1;
+    let currentId = parent_id;
+    while (currentId && depth < 6) {
+      const { data: parent } = await supabase
+        .from('folders')
+        .select('parent_id')
+        .eq('id', currentId)
+        .single();
+      if (!parent || !parent.parent_id) break;
+      currentId = parent.parent_id;
+      depth++;
+    }
+    if (depth >= 5) {
+      return NextResponse.json({ error: 'Maximum folder depth (5 levels) reached' }, { status: 400 });
+    }
+  }
+
+  const { data, error } = await supabase.from('folders').insert({
+    name,
+    parent_id: parent_id || null,
+    color: color || null,
+    icon: icon || null,
+    user_id: user.id,
+  }).select().single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ folder: data }, { status: 201 });
+}

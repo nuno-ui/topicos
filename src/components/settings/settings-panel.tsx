@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2, Trash2, Plus, Shield } from 'lucide-react';
+import { Loader2, Trash2, Plus, Shield, Sparkles, BarChart3, Brain, Zap, X } from 'lucide-react';
 import { sourceIcon } from '@/lib/utils';
 
 interface Props {
@@ -15,6 +15,16 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
   const [slackAccounts, setSlackAccounts] = useState(initialSlack);
   const [notionAccounts, setNotionAccounts] = useState(initialNotion);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+
+  // AI Agent state
+  const [agentLoading, setAgentLoading] = useState<string | null>(null);
+  const [usageInsights, setUsageInsights] = useState<string | null>(null);
+  const [usageStats, setUsageStats] = useState<{ topics: number; items: number; aiRuns: number; totalTokens: number } | null>(null);
+  const [showInsights, setShowInsights] = useState(false);
+  const [healthCheck, setHealthCheck] = useState<string | null>(null);
+  const [showHealth, setShowHealth] = useState(false);
+  const [optimizations, setOptimizations] = useState<string | null>(null);
+  const [showOptimizations, setShowOptimizations] = useState(false);
 
   const connectGoogle = () => {
     window.location.href = '/api/auth/google/connect';
@@ -70,8 +80,169 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
     setDisconnecting(null);
   };
 
+  // ========== AI AGENT FUNCTIONS ==========
+
+  const runUsageInsights = async () => {
+    setAgentLoading('usage');
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'usage_insights', context: {} }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setUsageInsights(data.result.insights);
+      setUsageStats(data.result.stats);
+      setShowInsights(true);
+      toast.success('Usage insights generated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Analysis failed');
+    }
+    setAgentLoading(null);
+  };
+
+  const runHealthCheck = async () => {
+    setAgentLoading('health');
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'health_check', context: {} }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setHealthCheck(data.result.health || data.result.insights || 'System is healthy');
+      setShowHealth(true);
+      toast.success('Health check complete');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Health check failed');
+    }
+    setAgentLoading(null);
+  };
+
+  const runOptimizations = async () => {
+    setAgentLoading('optimize');
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'optimization_suggestions', context: {} }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setOptimizations(data.result.suggestions || data.result.insights || 'No suggestions at this time');
+      setShowOptimizations(true);
+      toast.success('Optimization suggestions ready');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Analysis failed');
+    }
+    setAgentLoading(null);
+  };
+
+  const renderMarkdown = (text: string) => {
+    return text.split('\n').map((line, i) => {
+      if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-gray-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
+      if (line.startsWith('# ')) return <h2 key={i} className="font-bold text-gray-900 mt-2 mb-1 text-base">{line.replace('# ', '')}</h2>;
+      if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-sm text-gray-700 mt-0.5">{line.slice(2)}</li>;
+      if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-semibold text-gray-800 mt-2 text-sm">{line.replace(/\*\*/g, '')}</p>;
+      if (line.trim() === '') return <br key={i} />;
+      return <p key={i} className="text-sm text-gray-700 mt-1">{line}</p>;
+    });
+  };
+
   return (
     <div className="space-y-8">
+      {/* AI Platform Assistants */}
+      <div className="p-4 bg-white rounded-lg border border-gray-200">
+        <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+          <Sparkles className="w-4 h-4 text-purple-500" />
+          AI Platform Assistants
+        </h2>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={runUsageInsights} disabled={!!agentLoading}
+            className="px-3 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 flex items-center gap-1.5">
+            {agentLoading === 'usage' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BarChart3 className="w-3.5 h-3.5" />}
+            Usage Insights
+          </button>
+          <button onClick={runHealthCheck} disabled={!!agentLoading}
+            className="px-3 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 disabled:opacity-50 flex items-center gap-1.5">
+            {agentLoading === 'health' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            Health Check
+          </button>
+          <button onClick={runOptimizations} disabled={!!agentLoading}
+            className="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 flex items-center gap-1.5">
+            {agentLoading === 'optimize' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
+            Optimization Tips
+          </button>
+        </div>
+      </div>
+
+      {/* Usage Insights Panel */}
+      {showInsights && usageInsights && (
+        <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-purple-800 flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" /> Usage Insights
+            </h3>
+            <button onClick={() => setShowInsights(false)} className="p-1 text-purple-400 hover:text-purple-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          {usageStats && (
+            <div className="grid grid-cols-4 gap-3 mb-4">
+              <div className="bg-white rounded-lg p-3 text-center border border-purple-100">
+                <p className="text-lg font-bold text-purple-600">{usageStats.topics}</p>
+                <p className="text-xs text-gray-500">Topics</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 text-center border border-purple-100">
+                <p className="text-lg font-bold text-blue-600">{usageStats.items}</p>
+                <p className="text-xs text-gray-500">Items</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 text-center border border-purple-100">
+                <p className="text-lg font-bold text-green-600">{usageStats.aiRuns}</p>
+                <p className="text-xs text-gray-500">AI Runs</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 text-center border border-purple-100">
+                <p className="text-lg font-bold text-amber-600">{usageStats.totalTokens.toLocaleString()}</p>
+                <p className="text-xs text-gray-500">Tokens Used</p>
+              </div>
+            </div>
+          )}
+          <div className="prose prose-sm max-w-none">{renderMarkdown(usageInsights)}</div>
+        </div>
+      )}
+
+      {/* Health Check Panel */}
+      {showHealth && healthCheck && (
+        <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-green-800 flex items-center gap-2">
+              <Zap className="w-4 h-4" /> System Health
+            </h3>
+            <button onClick={() => setShowHealth(false)} className="p-1 text-green-400 hover:text-green-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="prose prose-sm max-w-none">{renderMarkdown(healthCheck)}</div>
+        </div>
+      )}
+
+      {/* Optimization Suggestions Panel */}
+      {showOptimizations && optimizations && (
+        <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+              <Brain className="w-4 h-4" /> Optimization Tips
+            </h3>
+            <button onClick={() => setShowOptimizations(false)} className="p-1 text-blue-400 hover:text-blue-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="prose prose-sm max-w-none">{renderMarkdown(optimizations)}</div>
+        </div>
+      )}
+
       {/* Google Accounts */}
       <div>
         <div className="flex items-center gap-2 mb-1">

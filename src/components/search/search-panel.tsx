@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { sourceIcon, sourceLabel, formatRelativeDate } from '@/lib/utils';
-import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, Clock, ArrowUpDown, Calendar, X } from 'lucide-react';
+import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, Clock, ArrowUpDown, Calendar, X, Sparkles, Brain, Tags, Wand2 } from 'lucide-react';
 
 interface SearchResult {
   external_id: string;
@@ -20,6 +20,19 @@ interface Topic {
   id: string;
   title: string;
   area: string;
+}
+
+interface EnhancedQuery {
+  query: string;
+  sources: string[];
+  reason: string;
+}
+
+interface CategorizedResult {
+  result_index: number;
+  suggested_topic_id: string | null;
+  suggested_topic_name: string;
+  confidence: number;
 }
 
 const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion'] as const;
@@ -52,6 +65,15 @@ export function SearchPanel() {
   const [showTopicDropdown, setShowTopicDropdown] = useState<string | null>(null);
   const [newTopicTitle, setNewTopicTitle] = useState('');
   const [creatingTopic, setCreatingTopic] = useState(false);
+
+  // AI Agent state
+  const [agentLoading, setAgentLoading] = useState<string | null>(null);
+  const [enhancedQueries, setEnhancedQueries] = useState<EnhancedQuery[]>([]);
+  const [showEnhanced, setShowEnhanced] = useState(false);
+  const [categorized, setCategorized] = useState<CategorizedResult[]>([]);
+  const [showCategorized, setShowCategorized] = useState(false);
+  const [searchSummary, setSearchSummary] = useState<string | null>(null);
+  const [showSummary, setShowSummary] = useState(false);
 
   useEffect(() => {
     fetch('/api/topics').then(r => r.json()).then(data => {
@@ -120,6 +142,9 @@ export function SearchPanel() {
         allItems.push(...(src.items ?? []));
       }
       setResults(allItems);
+      setCategorized([]);
+      setShowCategorized(false);
+      setSearchSummary(null);
       if (allItems.length === 0) {
         toast.info('No results found. Try different keywords or date range.');
       }
@@ -195,7 +220,89 @@ export function SearchPanel() {
     setShowDateFilters(false);
   };
 
+  // ========== AI AGENT FUNCTIONS ==========
+
+  const runSmartSearch = async () => {
+    if (!query.trim()) { toast.error('Enter a search query first'); return; }
+    setAgentLoading('smart_search');
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'smart_search', context: { query } }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setEnhancedQueries(data.result.enhanced_queries || []);
+      setShowEnhanced(true);
+      toast.success(`Generated ${data.result.enhanced_queries?.length || 0} optimized queries`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Smart search failed');
+    }
+    setAgentLoading(null);
+  };
+
+  const runCategorize = async () => {
+    if (results.length === 0) { toast.error('Search for items first'); return; }
+    setAgentLoading('categorize');
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: 'categorize_results',
+          context: { results: results.slice(0, 20).map(r => ({ title: r.title, source: r.source, snippet: r.snippet })) },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setCategorized(data.result.categorized || []);
+      setShowCategorized(true);
+      toast.success('Results categorized into topics');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Categorize failed');
+    }
+    setAgentLoading(null);
+  };
+
+  const runSummarize = async () => {
+    if (results.length === 0) { toast.error('Search for items first'); return; }
+    setAgentLoading('summarize');
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: 'summarize_results',
+          context: { query, results: results.slice(0, 20).map(r => ({ title: r.title, source: r.source, snippet: r.snippet, occurred_at: r.occurred_at })) },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSearchSummary(data.result.summary || 'No summary generated');
+      setShowSummary(true);
+      toast.success('Results summarized');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Summarize failed');
+    }
+    setAgentLoading(null);
+  };
+
+  const applyEnhancedQuery = (eq: EnhancedQuery) => {
+    setQuery(eq.query);
+    const newSources = new Set(eq.sources.filter(s => SOURCES.includes(s as typeof SOURCES[number])));
+    if (newSources.size > 0) setSources(newSources);
+    setShowEnhanced(false);
+    toast.info('Query applied - click Search to run it');
+  };
+
   const sortedResults = sortResults(results);
+
+  // Get category for a result by index
+  const getCategoryForResult = (index: number) => {
+    if (!showCategorized || categorized.length === 0) return null;
+    return categorized.find(c => c.result_index === index);
+  };
 
   return (
     <div>
@@ -294,6 +401,93 @@ export function SearchPanel() {
         )}
       </div>
 
+      {/* AI Assistants Panel */}
+      <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200">
+        <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+          <Sparkles className="w-4 h-4 text-purple-500" />
+          AI Search Assistants
+        </h2>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={runSmartSearch} disabled={!!agentLoading}
+            className="px-3 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 flex items-center gap-1.5">
+            {agentLoading === 'smart_search' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+            Smart Search
+          </button>
+          <button onClick={runCategorize} disabled={!!agentLoading || results.length === 0}
+            className="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 flex items-center gap-1.5">
+            {agentLoading === 'categorize' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Tags className="w-3.5 h-3.5" />}
+            Auto-Categorize
+          </button>
+          <button onClick={runSummarize} disabled={!!agentLoading || results.length === 0}
+            className="px-3 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 disabled:opacity-50 flex items-center gap-1.5">
+            {agentLoading === 'summarize' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
+            Summarize Results
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 mt-2">
+          {results.length > 0
+            ? `${results.length} results available for AI analysis`
+            : 'Enter a query and search, then use AI to analyze results'}
+        </p>
+      </div>
+
+      {/* AI Enhanced Queries Panel */}
+      {showEnhanced && enhancedQueries.length > 0 && (
+        <div className="mb-6 p-4 bg-purple-50 rounded-lg border border-purple-200">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-purple-800 flex items-center gap-2">
+              <Wand2 className="w-4 h-4" /> AI-Optimized Queries
+            </h3>
+            <button onClick={() => setShowEnhanced(false)} className="p-1 text-purple-400 hover:text-purple-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="space-y-2">
+            {enhancedQueries.map((eq, i) => (
+              <div key={i} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-100">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">&ldquo;{eq.query}&rdquo;</p>
+                  <div className="flex gap-1 mt-1 flex-wrap">
+                    {eq.sources.map(s => (
+                      <span key={s} className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">
+                        {sourceIcon(s)} {s}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-xs text-purple-600 mt-1 italic">{eq.reason}</p>
+                </div>
+                <button onClick={() => applyEnhancedQuery(eq)}
+                  className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 flex-shrink-0">
+                  Use
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* AI Search Summary Panel */}
+      {showSummary && searchSummary && (
+        <div className="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-green-800 flex items-center gap-2">
+              <Brain className="w-4 h-4" /> Results Summary
+            </h3>
+            <button onClick={() => setShowSummary(false)} className="p-1 text-green-400 hover:text-green-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="prose prose-sm max-w-none text-sm text-gray-700">
+            {searchSummary.split('\n').map((line, i) => {
+              if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-green-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
+              if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-sm text-gray-700 mt-0.5">{line.slice(2)}</li>;
+              if (line.trim() === '') return <br key={i} />;
+              return <p key={i} className="text-sm text-gray-700 mt-1">{line}</p>;
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Results header */}
       {sortedResults.length > 0 && (
         <div className="mb-4 flex items-center justify-between">
@@ -309,8 +503,9 @@ export function SearchPanel() {
       )}
 
       <div className="space-y-2">
-        {sortedResults.map((item) => {
+        {sortedResults.map((item, index) => {
           const key = item.source + ':' + item.external_id;
+          const cat = getCategoryForResult(index);
           return (
             <div key={key} className={`p-4 bg-white rounded-lg border transition-colors ${
               item.already_linked ? 'border-green-200 bg-green-50/50' : 'border-gray-200 hover:border-gray-300'
@@ -341,6 +536,22 @@ export function SearchPanel() {
                       <span>{(item.metadata.attendees as string[]).length} attendees</span>
                     ) : null}
                   </div>
+                  {/* AI Category suggestion */}
+                  {cat && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 flex items-center gap-1">
+                        <Tags className="w-3 h-3" />
+                        {cat.suggested_topic_name}
+                        <span className="text-blue-400">({Math.round(cat.confidence * 100)}%)</span>
+                      </span>
+                      {cat.suggested_topic_id && !item.already_linked && (
+                        <button onClick={() => linkToTopic(item, cat.suggested_topic_id!)}
+                          className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+                          Quick Link
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-1.5 items-center flex-shrink-0">
                   <a href={item.url} target="_blank" rel="noopener noreferrer"
@@ -416,6 +627,10 @@ export function SearchPanel() {
           <Search className="w-8 h-8 text-gray-300 mx-auto mb-3" />
           <p className="text-gray-500 text-sm">No results found for &ldquo;{query}&rdquo;</p>
           <p className="text-gray-400 text-xs mt-1">Try different keywords, broaden your date range, or check your source connections in Settings</p>
+          <button onClick={runSmartSearch} disabled={!!agentLoading}
+            className="mt-3 px-4 py-2 bg-purple-100 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-200 flex items-center gap-2 mx-auto transition-colors">
+            <Wand2 className="w-4 h-4" /> Try AI Smart Search
+          </button>
         </div>
       )}
 

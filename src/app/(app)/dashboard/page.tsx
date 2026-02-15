@@ -1,6 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { sourceIcon, formatRelativeDate } from '@/lib/utils';
+import { DashboardAgents } from '@/components/dashboard/dashboard-agents';
 
 export default async function DashboardPage() {
   const supabase = await createServerSupabaseClient();
@@ -114,13 +115,18 @@ export default async function DashboardPage() {
       </div>
 
       {/* Quick Actions */}
-      <div className="flex gap-3 mb-8">
+      <div className="flex gap-3 mb-6">
         <Link href="/topics" className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
           + New Topic
         </Link>
         <Link href="/search" className="px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
           Search Sources
         </Link>
+      </div>
+
+      {/* AI Agents */}
+      <div className="mb-8">
+        <DashboardAgents />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

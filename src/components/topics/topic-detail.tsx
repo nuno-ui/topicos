@@ -4,7 +4,7 @@ import { sourceIcon, sourceLabel, formatRelativeDate } from '@/lib/utils';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare } from 'lucide-react';
+import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap } from 'lucide-react';
 
 interface TopicItem {
   id: string;
@@ -43,6 +43,7 @@ interface Topic {
   status: string;
   area: string;
   due_date: string | null;
+  start_date: string | null;
   priority: number;
   tags: string[];
   summary: string | null;
@@ -51,6 +52,14 @@ interface Topic {
   notes: string | null;
   owner: string | null;
   stakeholders: string[];
+  progress_percent: number | null;
+  risk_level: string | null;
+  client: string | null;
+  company: string | null;
+  goal: string | null;
+  folder_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion'] as const;
@@ -99,6 +108,84 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
   // AI Question state
   const [aiQuestion, setAiQuestion] = useState('');
+
+  // AI Agent state
+  const [agentLoading, setAgentLoading] = useState<string | null>(null);
+  const [actionItems, setActionItems] = useState<Array<{ task: string; assignee: string; due: string; priority: string }>>([]);
+  const [showActionItems, setShowActionItems] = useState(false);
+  const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
+  const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
+  const [extractedContacts, setExtractedContacts] = useState<Array<{ name: string; email: string; role: string }>>([]);
+  const [showExtractedContacts, setShowExtractedContacts] = useState(false);
+  const [threadSummary, setThreadSummary] = useState<string | null>(null);
+  const [showThreadSummary, setShowThreadSummary] = useState(false);
+
+  // Run an AI agent
+  const runAgent = async (agent: string) => {
+    setAgentLoading(agent);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent, context: { topic_id: topic.id } }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      switch (agent) {
+        case 'auto_tag':
+          setTopic(prev => ({ ...prev, tags: data.result.tags, area: data.result.area, priority: data.result.priority }));
+          toast.success(`Added ${data.result.tags.length} tags, area: ${data.result.area}, priority: ${data.result.priority}`);
+          break;
+        case 'suggest_title':
+          setTitleSuggestions(data.result.suggestions);
+          setShowTitleSuggestions(true);
+          break;
+        case 'generate_description':
+          setTopic(prev => ({ ...prev, description: data.result.description }));
+          toast.success('Description generated');
+          // Also save to DB
+          await fetch(`/api/topics/${topic.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: data.result.description }),
+          });
+          break;
+        case 'extract_action_items':
+          setActionItems(data.result.action_items || []);
+          setShowActionItems(true);
+          toast.success(`Found ${data.result.action_items?.length || 0} action items`);
+          break;
+        case 'summarize_thread':
+          setThreadSummary(data.result.summary);
+          setShowThreadSummary(true);
+          toast.success('Thread summarized');
+          break;
+        case 'find_contacts':
+          setExtractedContacts(data.result.contacts || []);
+          setShowExtractedContacts(true);
+          toast.success(`Found ${data.result.contacts?.length || 0} contacts`);
+          break;
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Agent failed');
+    }
+    setAgentLoading(null);
+  };
+
+  // Apply title suggestion
+  const applyTitle = async (newTitle: string) => {
+    const res = await fetch(`/api/topics/${topic.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newTitle }),
+    });
+    if (res.ok) {
+      setTopic(prev => ({ ...prev, title: newTitle }));
+      setShowTitleSuggestions(false);
+      toast.success('Title updated');
+    }
+  };
 
   // --- SEARCH ---
   const handleSearch = async () => {
@@ -474,6 +561,162 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         )}
       </div>
 
+      {/* Topic Info Dashboard */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Key Metrics */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Overview</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="text-center p-2 bg-blue-50 rounded-lg">
+              <p className="text-lg font-bold text-blue-600">{items.length}</p>
+              <p className="text-xs text-gray-500">Linked Items</p>
+            </div>
+            <div className="text-center p-2 bg-purple-50 rounded-lg">
+              <p className="text-lg font-bold text-purple-600">{Object.keys(sourceCounts).length}</p>
+              <p className="text-xs text-gray-500">Sources</p>
+            </div>
+            <div className="text-center p-2 bg-green-50 rounded-lg">
+              <p className="text-lg font-bold text-green-600">{topic.priority || 0}</p>
+              <p className="text-xs text-gray-500">Priority</p>
+            </div>
+            <div className="text-center p-2 bg-amber-50 rounded-lg">
+              <p className="text-lg font-bold text-amber-600">{topic.progress_percent ?? 0}%</p>
+              <p className="text-xs text-gray-500">Progress</p>
+            </div>
+          </div>
+          {(topic.tags && topic.tags.length > 0) && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <p className="text-xs text-gray-500 mb-1.5">Tags</p>
+              <div className="flex gap-1 flex-wrap">
+                {topic.tags.map((tag, i) => (
+                  <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{tag}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {topic.goal && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <p className="text-xs text-gray-500 mb-1">Goal</p>
+              <p className="text-sm text-gray-700">{topic.goal}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Timeline */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1">
+            <Clock className="w-3 h-3" /> Timeline
+          </h3>
+          {items.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-4">No items linked yet</p>
+          ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {items.slice(0, 8).map((item, idx) => (
+                <div key={item.id} className="flex items-start gap-2">
+                  <div className="flex flex-col items-center">
+                    <div className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 flex-shrink-0" />
+                    {idx < Math.min(items.length, 8) - 1 && <div className="w-0.5 h-full bg-gray-200 min-h-[16px]" />}
+                  </div>
+                  <div className="flex-1 min-w-0 pb-1">
+                    <p className="text-xs font-medium text-gray-800 truncate">{item.title}</p>
+                    <div className="flex gap-1 text-xs text-gray-400">
+                      <span>{sourceIcon(item.source)}</span>
+                      <span>{formatRelativeDate(item.occurred_at)}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {items.length > 8 && (
+                <p className="text-xs text-gray-400 text-center">+{items.length - 8} more items</p>
+              )}
+            </div>
+          )}
+          <div className="mt-3 pt-3 border-t border-gray-100 space-y-1 text-xs text-gray-500">
+            {topic.start_date && <p>Started: {new Date(topic.start_date).toLocaleDateString()}</p>}
+            {topic.due_date && (
+              <p className={new Date(topic.due_date) < new Date() ? 'text-red-600 font-medium' : ''}>
+                Due: {new Date(topic.due_date).toLocaleDateString()}
+                {new Date(topic.due_date) < new Date() && ' (Overdue)'}
+              </p>
+            )}
+            {topic.created_at && <p>Created: {new Date(topic.created_at).toLocaleDateString()}</p>}
+          </div>
+        </div>
+
+        {/* People & Contacts */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1">
+            <Users className="w-3 h-3" /> People Involved
+          </h3>
+          {topic.owner && (
+            <div className="mb-2">
+              <p className="text-xs text-gray-500">Owner</p>
+              <p className="text-sm font-medium text-gray-800">{topic.owner}</p>
+            </div>
+          )}
+          {topic.stakeholders && topic.stakeholders.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs text-gray-500 mb-1">Stakeholders</p>
+              <div className="flex gap-1 flex-wrap">
+                {topic.stakeholders.map((s, i) => (
+                  <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-teal-50 text-teal-700">{s}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {topic.client && (
+            <div className="mb-2">
+              <p className="text-xs text-gray-500">Client</p>
+              <p className="text-sm text-gray-700">{topic.client}</p>
+            </div>
+          )}
+          {topic.company && (
+            <div className="mb-2">
+              <p className="text-xs text-gray-500">Company</p>
+              <p className="text-sm text-gray-700">{topic.company}</p>
+            </div>
+          )}
+          {/* Extract unique contacts from item metadata */}
+          {(() => {
+            const contacts = new Map<string, string>();
+            items.forEach(item => {
+              const meta = item.metadata || {};
+              if (meta.from && typeof meta.from === 'string') {
+                const name = meta.from.split('<')[0].trim();
+                if (name && !contacts.has(name.toLowerCase())) contacts.set(name.toLowerCase(), name);
+              }
+            });
+            const contactList = Array.from(contacts.values()).slice(0, 6);
+            if (contactList.length === 0) return null;
+            return (
+              <div className="mt-2 pt-2 border-t border-gray-100">
+                <p className="text-xs text-gray-500 mb-1">From Communications</p>
+                <div className="flex gap-1 flex-wrap">
+                  {contactList.map((name, i) => (
+                    <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{name}</span>
+                  ))}
+                  {contacts.size > 6 && <span className="text-xs text-gray-400">+{contacts.size - 6} more</span>}
+                </div>
+              </div>
+            );
+          })()}
+          {!topic.owner && (!topic.stakeholders || topic.stakeholders.length === 0) && items.length === 0 && (
+            <p className="text-xs text-gray-400 text-center py-4">No contacts associated yet</p>
+          )}
+          {topic.risk_level && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <p className="text-xs text-gray-500 mb-1">Risk Level</p>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                topic.risk_level === 'critical' ? 'bg-red-100 text-red-700' :
+                topic.risk_level === 'high' ? 'bg-orange-100 text-orange-700' :
+                topic.risk_level === 'medium' ? 'bg-amber-100 text-amber-700' :
+                'bg-green-100 text-green-700'
+              }`}>{topic.risk_level}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Search Panel */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <button onClick={() => setShowSearch(!showSearch)}
@@ -799,6 +1042,124 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             </div>
           )}
         </div>
+      </div>
+
+      {/* AI Agents */}
+      <div className="bg-white rounded-lg border border-gray-200">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+            <Zap className="w-4 h-4 text-amber-500" />
+            AI Agents
+          </h2>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => runAgent('auto_tag')} disabled={!!agentLoading}
+              className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'auto_tag' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Tag className="w-3 h-3" />}
+              Auto-Tag
+            </button>
+            <button onClick={() => runAgent('suggest_title')} disabled={!!agentLoading}
+              className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'suggest_title' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+              Suggest Title
+            </button>
+            <button onClick={() => runAgent('generate_description')} disabled={!!agentLoading}
+              className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'generate_description' ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+              Generate Description
+            </button>
+            <button onClick={() => runAgent('extract_action_items')} disabled={!!agentLoading || items.length === 0}
+              className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'extract_action_items' ? <Loader2 className="w-3 h-3 animate-spin" /> : <ListChecks className="w-3 h-3" />}
+              Extract Actions
+            </button>
+            <button onClick={() => runAgent('summarize_thread')} disabled={!!agentLoading || items.length === 0}
+              className="px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-medium hover:bg-indigo-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'summarize_thread' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
+              Summarize Thread
+            </button>
+            <button onClick={() => runAgent('find_contacts')} disabled={!!agentLoading || items.length === 0}
+              className="px-3 py-1.5 bg-teal-50 text-teal-700 border border-teal-200 rounded-lg text-xs font-medium hover:bg-teal-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'find_contacts' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Users className="w-3 h-3" />}
+              Find Contacts
+            </button>
+          </div>
+        </div>
+
+        {/* Title suggestions */}
+        {showTitleSuggestions && titleSuggestions.length > 0 && (
+          <div className="px-4 py-3 border-b border-gray-100 bg-purple-50/50">
+            <p className="text-xs text-purple-700 font-medium mb-2">Suggested Titles:</p>
+            <div className="space-y-1">
+              {titleSuggestions.map((s, i) => (
+                <button key={i} onClick={() => applyTitle(s)}
+                  className="block w-full text-left px-3 py-2 text-sm bg-white rounded border border-purple-100 hover:border-purple-300 hover:bg-purple-50 transition-colors">
+                  {s}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowTitleSuggestions(false)} className="text-xs text-purple-600 hover:underline mt-2">Dismiss</button>
+          </div>
+        )}
+
+        {/* Action items */}
+        {showActionItems && actionItems.length > 0 && (
+          <div className="px-4 py-3 border-b border-gray-100 bg-amber-50/50">
+            <p className="text-xs text-amber-700 font-medium mb-2">Action Items ({actionItems.length}):</p>
+            <div className="space-y-1.5">
+              {actionItems.map((item, i) => (
+                <div key={i} className="flex items-start gap-2 text-sm p-2 bg-white rounded border border-amber-100">
+                  <ListChecks className="w-3.5 h-3.5 text-amber-500 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-gray-800">{item.task}</p>
+                    <div className="flex gap-2 mt-0.5 text-xs text-gray-400">
+                      <span>Assignee: {item.assignee}</span>
+                      <span>Due: {item.due}</span>
+                      <span className={`font-medium ${item.priority === 'high' ? 'text-red-500' : item.priority === 'medium' ? 'text-amber-500' : 'text-gray-500'}`}>{item.priority}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setShowActionItems(false)} className="text-xs text-amber-600 hover:underline mt-2">Dismiss</button>
+          </div>
+        )}
+
+        {/* Thread summary */}
+        {showThreadSummary && threadSummary && (
+          <div className="px-4 py-3 border-b border-gray-100 bg-indigo-50/50">
+            <p className="text-xs text-indigo-700 font-medium mb-2">Thread Summary:</p>
+            <div className="prose prose-sm max-w-none text-gray-700 text-sm">
+              {threadSummary.split('\n').map((line, i) => {
+                if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-gray-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
+                if (line.startsWith('- ')) return <li key={i} className="ml-4 text-sm mt-0.5">{line.slice(2)}</li>;
+                if (line.trim() === '') return <br key={i} />;
+                return <p key={i} className="text-sm mt-1">{line}</p>;
+              })}
+            </div>
+            <button onClick={() => setShowThreadSummary(false)} className="text-xs text-indigo-600 hover:underline mt-2">Dismiss</button>
+          </div>
+        )}
+
+        {/* Extracted contacts */}
+        {showExtractedContacts && extractedContacts.length > 0 && (
+          <div className="px-4 py-3 bg-teal-50/50">
+            <p className="text-xs text-teal-700 font-medium mb-2">Extracted Contacts ({extractedContacts.length}):</p>
+            <div className="space-y-1.5">
+              {extractedContacts.map((c, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm p-2 bg-white rounded border border-teal-100">
+                  <div className="w-7 h-7 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-medium flex-shrink-0">
+                    {c.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-gray-800 font-medium truncate">{c.name}</p>
+                    <p className="text-xs text-gray-400">{c.email} &bull; {c.role}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setShowExtractedContacts(false)} className="text-xs text-teal-600 hover:underline mt-2">Dismiss</button>
+          </div>
+        )}
       </div>
 
       {/* Notes */}

@@ -5,18 +5,28 @@ export default async function TopicsPage() {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { data: topics } = await supabase
-    .from('topics')
-    .select('*, topic_items(count)')
-    .eq('user_id', user!.id)
-    .order('updated_at', { ascending: false });
+  const [topicsRes, foldersRes] = await Promise.all([
+    supabase
+      .from('topics')
+      .select('*, topic_items(count)')
+      .eq('user_id', user!.id)
+      .order('updated_at', { ascending: false }),
+    supabase
+      .from('folders')
+      .select('*')
+      .eq('user_id', user!.id)
+      .order('position', { ascending: true }),
+  ]);
 
   return (
-    <div className="p-8 max-w-5xl">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-8 max-w-6xl">
+      <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Topics</h1>
       </div>
-      <TopicsList initialTopics={topics ?? []} />
+      <TopicsList
+        initialTopics={topicsRes.data ?? []}
+        initialFolders={foldersRes.data ?? []}
+      />
     </div>
   );
 }
