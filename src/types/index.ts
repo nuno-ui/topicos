@@ -2,7 +2,7 @@ export interface Topic {
   id: string;
   title: string;
   description: string | null;
-  status: 'active' | 'archived' | 'completed';
+  status: 'active' | 'archived' | 'completed' | 'paused';
   area: 'work' | 'personal' | 'career';
   due_date: string | null;
   start_date: string | null;

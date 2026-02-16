@@ -92,64 +92,69 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const body = await request.json();
-  const { content, format, contacts: directContacts } = body;
+  try {
+    const body = await request.json();
+    const { content, format, contacts: directContacts } = body;
 
-  let parsedContacts: ImportedContact[] = [];
+    let parsedContacts: ImportedContact[] = [];
 
-  if (directContacts && Array.isArray(directContacts)) {
-    // Direct contact array (from preview → confirm flow)
-    parsedContacts = directContacts;
-  } else if (content && format) {
-    // Parse from file content
-    if (format === 'csv') {
-      parsedContacts = parseCSV(content);
-    } else if (format === 'vcf' || format === 'vcard') {
-      parsedContacts = parseVCard(content);
+    if (directContacts && Array.isArray(directContacts)) {
+      // Direct contact array (from preview → confirm flow)
+      parsedContacts = directContacts;
+    } else if (content && format) {
+      // Parse from file content
+      if (format === 'csv') {
+        parsedContacts = parseCSV(content);
+      } else if (format === 'vcf' || format === 'vcard') {
+        parsedContacts = parseVCard(content);
+      } else {
+        return NextResponse.json({ error: 'Unsupported format. Use csv or vcf.' }, { status: 400 });
+      }
     } else {
-      return NextResponse.json({ error: 'Unsupported format. Use csv or vcf.' }, { status: 400 });
+      return NextResponse.json({ error: 'Provide either content+format or contacts array' }, { status: 400 });
     }
-  } else {
-    return NextResponse.json({ error: 'Provide either content+format or contacts array' }, { status: 400 });
-  }
 
-  if (parsedContacts.length === 0) {
-    return NextResponse.json({ error: 'No valid contacts found in the provided data' }, { status: 400 });
-  }
-
-  // Preview mode: return parsed contacts without importing
-  if (body.preview) {
-    return NextResponse.json({ contacts: parsedContacts, count: parsedContacts.length });
-  }
-
-  // Import contacts
-  let created = 0;
-  let updated = 0;
-  let skipped = 0;
-
-  for (const c of parsedContacts) {
-    const metadata: Record<string, unknown> = {};
-    if (c.phone) metadata.phone = c.phone;
-
-    const { data, error } = await supabase.from('contacts').upsert({
-      user_id: user.id,
-      name: c.name,
-      email: c.email || null,
-      organization: c.organization || null,
-      role: c.role || null,
-      notes: c.notes || null,
-      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-    }, { onConflict: 'user_id, email' }).select().single();
-
-    if (error) {
-      skipped++;
-    } else if (data) {
-      // Determine if created or updated based on created_at timestamp
-      const isNew = new Date(data.created_at).getTime() > Date.now() - 5000;
-      if (isNew) created++;
-      else updated++;
+    if (parsedContacts.length === 0) {
+      return NextResponse.json({ error: 'No valid contacts found in the provided data' }, { status: 400 });
     }
-  }
 
-  return NextResponse.json({ created, updated, skipped, total: parsedContacts.length });
+    // Preview mode: return parsed contacts without importing
+    if (body.preview) {
+      return NextResponse.json({ contacts: parsedContacts, count: parsedContacts.length });
+    }
+
+    // Import contacts
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const c of parsedContacts) {
+      const metadata: Record<string, unknown> = {};
+      if (c.phone) metadata.phone = c.phone;
+
+      const { data, error } = await supabase.from('contacts').upsert({
+        user_id: user.id,
+        name: c.name,
+        email: c.email || null,
+        organization: c.organization || null,
+        role: c.role || null,
+        notes: c.notes || null,
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+      }, { onConflict: 'user_id, email' }).select().single();
+
+      if (error) {
+        skipped++;
+      } else if (data) {
+        // Determine if created or updated based on created_at timestamp
+        const isNew = new Date(data.created_at).getTime() > Date.now() - 5000;
+        if (isNew) created++;
+        else updated++;
+      }
+    }
+
+    return NextResponse.json({ created, updated, skipped, total: parsedContacts.length });
+  } catch (err) {
+    console.error('POST /api/contacts/import error:', err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal server error' }, { status: 500 });
+  }
 }
