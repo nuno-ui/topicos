@@ -1,7 +1,40 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, RefreshCw, Home, Copy, ChevronDown, ChevronUp } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { AlertTriangle, RefreshCw, Home, Copy, ChevronDown, ChevronUp, Wifi, WifiOff, ShieldAlert, ServerCrash } from 'lucide-react';
+
+/** Categorize errors for better user messaging */
+function categorizeError(error: Error): { icon: React.ReactNode; title: string; description: string } {
+  const msg = error.message?.toLowerCase() || '';
+
+  if (msg.includes('network') || msg.includes('fetch') || msg.includes('failed to fetch') || msg.includes('load failed')) {
+    return {
+      icon: <WifiOff className="w-10 h-10 text-amber-500" />,
+      title: 'Connection issue',
+      description: 'Unable to reach the server. Check your internet connection and try again.',
+    };
+  }
+  if (msg.includes('unauthorized') || msg.includes('401') || msg.includes('auth') || msg.includes('session')) {
+    return {
+      icon: <ShieldAlert className="w-10 h-10 text-orange-500" />,
+      title: 'Authentication error',
+      description: 'Your session may have expired. Try refreshing or sign in again.',
+    };
+  }
+  if (msg.includes('500') || msg.includes('server') || msg.includes('internal')) {
+    return {
+      icon: <ServerCrash className="w-10 h-10 text-red-500" />,
+      title: 'Server error',
+      description: 'The server encountered an issue. This is usually temporary \u2014 try again in a moment.',
+    };
+  }
+  return {
+    icon: <AlertTriangle className="w-10 h-10 text-red-500" />,
+    title: 'Something went wrong',
+    description: 'An unexpected error occurred. Try again or return to the dashboard.',
+  };
+}
 
 export default function Error({
   error,
@@ -10,6 +43,7 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const router = useRouter();
   const [showDetails, setShowDetails] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -17,10 +51,14 @@ export default function Error({
     console.error('App error:', error);
   }, [error]);
 
+  const errorInfo = categorizeError(error);
+
   const handleCopyError = () => {
     const errorText = [
       `Error: ${error.message}`,
       error.digest ? `Error ID: ${error.digest}` : null,
+      `URL: ${typeof window !== 'undefined' ? window.location.href : 'unknown'}`,
+      `Time: ${new Date().toISOString()}`,
       error.stack ? `\nStack:\n${error.stack}` : null,
     ]
       .filter(Boolean)
@@ -42,7 +80,7 @@ export default function Error({
         <div className="relative w-20 h-20 mx-auto mb-6">
           <div className="absolute inset-0 brand-gradient rounded-2xl opacity-10" />
           <div className="absolute inset-0 flex items-center justify-center">
-            <AlertTriangle className="w-10 h-10 text-red-500" />
+            {errorInfo.icon}
           </div>
         </div>
 
@@ -53,10 +91,9 @@ export default function Error({
           </p>
         )}
 
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">Something went wrong</h2>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">{errorInfo.title}</h2>
         <p className="text-sm text-gray-500 mb-6 leading-relaxed">
-          An unexpected error occurred. This might be a temporary issue.
-          Try again or return to the dashboard.
+          {errorInfo.description}
         </p>
 
         {/* Error message display */}
@@ -65,12 +102,14 @@ export default function Error({
             <button
               onClick={() => setShowDetails(!showDetails)}
               className="w-full flex items-center justify-between gap-2 text-xs text-gray-400 hover:text-gray-600 font-mono bg-gray-50 border border-gray-100 px-4 py-2.5 rounded-xl transition-colors"
+              aria-expanded={showDetails}
+              aria-label="Toggle error details"
             >
               <span className="truncate">{error.message}</span>
               {showDetails ? (
-                <ChevronUp className="w-3.5 h-3.5 flex-shrink-0" />
+                <ChevronUp className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
               ) : (
-                <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" />
+                <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
               )}
             </button>
 
@@ -83,6 +122,7 @@ export default function Error({
                   <button
                     onClick={handleCopyError}
                     className="inline-flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 transition-colors"
+                    aria-label="Copy error details to clipboard"
                   >
                     <Copy className="w-3 h-3" />
                     {copied ? 'Copied!' : 'Copy'}
@@ -106,7 +146,7 @@ export default function Error({
             Try again
           </button>
           <button
-            onClick={() => (window.location.href = '/dashboard')}
+            onClick={() => router.push('/dashboard')}
             className="inline-flex items-center gap-2 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-200 transition-all active:scale-[0.98]"
           >
             <Home className="w-4 h-4" />

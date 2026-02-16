@@ -1,8 +1,9 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import Link from 'next/link';
-import { sourceLabel, formatRelativeDate, getTopicHealthScore, getDaysUntil, formatSmartDate } from '@/lib/utils';
+import { sourceLabel, formatRelativeDate, getTopicHealthScore, getDaysUntil, formatSmartDate, decodeHtmlEntities } from '@/lib/utils';
 import { Zap, Clock, FolderKanban, Newspaper, PieChart, Mail, Calendar, FileText, MessageSquare, BookOpen, StickyNote, Link2, File, Search, Users, Plus, Sparkles, Paperclip, TrendingUp, TrendingDown, ArrowRight, Brain, Flame, LinkIcon, CheckCircle2, Circle, Rocket } from 'lucide-react';
 import { DashboardAgents } from '@/components/dashboard/dashboard-agents';
+import { ClientGreeting, ClientDate } from '@/components/dashboard/client-date';
 
 const sourceIconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   gmail: Mail,
@@ -238,12 +239,6 @@ export default async function DashboardPage() {
   };
 
   const displayName = user!.user_metadata?.full_name || user!.email?.split('@')[0] || 'there';
-  const greeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
-  };
 
   const productivityTip = () => {
     const tips = [
@@ -283,7 +278,7 @@ export default async function DashboardPage() {
   return (
     <div className="p-8 max-w-6xl animate-page-enter">
       {/* Quick Actions Bar */}
-      <div className="mb-6 flex items-center gap-3 p-3 bg-white rounded-xl border border-gray-100 shadow-sm">
+      <div className="mb-6 flex items-center gap-3 p-3 bg-white rounded-xl border border-gray-100 shadow-sm overflow-x-auto thin-scrollbar">
         <Link href="/topics" className="px-4 py-2 brand-gradient text-white rounded-lg text-sm font-semibold hover:opacity-90 transition-all shadow-sm flex items-center gap-2">
           <Plus className="w-4 h-4" /> New Topic
         </Link>
@@ -304,15 +299,15 @@ export default async function DashboardPage() {
       </div>
 
       {/* Welcome + Stats */}
-      <div className="mb-8 flex items-start justify-between">
+      <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">
-            <span className="text-gray-900">{greeting()}, </span>
+            <ClientGreeting />{' '}
             <span className="brand-gradient-text">{displayName}</span>
           </h1>
-          <p className="text-gray-500 mt-1">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+          <ClientDate />
         </div>
-        <div className="flex gap-4">
+        <div className="flex gap-3 sm:gap-4 overflow-x-auto thin-scrollbar pb-1">
           <div className="text-center px-5 py-4 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[100px] animate-count-up">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <FolderKanban className="w-4 h-4 text-blue-400" />
@@ -476,7 +471,7 @@ export default async function DashboardPage() {
                 .map((t: any) => ({ type: 'topic' as const, title: `Updated topic: ${t.title}`, date: t.updated_at, href: `/topics/${t.id}` })),
               ...recentItems
                 .slice(0, 3)
-                .map((item: any) => ({ type: 'item' as const, title: `New item: ${item.title}`, date: item.created_at, href: item.topic_id ? `/topics/${item.topic_id}` : '/search' })),
+                .map((item: any) => ({ type: 'item' as const, title: `New item: ${decodeHtmlEntities(item.title)}`, date: item.created_at, href: item.topic_id ? `/topics/${item.topic_id}` : '/search' })),
               ...aiRuns
                 .slice(0, 2)
                 .map((run: any) => ({ type: 'ai' as const, title: `AI ${agentKindLabel(run.kind)}: ${run.input_summary || 'completed'}`, date: run.created_at, href: run.topic_id ? `/topics/${run.topic_id}` : '#' })),
@@ -707,7 +702,7 @@ export default async function DashboardPage() {
                           <DashSourceIcon source={item.source} className="w-3.5 h-3.5" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-700 transition-colors">{item.title}</p>
+                          <p className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-700 transition-colors">{decodeHtmlEntities(item.title)}</p>
                           <div className="flex gap-2 mt-0.5 text-xs text-gray-400">
                             <span className={`truncate px-1.5 py-0.5 rounded text-[10px] font-medium ${
                               item.source === 'gmail' ? 'bg-red-50 text-red-600' :

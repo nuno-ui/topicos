@@ -73,7 +73,13 @@ export async function GET(request: Request) {
     }
 
     const { data, error } = await query;
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      // Gracefully handle missing feedback table (migration not yet run)
+      if (error.message?.includes('schema cache') || error.message?.includes('does not exist') || error.code === '42P01') {
+        return NextResponse.json({ feedback: [], table_missing: true });
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
     return NextResponse.json({ feedback: data ?? [] });
   } catch (err) {

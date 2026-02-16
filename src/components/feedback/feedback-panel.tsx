@@ -83,9 +83,19 @@ export function FeedbackPanel() {
       const res = await fetch('/api/feedback');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+      // Gracefully handle missing feedback table (migration not run)
+      if (data.table_missing) {
+        setFeedback([]);
+        setLoading(false);
+        return;
+      }
       setFeedback(data.feedback ?? []);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load feedback');
+      // Don't show error toast for expected "table missing" scenario
+      const msg = err instanceof Error ? err.message : '';
+      if (!msg.includes('schema cache') && !msg.includes('does not exist')) {
+        toast.error(msg || 'Failed to load feedback');
+      }
     }
     setLoading(false);
   }, []);

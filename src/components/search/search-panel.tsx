@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { sourceLabel, formatRelativeDate, sourceBorderClass, sourceToggleClass, sourceIconBgClass } from '@/lib/utils';
+import { sourceLabel, formatRelativeDate, sourceBorderClass, sourceToggleClass, sourceIconBgClass, decodeHtmlEntities } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, ChevronUp, ChevronRight, Clock, ArrowUpDown, Calendar, X, Sparkles, Brain, Tags, Wand2, Bookmark, BookmarkCheck, Eye, Mail, Filter, RotateCcw, ChevronsUpDown, SearchX, Lightbulb } from 'lucide-react';
 
@@ -845,9 +845,9 @@ export function SearchPanel() {
                   <div className="flex-1 min-w-0">
                     <a href={item.url} target="_blank" rel="noopener noreferrer"
                       className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate block">
-                      {item.title}
+                      {decodeHtmlEntities(item.title)}
                     </a>
-                    <p className="text-xs text-gray-500 line-clamp-2 mt-0.5">{item.snippet}</p>
+                    <p className="text-xs text-gray-500 line-clamp-2 mt-0.5">{decodeHtmlEntities(item.snippet)}</p>
                     <div className="flex gap-2 mt-1 text-xs text-gray-400">
                       <span>{sourceLabel(item.source)}</span>
                       <span>{formatRelativeDate(item.occurred_at)}</span>
@@ -989,7 +989,7 @@ export function SearchPanel() {
                                   </span>
                                 )}
                               </div>
-                              <p className={`text-xs text-gray-500 mt-0.5 ${expandedResult === key ? '' : 'line-clamp-2'}`}>{item.snippet}</p>
+                              <p className={`text-xs text-gray-500 mt-0.5 ${expandedResult === key ? '' : 'line-clamp-2'}`}>{decodeHtmlEntities(item.snippet)}</p>
                               {item.snippet && item.snippet.length > 100 && (
                                 <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpandedResult(expandedResult === key ? null : key); }}
                                   className="text-xs text-blue-500 hover:text-blue-700 mt-0.5 flex items-center gap-0.5">

@@ -39,6 +39,20 @@
     outline-offset: 2px;
     border-radius: 4px;
   }
+
+  /* Scroll margin so anchored elements aren't hidden behind sticky headers */
+  [id] {
+    scroll-margin-top: 1rem;
+  }
+
+  /* Improve text rendering */
+  h1, h2, h3, h4, h5, h6 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
 }
 
 /* ===== Brand Utilities ===== */
@@ -497,7 +511,9 @@
   .animate-count-up,
   .toast-enter,
   .animate-page-enter,
-  .login-particle {
+  .login-particle,
+  .new-badge,
+  .animate-pulse-dot {
     animation: none !important;
   }
   .card-hover:hover,
@@ -780,4 +796,32 @@ select:focus {
 
 .progress-pulse {
   animation: progressPulse 1.5s ease-in-out infinite;
+}
+
+/* ===== Touch target sizing for mobile ===== */
+
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Exception for inline/compact elements */
+  .compact-touch button,
+  .compact-touch a,
+  kbd,
+  .text-\[10px\] {
+    min-height: unset;
+    min-width: unset;
+  }
+}
+
+/* ===== Better disabled state for buttons ===== */
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+  pointer-events: auto;
 }

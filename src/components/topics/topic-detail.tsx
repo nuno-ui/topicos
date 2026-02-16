@@ -1,6 +1,6 @@
 'use client';
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { sourceLabel, formatRelativeDate, sourceBorderClass, sourceIconBgClass, formatSmartDate, AREA_COLORS } from '@/lib/utils';
+import { sourceLabel, formatRelativeDate, sourceBorderClass, sourceIconBgClass, formatSmartDate, AREA_COLORS, decodeHtmlEntities } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -20,6 +20,7 @@ interface TopicItem {
   body?: string | null;
   url: string;
   occurred_at: string;
+  created_at: string;
   metadata: Record<string, unknown>;
   linked_by?: string;
   confidence?: number;
@@ -438,6 +439,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                 snippet: result.snippet || '',
                 url: result.url || '',
                 occurred_at: result.occurred_at || new Date().toISOString(),
+                created_at: new Date().toISOString(),
                 metadata: result.metadata || {},
                 linked_by: linkedBy,
               }, ...prev]);
@@ -853,9 +855,10 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     return acc;
   }, {} as Record<string, number>);
 
-  // Helper: check if item was added in last 24 hours
-  const isNewItem = (occurredAt: string) => {
-    return (Date.now() - new Date(occurredAt).getTime()) < 24 * 60 * 60 * 1000;
+  // Helper: check if item was linked to this topic in last 2 hours
+  // Uses created_at (when item was added) not occurred_at (when event happened)
+  const isNewItem = (createdAt: string) => {
+    return (Date.now() - new Date(createdAt).getTime()) < 2 * 60 * 60 * 1000;
   };
 
   // Area badge gradient class
@@ -1535,8 +1538,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                     <SourceIcon source={item.source} className="w-3.5 h-3.5" />
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
-                    <p className="text-xs text-gray-500 truncate mt-0.5">{item.snippet}</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">{decodeHtmlEntities(item.title)}</p>
+                    <p className="text-xs text-gray-500 truncate mt-0.5">{decodeHtmlEntities(item.snippet)}</p>
                     <div className="flex gap-2 mt-1.5 text-xs text-gray-400">
                       <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
                         {sourceLabel(item.source)}
@@ -1607,8 +1610,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                       <SourceIcon source={item.source} className="w-3.5 h-3.5" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
-                      <p className="text-xs text-gray-500 truncate mt-0.5">{item.snippet}</p>
+                      <p className="text-sm font-medium text-gray-900 truncate">{decodeHtmlEntities(item.title)}</p>
+                      <p className="text-xs text-gray-500 truncate mt-0.5">{decodeHtmlEntities(item.snippet)}</p>
                       <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-400">
                         <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
                           {sourceLabel(item.source)}
@@ -1791,10 +1794,10 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                         {!!item.metadata?.pinned && <Pin className="w-3 h-3 text-amber-500 flex-shrink-0" />}
                         <a href={item.url} target="_blank" rel="noopener noreferrer"
                           className="font-semibold text-gray-900 hover:text-blue-600 text-sm truncate block transition-colors">
-                          {item.title}
+                          {decodeHtmlEntities(item.title)}
                         </a>
                         {/* New badge for items added in last 24h */}
-                        {isNewItem(item.occurred_at) && (
+                        {isNewItem(item.created_at) && (
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white new-badge flex-shrink-0">
                             NEW
                           </span>
@@ -1834,7 +1837,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                         </div>
                       )}
                       {item.snippet && !expandedContent[item.id] && (
-                        <p className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">{item.snippet}</p>
+                        <p className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">{decodeHtmlEntities(item.snippet)}</p>
                       )}
                       {/* Expanded content */}
                       {expandedContent[item.id] && (

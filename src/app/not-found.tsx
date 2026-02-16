@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Home, ArrowLeft, Search } from 'lucide-react';
 
 export default function NotFound() {
   return (
@@ -11,13 +12,13 @@ export default function NotFound() {
         <span className="text-xl font-extrabold brand-gradient-text tracking-tight">YouOS</span>
       </div>
 
-      {/* Large 404 with gradient */}
-      <h1 className="text-[10rem] sm:text-[12rem] font-black leading-none brand-gradient-text select-none tracking-tighter">
+      {/* Large 404 with gradient — responsive sizing */}
+      <h1 className="text-8xl sm:text-[10rem] md:text-[12rem] font-black leading-none brand-gradient-text select-none tracking-tighter">
         404
       </h1>
 
       {/* Message */}
-      <div className="text-center max-w-md -mt-4">
+      <div className="text-center max-w-md -mt-2 sm:-mt-4">
         <h2 className="text-2xl font-bold text-gray-900 mb-2">
           Page not found
         </h2>
@@ -27,27 +28,20 @@ export default function NotFound() {
         </p>
 
         {/* Actions */}
-        <div className="flex items-center gap-3 justify-center">
+        <div className="flex items-center gap-3 justify-center flex-wrap">
           <Link
             href="/dashboard"
             className="inline-flex items-center gap-2 px-6 py-3 brand-gradient text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-all shadow-sm"
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z" />
-            </svg>
+            <Home className="w-4 h-4" />
             Go to Dashboard
           </Link>
           <Link
-            href="/"
+            href="/search"
             className="inline-flex items-center gap-2 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-200 transition-all"
           >
-            Home
+            <Search className="w-4 h-4" />
+            Search
           </Link>
         </div>
       </div>

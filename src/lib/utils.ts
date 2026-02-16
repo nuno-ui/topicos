@@ -137,7 +137,12 @@ export function pluralize(count: number, singular: string, plural?: string): str
 }
 
 export function getDaysUntil(date: string | Date): number {
-  return Math.ceil((new Date(date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  const target = new Date(date);
+  const now = new Date();
+  // Compare dates only (strip time component) to avoid off-by-one errors
+  const targetDay = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+  const todayDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((targetDay.getTime() - todayDay.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 // Constants for consistency across the app
@@ -192,6 +197,10 @@ export function formatNumber(num: number): string {
 }
 
 export function generateId(): string {
+  // Use crypto API when available for better randomness, fallback to Math.random
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID().slice(0, 8);
+  }
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
   for (let i = 0; i < 8; i++) {
@@ -288,4 +297,45 @@ export function getTopicHealthScore(topic: {
   const label = score >= 80 ? 'Healthy' : score >= 50 ? 'Needs Attention' : 'Critical';
   const color = score >= 80 ? 'green' : score >= 50 ? 'amber' : 'red';
   return { score, label, color };
+}
+
+/**
+ * Decode HTML entities in a string (e.g. &#39; → ', &lt; → <, &amp; → &)
+ * Handles both named and numeric entities.
+ */
+export function decodeHtmlEntities(text: string): string {
+  if (!text) return text;
+  const entities: Record<string, string> = {
+    '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"',
+    '&#39;': "'", '&apos;': "'", '&nbsp;': ' ', '&#x27;': "'",
+    '&#x2F;': '/', '&#47;': '/', '&mdash;': '\u2014', '&ndash;': '\u2013',
+    '&hellip;': '\u2026', '&laquo;': '\u00AB', '&raquo;': '\u00BB',
+  };
+  return text
+    .replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|(\w+));/g, (match, dec, hex, name) => {
+      if (dec) return String.fromCharCode(parseInt(dec, 10));
+      if (hex) return String.fromCharCode(parseInt(hex, 16));
+      if (name && entities[`&${name};`]) return entities[`&${name};`];
+      return match;
+    });
+}
+
+/**
+ * Check if a topic is overdue based on its due_date.
+ * Uses date-only comparison (ignores time component).
+ */
+export function isOverdue(dueDate: string | null | undefined): boolean {
+  if (!dueDate) return false;
+  return getDaysUntil(dueDate) < 0;
+}
+
+/**
+ * Format bytes to human-readable string (e.g. 1024 → "1 KB")
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }

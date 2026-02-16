@@ -174,11 +174,11 @@ export function CommandPalette() {
   let globalIndex = -1;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center pt-[20vh]" onClick={() => setOpen(false)}>
-      <div className="bg-white rounded-2xl shadow-2xl w-[560px] max-h-[420px] border border-gray-200 overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center pt-[20vh]" onClick={() => setOpen(false)} role="dialog" aria-modal="true" aria-label="Command palette">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[560px] mx-4 max-h-[420px] border border-gray-200 overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
         {/* Search input */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-          <Command className="w-4 h-4 text-gray-400" />
+          <Command className="w-4 h-4 text-gray-400" aria-hidden="true" />
           <input
             ref={inputRef}
             value={query}
@@ -186,6 +186,10 @@ export function CommandPalette() {
             onKeyDown={handleKeyDown}
             placeholder="Type a command or search..."
             className="flex-1 text-sm text-gray-900 placeholder-gray-400 outline-none bg-transparent"
+            aria-label="Search commands"
+            role="combobox"
+            aria-expanded="true"
+            aria-autocomplete="list"
           />
           <kbd className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-400 rounded border border-gray-200 font-mono">ESC</kbd>
         </div>

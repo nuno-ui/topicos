@@ -239,8 +239,10 @@ export function Sidebar({ user }: { user: User }) {
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const target = e.target as HTMLElement;
+      const tag = target?.tagName;
+      // Don't trigger navigation shortcuts when user is typing in forms or contentEditable
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       switch (e.key) {
@@ -361,7 +363,7 @@ export function Sidebar({ user }: { user: User }) {
       </div>
 
       {/* Navigation */}
-      <nav className={cn('flex-1 px-3 space-y-0.5', collapsed && !isMobile && 'px-2')}>
+      <nav aria-label="Main navigation" className={cn('flex-1 px-3 space-y-0.5', collapsed && !isMobile && 'px-2')}>
         {navItems.map((item) => {
           const isActive = pathname.startsWith(item.href);
           const showCollapsed = collapsed && !isMobile;
@@ -371,6 +373,7 @@ export function Sidebar({ user }: { user: User }) {
               <Link
                 href={item.href}
                 onClick={() => isMobile && setMobileOpen(false)}
+                aria-current={isActive ? 'page' : undefined}
                 className={cn(
                   'flex items-center px-3 py-2.5 rounded-xl text-sm font-medium transition-all group relative',
                   showCollapsed ? 'justify-center px-0' : 'justify-between',
@@ -487,7 +490,7 @@ export function Sidebar({ user }: { user: User }) {
             </div>
             <button onClick={handleLogout}
               className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
-              title="Sign out">
+              title="Sign out" aria-label="Sign out">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -501,7 +504,7 @@ export function Sidebar({ user }: { user: User }) {
             </div>
             <button onClick={handleLogout}
               className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-              title="Sign out">
+              title="Sign out" aria-label="Sign out">
               <LogOut className="w-4 h-4" />
             </button>
             <div className="absolute left-full top-0 ml-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/user:opacity-100 transition-opacity z-50 shadow-lg">

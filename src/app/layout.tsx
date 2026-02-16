@@ -1,6 +1,13 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { Toaster } from 'sonner';
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: '#3b82f6',
+};
 
 export const metadata: Metadata = {
   title: {
@@ -22,12 +29,17 @@ export const metadata: Metadata = {
   icons: {
     icon: '/icon',
   },
+  other: {
+    'apple-mobile-web-app-capable': 'yes',
+    'apple-mobile-web-app-status-bar-style': 'default',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className="scroll-smooth">
       <head>
+        <meta name="color-scheme" content="light" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -38,6 +50,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           position="top-right"
           richColors
           closeButton
+          visibleToasts={4}
+          duration={4000}
           toastOptions={{
             style: {
               borderRadius: '12px',
