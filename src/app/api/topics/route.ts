@@ -83,9 +83,9 @@ export async function POST(request: Request) {
 
     let { data, error } = await supabase.from('topics').insert(insertData).select().single();
 
-    // If schema cache error, retry with only base fields (new columns may not exist yet)
+    // If schema cache error, retry with all known fields
     if (error && error.message.includes('schema cache')) {
-      console.warn('POST /api/topics: new columns not in schema, retrying with base fields only');
+      console.warn('POST /api/topics: schema cache error, retrying with known fields');
       const safeData: Record<string, unknown> = {
         title: insertData.title,
         description: insertData.description,
@@ -94,6 +94,11 @@ export async function POST(request: Request) {
         due_date: insertData.due_date,
         user_id: insertData.user_id,
       };
+      // Include optional fields if provided
+      if (insertData.start_date) safeData.start_date = insertData.start_date;
+      if (insertData.priority != null) safeData.priority = insertData.priority;
+      if (insertData.tags) safeData.tags = insertData.tags;
+      if (insertData.folder_id) safeData.folder_id = insertData.folder_id;
       const retry = await supabase.from('topics').insert(safeData).select().single();
       data = retry.data;
       error = retry.error;

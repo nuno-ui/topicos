@@ -71,12 +71,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       .select()
       .single();
 
-    // If schema cache error, retry with only base fields (new columns may not exist yet)
+    // If schema cache error, retry with all known fields
     if (error && error.message.includes('schema cache')) {
-      console.warn('PATCH /api/topics/[id]: new columns not in schema, retrying with base fields only');
-      const baseFields = ['title', 'description', 'area', 'status', 'due_date', 'updated_at'];
+      console.warn('PATCH /api/topics/[id]: schema cache error, retrying with known fields');
+      const knownFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'summary', 'notes', 'progress_percent', 'owner', 'goal', 'updated_at'];
       const safeData: Record<string, unknown> = {};
-      for (const key of baseFields) {
+      for (const key of knownFields) {
         if (key in updateData) safeData[key] = updateData[key];
       }
       const retry = await supabase
