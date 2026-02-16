@@ -273,7 +273,7 @@ export function SettingsPanel({
 
       const exportData = {
         exported_at: new Date().toISOString(),
-        version: 'TopicOS v3',
+        version: 'YouOS v1',
         topics: topics.topics || [],
         contacts: contacts.contacts || [],
         items,
@@ -285,7 +285,7 @@ export function SettingsPanel({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `topicos-export-${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `youos-export-${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast.success('Data exported successfully');
@@ -830,12 +830,12 @@ export function SettingsPanel({
       {/* About                                                         */}
       {/* ============================================================ */}
       <div>
-        <SectionHeader icon={Settings} title="About TopicOS" />
+        <SectionHeader icon={Settings} title="About YouOS" />
         <div className="p-5 bg-gradient-to-br from-white to-gray-50 rounded-xl border border-gray-100 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-semibold text-gray-900">TopicOS v3</p>
-              <p className="text-xs text-gray-500 mt-0.5">Search-first topic-centric productivity</p>
+              <p className="text-sm font-semibold text-gray-900">YouOS v1</p>
+              <p className="text-xs text-gray-500 mt-0.5">Your AI-Powered Life Operating System</p>
             </div>
             <div className="text-right text-xs text-gray-400">
               <p>Powered by Claude AI</p>

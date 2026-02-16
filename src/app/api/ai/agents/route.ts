@@ -645,7 +645,7 @@ ${(actionItems || []).map((i: Record<string, unknown>, idx: number) => {
         const orphanItems = (allItems || []).filter(i => !i.topic_id);
 
         const { text } = await callClaude(
-          'Based on this platform usage data, suggest 5-7 specific, actionable optimizations the user should take to get more value from TopicOS. Focus on organization, productivity, and AI features.',
+          'Based on this platform usage data, suggest 5-7 specific, actionable optimizations the user should take to get more value from YouOS. Focus on organization, productivity, and AI features.',
           `Usage data:\n- Topics: ${(allTopics || []).length} total, ${activeTopics.length} active\n- Topics without tags: ${topicsWithoutTags.length}\n- Topics without folders: ${topicsWithoutFolder.length}\n- Items: ${(allItems || []).length} total, ${orphanItems.length} orphaned (not linked to topics)\n- Contacts: ${(allContacts || []).length}\n- Sources used: ${[...new Set((allItems || []).map(i => i.source))].join(', ') || 'none'}\n\nAvailable features:\n- Folder hierarchy for topic organization\n- AI auto-tagging, description generation, action item extraction\n- Smart search with AI query enhancement\n- AI contact enrichment from communications\n- Weekly review and daily briefing agents`
         );
 

@@ -335,8 +335,8 @@ export function Sidebar({ user }: { user: User }) {
             'min-w-0 flex-1 overflow-hidden transition-all duration-200',
             collapsed && !isMobile ? 'w-0 opacity-0' : 'w-auto opacity-100'
           )}>
-            <h1 className="text-lg font-extrabold brand-gradient-text tracking-tight leading-tight whitespace-nowrap">TopicOS</h1>
-            <p className="text-[10px] text-gray-400 font-medium tracking-wide uppercase whitespace-nowrap">Search-First Productivity</p>
+            <h1 className="text-lg font-extrabold brand-gradient-text tracking-tight leading-tight whitespace-nowrap">YouOS</h1>
+            <p className="text-[10px] text-gray-400 font-medium tracking-wide uppercase whitespace-nowrap">Your AI-Powered Life OS</p>
           </div>
           {/* Mobile close button */}
           {isMobile && (

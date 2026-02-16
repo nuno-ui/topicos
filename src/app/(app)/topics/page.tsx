@@ -3,8 +3,8 @@ import { TopicsList } from '@/components/topics/topics-list';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Topics - TopicOS',
-  description: 'Organize your work, projects, and personal matters into topic clusters',
+  title: 'Topics - YouOS',
+  description: 'Your projects and life areas, organized intelligently',
 };
 
 export default async function TopicsPage() {

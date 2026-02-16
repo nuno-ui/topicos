@@ -3,7 +3,7 @@ import { SettingsPanel } from '@/components/settings/settings-panel';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Settings - TopicOS',
+  title: 'Settings - YouOS',
   description: 'Manage your connected sources and account settings',
 };
 

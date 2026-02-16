@@ -314,16 +314,17 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
   };
 
   const startEdit = () => {
-    setEditName(contact.name);
+    setEditName(contact.name || '');
     setEditEmail(contact.email || '');
     setEditOrganization(contact.organization || '');
     setEditRole(contact.role || '');
     setEditArea(contact.area || '');
     setEditNotes(contact.notes || '');
-    setEditPhone((contact.metadata?.phone as string) || '');
-    setEditLinkedin((contact.metadata?.linkedin as string) || '');
-    setEditTwitter((contact.metadata?.twitter as string) || '');
-    setEditTimezone((contact.metadata?.timezone as string) || '');
+    const meta = contact.metadata || {};
+    setEditPhone((meta.phone as string) || '');
+    setEditLinkedin((meta.linkedin as string) || '');
+    setEditTwitter((meta.twitter as string) || '');
+    setEditTimezone((meta.timezone as string) || '');
     setEditing(true);
   };
 
@@ -338,7 +339,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
     }
     setSaving(true);
     try {
-      const metadata = { ...contact.metadata };
+      const metadata: Record<string, unknown> = { ...(contact.metadata || {}) };
       if (editPhone.trim()) metadata.phone = editPhone.trim();
       else delete metadata.phone;
       if (editLinkedin.trim()) metadata.linkedin = editLinkedin.trim();
@@ -376,12 +377,21 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       if (editTwitter.trim() !== ((contact.metadata?.twitter as string) || '')) changes.push('twitter');
       if (editTimezone.trim() !== ((contact.metadata?.timezone as string) || '')) changes.push('timezone');
 
-      setContact(prev => ({
-        ...prev,
-        ...(data.contact ?? {}),
-        metadata: { ...(data.contact?.metadata ?? {}), ...metadata },
-        contact_topic_links: prev.contact_topic_links,
-      }));
+      setContact(prev => {
+        const serverData = data.contact ?? {};
+        return {
+          ...prev,
+          name: serverData.name ?? editName.trim(),
+          email: serverData.email ?? (editEmail.trim() || null),
+          organization: serverData.organization ?? (editOrganization.trim() || null),
+          role: serverData.role ?? (editRole.trim() || null),
+          area: serverData.area ?? (editArea || null),
+          notes: serverData.notes ?? (editNotes.trim() || null),
+          metadata: { ...(serverData.metadata ?? {}), ...metadata },
+          updated_at: serverData.updated_at ?? prev.updated_at,
+          contact_topic_links: prev.contact_topic_links,
+        };
+      });
       setEditing(false);
       setLastSavedAt(new Date());
       setSaveFlash(true);

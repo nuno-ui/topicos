@@ -2,10 +2,10 @@ import { LoginForm } from './login-form';
 import { Sparkles, Search, Brain, Zap, Shield, Globe, Users, Star } from 'lucide-react';
 
 const features = [
-  { icon: Search, title: 'Unified Search', desc: 'Search across Gmail, Slack, Notion, Calendar & Drive in one place', badge: 'Core' },
-  { icon: Brain, title: 'AI-Powered', desc: 'Smart topic clustering, daily briefings, and auto-categorization', badge: 'Smart' },
-  { icon: Zap, title: 'Topic-Centric', desc: 'Organize everything around topics, not apps or inboxes', badge: 'Fast' },
-  { icon: Shield, title: 'Private & Secure', desc: 'Your data stays yours with enterprise-grade security', badge: 'Safe' },
+  { icon: Brain, title: 'AI Companion', desc: 'Your personal AI that handles the grunt work — organizing, connecting, and acting on your behalf', badge: 'Core' },
+  { icon: Search, title: 'Unified Life View', desc: 'One place for everything. Gmail, Slack, Notion, Calendar, Drive — all connected', badge: 'Connected' },
+  { icon: Zap, title: 'Focus on Being Human', desc: 'While AI manages your digital life, you focus on what truly matters', badge: 'Freedom' },
+  { icon: Shield, title: 'Supercharged Productivity', desc: 'Be 10x more productive with zero extra stress', badge: '10x' },
 ];
 
 export default function LoginPage() {
@@ -35,16 +35,16 @@ export default function LoginPage() {
               </div>
               <div>
                 <div className="flex items-center gap-2.5">
-                  <h1 className="text-3xl font-extrabold text-white tracking-tight">TopicOS</h1>
+                  <h1 className="text-3xl font-extrabold text-white tracking-tight">YouOS</h1>
                   <span className="px-2 py-0.5 bg-white/15 backdrop-blur-sm text-[10px] font-bold text-white/90 rounded-full uppercase tracking-wider border border-white/10">
-                    v2.0
+                    v1
                   </span>
                 </div>
-                <p className="text-blue-100 text-sm font-medium">Search-First Productivity</p>
+                <p className="text-blue-100 text-sm font-medium">Your AI-Powered Life OS</p>
               </div>
             </div>
             <p className="text-xl text-white/90 font-medium leading-relaxed max-w-md">
-              Your AI-powered command center for everything that matters.
+              While AI does the hard work, you focus on being human.
             </p>
           </div>
 
@@ -92,7 +92,7 @@ export default function LoginPage() {
               </div>
             </div>
             <p className="text-blue-100/50 text-xs italic leading-relaxed max-w-sm">
-              &ldquo;TopicOS transformed how our team manages information. We cut context-switching time by 60%.&rdquo;
+              &ldquo;YouOS transformed how I manage my digital life. I spend 60% less time on admin work and can finally focus on what matters.&rdquo;
             </p>
             <p className="text-blue-100/40 text-[11px] mt-1.5 font-medium">
               &mdash; Sarah K., Product Manager at TechCorp
@@ -117,12 +117,12 @@ export default function LoginPage() {
               </div>
               <div>
                 <div className="flex items-center justify-center gap-2">
-                  <h1 className="text-3xl font-extrabold brand-gradient-text">TopicOS</h1>
+                  <h1 className="text-3xl font-extrabold brand-gradient-text">YouOS</h1>
                   <span className="px-2 py-0.5 bg-blue-50 text-[10px] font-bold text-blue-600 rounded-full uppercase tracking-wider border border-blue-100">
-                    v2.0
+                    v1
                   </span>
                 </div>
-                <p className="text-gray-500 text-sm mt-1.5">Your AI-powered command center</p>
+                <p className="text-gray-500 text-sm mt-1.5">Your AI-Powered Life OS</p>
               </div>
             </div>
             {/* Mobile social proof */}

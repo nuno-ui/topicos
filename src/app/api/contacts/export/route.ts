@@ -19,7 +19,7 @@ export async function GET() {
       return new NextResponse(emptyHeaders, {
         headers: {
           'Content-Type': 'text/csv',
-          'Content-Disposition': `attachment; filename="topicos_contacts_${new Date().toISOString().split('T')[0]}.csv"`,
+          'Content-Disposition': `attachment; filename="youos_contacts_${new Date().toISOString().split('T')[0]}.csv"`,
         },
       });
     }
@@ -48,7 +48,7 @@ export async function GET() {
     return new NextResponse(csv, {
       headers: {
         'Content-Type': 'text/csv',
-        'Content-Disposition': `attachment; filename="topicos_contacts_${new Date().toISOString().split('T')[0]}.csv"`,
+        'Content-Disposition': `attachment; filename="youos_contacts_${new Date().toISOString().split('T')[0]}.csv"`,
       },
     });
   } catch (err) {

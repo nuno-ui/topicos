@@ -4,16 +4,16 @@ import { Toaster } from 'sonner';
 
 export const metadata: Metadata = {
   title: {
-    template: '%s | TopicOS',
-    default: 'TopicOS - Search-First Productivity',
+    template: '%s | YouOS',
+    default: 'YouOS - Your AI-Powered Life OS',
   },
-  description: 'AI-powered topic-centric productivity platform. Organize your work across Gmail, Slack, Notion, Calendar, and Drive.',
-  keywords: ['productivity', 'AI', 'topic management', 'search', 'organization', 'gmail', 'slack', 'notion'],
+  description: 'Your AI-powered life operating system. One place for Gmail, Slack, Notion, Calendar, and Drive — while AI does the hard work, you focus on being human.',
+  keywords: ['productivity', 'AI', 'life OS', 'search', 'organization', 'gmail', 'slack', 'notion'],
   openGraph: {
-    title: 'TopicOS - Search-First Productivity',
-    description: 'AI-powered topic-centric productivity. Unify your Gmail, Slack, Notion, Calendar, and Drive.',
+    title: 'YouOS - Your AI-Powered Life OS',
+    description: 'Your AI-powered life operating system. One place for Gmail, Slack, Notion, Calendar, and Drive — while AI does the hard work, you focus on being human.',
     type: 'website',
-    siteName: 'TopicOS',
+    siteName: 'YouOS',
   },
   robots: {
     index: false,

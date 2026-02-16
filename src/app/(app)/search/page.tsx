@@ -3,7 +3,7 @@ import { SearchPanel } from '@/components/search/search-panel';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Search - TopicOS',
+  title: 'Search - YouOS',
   description: 'Search across all your connected sources',
 };
 

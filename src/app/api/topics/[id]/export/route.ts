@@ -172,7 +172,7 @@ export async function GET(
 
     // Metadata
     lines.push('---');
-    lines.push(`*Exported from TopicOS on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}*`);
+    lines.push(`*Exported from YouOS on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}*`);
     lines.push(`*Topic created: ${new Date(topic.created_at).toLocaleDateString()} | Last updated: ${new Date(topic.updated_at).toLocaleDateString()}*`);
 
     const markdown = lines.join('\n');

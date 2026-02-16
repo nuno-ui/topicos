@@ -14,7 +14,7 @@ export async function fetchLinkContent(url: string, maxLength: number = 15000): 
     const res = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'TopicOS/1.0 (Content Analyzer)',
+        'User-Agent': 'YouOS/1.0 (Content Analyzer)',
         'Accept': 'text/html, application/json, text/plain',
       },
     });

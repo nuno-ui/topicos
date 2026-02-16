@@ -6,9 +6,9 @@ export default function NotFound() {
       {/* Brand logo */}
       <div className="mb-8 flex items-center gap-3">
         <div className="w-10 h-10 brand-gradient rounded-xl flex items-center justify-center shadow-sm">
-          <span className="text-white font-bold text-lg">T</span>
+          <span className="text-white font-bold text-lg">Y</span>
         </div>
-        <span className="text-xl font-extrabold brand-gradient-text tracking-tight">TopicOS</span>
+        <span className="text-xl font-extrabold brand-gradient-text tracking-tight">YouOS</span>
       </div>
 
       {/* Large 404 with gradient */}

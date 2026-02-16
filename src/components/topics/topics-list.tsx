@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client';
 import { formatRelativeDate } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, ArrowRightLeft, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban } from 'lucide-react';
 import Link from 'next/link';
 
 // --- Area border color map for topic cards ---
@@ -306,6 +306,31 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     setFolders(folders.filter(f => f.id !== folderId));
     setTopics(topics.map(t => t.folder_id === folderId ? { ...t, folder_id: null } : t));
     toast.success('Folder deleted');
+  };
+
+  const changeFolderArea = async (folderId: string, newArea: string) => {
+    try {
+      const res = await fetch(`/api/folders/${folderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ area: newArea }),
+      });
+      if (!res.ok) throw new Error('Failed to update folder area');
+      setFolders(prev => prev.map(f => f.id === folderId ? { ...f, area: newArea } : f));
+      // Also update any topics inside this folder to the new area
+      const topicsInFolder = topics.filter(t => t.folder_id === folderId);
+      for (const t of topicsInFolder) {
+        await fetch(`/api/topics/${t.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ area: newArea }),
+        });
+      }
+      setTopics(prev => prev.map(t => t.folder_id === folderId ? { ...t, area: newArea } : t));
+      toast.success(`Folder moved to ${newArea}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to move folder');
+    }
   };
 
   const moveTopicToFolder = async (topicId: string, folderId: string | null) => {
@@ -921,7 +946,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               </span>
             </span>
           )}
-          <div className="flex gap-0.5 opacity-0 group-hover/folder:opacity-100 transition-opacity bg-white/80 backdrop-blur-sm rounded-lg border border-gray-100 shadow-sm p-0.5">
+          <div className="flex gap-0.5 items-center opacity-0 group-hover/folder:opacity-100 transition-opacity bg-white/80 backdrop-blur-sm rounded-lg border border-gray-100 shadow-sm p-0.5">
             <button onClick={() => { setNewFolderParent(node.folder.id); setShowCreateFolder(true); }}
               className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Add subfolder">
               <FolderPlus className="w-3.5 h-3.5" />
@@ -934,6 +959,28 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete folder">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
+            <div className="w-px h-4 bg-gray-200 mx-0.5" />
+            <div className="flex gap-0.5 items-center" title="Move to area">
+              <ArrowRightLeft className="w-3 h-3 text-gray-400 mr-0.5" />
+              {(['work', 'personal', 'career'] as const).map(a => {
+                const isActive = node.folder.area === a;
+                const colorMap: Record<string, { active: string; inactive: string }> = {
+                  work: { active: 'bg-blue-500 text-white', inactive: 'text-blue-600 hover:bg-blue-50 border border-blue-200' },
+                  personal: { active: 'bg-green-500 text-white', inactive: 'text-green-600 hover:bg-green-50 border border-green-200' },
+                  career: { active: 'bg-purple-500 text-white', inactive: 'text-purple-600 hover:bg-purple-50 border border-purple-200' },
+                };
+                return (
+                  <button
+                    key={a}
+                    onClick={() => { if (!isActive) changeFolderArea(node.folder.id, a); }}
+                    className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full transition-colors ${isActive ? colorMap[a].active : colorMap[a].inactive}`}
+                    title={`Move to ${a}`}
+                  >
+                    {a.charAt(0).toUpperCase() + a.slice(1)}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
         {/* Collapsible content with animation */}

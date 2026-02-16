@@ -3,7 +3,7 @@ import { ContactsList } from '@/components/contacts/contacts-list';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Contacts - TopicOS',
+  title: 'People - YouOS',
   description: 'People from your topics, emails, and connected sources',
 };
 
