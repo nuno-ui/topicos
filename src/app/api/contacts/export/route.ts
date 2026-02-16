@@ -13,7 +13,14 @@ export async function GET() {
     .order('name', { ascending: true });
 
   if (!contacts || contacts.length === 0) {
-    return new NextResponse('No contacts to export', { status: 404 });
+    // Return CSV with just headers when no contacts exist
+    const emptyHeaders = 'Name,Email,Organization,Role,Area,Notes,Topics Count,Last Interaction,Interaction Count,Phone,Created At';
+    return new NextResponse(emptyHeaders, {
+      headers: {
+        'Content-Type': 'text/csv',
+        'Content-Disposition': `attachment; filename="topicos_contacts_${new Date().toISOString().split('T')[0]}.csv"`,
+      },
+    });
   }
 
   // Build CSV

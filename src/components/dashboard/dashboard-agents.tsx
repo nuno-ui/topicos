@@ -23,13 +23,14 @@ export function DashboardAgents() {
   const [showReview, setShowReview] = useState(false);
   const [suggestions, setSuggestions] = useState<Array<{ title: string; description: string; area: string; reason: string }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const lastRunRef = useRef<Record<string, Date>>({});
   const [lastRun, setLastRun] = useState<Record<string, Date>>({});
   const [justCompleted, setJustCompleted] = useState<string | null>(null);
   const completedTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const runAgent = useCallback(async (agent: string) => {
     // Rate-limit: prevent running the same agent within 30s
-    const last = lastRun[agent];
+    const last = lastRunRef.current[agent];
     if (last && Date.now() - last.getTime() < MIN_INTERVAL_MS) {
       toast.info(`Please wait ${Math.ceil((MIN_INTERVAL_MS - (Date.now() - last.getTime())) / 1000)}s before running again`);
       return;
@@ -45,24 +46,27 @@ export function DashboardAgents() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Agent failed');
 
+      const result = data.result || {};
       switch (agent) {
         case 'daily_briefing':
-          setBriefing(data.result.briefing);
+          setBriefing(result.briefing || 'No briefing content available.');
           setShowBriefing(true);
           toast.success('Daily briefing generated');
           break;
         case 'suggest_topics':
-          setSuggestions(data.result.suggestions || []);
+          setSuggestions(result.suggestions || []);
           setShowSuggestions(true);
-          toast.success(`${data.result.suggestions?.length || 0} topic suggestions`);
+          toast.success(`${result.suggestions?.length || 0} topic suggestions`);
           break;
         case 'weekly_review':
-          setReview(data.result.review);
+          setReview(result.review || 'No review content available.');
           setShowReview(true);
           toast.success('Weekly review generated');
           break;
       }
-      setLastRun(prev => ({ ...prev, [agent]: new Date() }));
+      const now = new Date();
+      lastRunRef.current = { ...lastRunRef.current, [agent]: now };
+      setLastRun(prev => ({ ...prev, [agent]: now }));
 
       // Flash success indicator
       setJustCompleted(agent);
@@ -72,7 +76,7 @@ export function DashboardAgents() {
       toast.error(err instanceof Error ? err.message : 'Agent failed');
     }
     setLoading(null);
-  }, [lastRun]);
+  }, []);
 
   const createSuggestedTopic = async (s: { title: string; description: string; area: string }) => {
     try {

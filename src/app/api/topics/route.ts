@@ -10,7 +10,8 @@ export async function GET(request: Request) {
   const status = searchParams.get('status');
   const area = searchParams.get('area');
   const search = searchParams.get('q');
-  const limit = Math.min(parseInt(searchParams.get('limit') || '100'), 500);
+  const parsedLimit = parseInt(searchParams.get('limit') || '100');
+  const limit = Math.min(Number.isNaN(parsedLimit) ? 100 : parsedLimit, 500);
 
   let query = supabase
     .from('topics')

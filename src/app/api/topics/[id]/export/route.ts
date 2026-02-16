@@ -27,13 +27,15 @@ export async function GET(
     .from('topic_items')
     .select('*, body')
     .eq('topic_id', id)
+    .eq('user_id', user.id)
     .order('occurred_at', { ascending: false });
 
   // Get contacts
   const { data: contactLinks } = await supabase
     .from('contact_topic_links')
     .select('role, contacts(name, email, organization)')
-    .eq('topic_id', id);
+    .eq('topic_id', id)
+    .eq('user_id', user.id);
 
   // --- JSON export ---
   if (format === 'json') {

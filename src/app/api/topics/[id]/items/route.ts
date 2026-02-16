@@ -97,7 +97,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   // Update topic updated_at
-  await supabase.from('topics').update({ updated_at: new Date().toISOString() }).eq('id', id);
+  // Best-effort: update parent topic timestamp
+  await supabase.from('topics').update({ updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', user.id);
 
   // Auto-enrich content for sources that have fetchable content (notion, gmail, drive, slack, link)
   // This runs in the background so the response is fast, but content is available for AI agents

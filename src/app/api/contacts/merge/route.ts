@@ -41,7 +41,8 @@ export async function POST(request: Request) {
 
   // Update primary with merged data
   if (Object.keys(mergeFields).length > 0) {
-    await supabase.from('contacts').update(mergeFields).eq('id', primary_id);
+    const { error: updateError } = await supabase.from('contacts').update(mergeFields).eq('id', primary_id).eq('user_id', user.id);
+    if (updateError) return NextResponse.json({ error: 'Failed to merge: ' + updateError.message }, { status: 500 });
   }
 
   // Transfer topic links from secondary to primary (skip duplicates)
@@ -52,17 +53,18 @@ export async function POST(request: Request) {
 
   if (secondaryLinks && secondaryLinks.length > 0) {
     for (const link of secondaryLinks) {
-      await supabase.from('contact_topic_links').upsert({
+      const { error: linkError } = await supabase.from('contact_topic_links').upsert({
         user_id: user.id,
         contact_id: primary_id,
         topic_id: link.topic_id,
         role: link.role,
       }, { onConflict: 'contact_id, topic_id' });
+      if (linkError) console.error('Failed to transfer topic link:', linkError.message);
     }
   }
 
   // Delete secondary's topic links and then the contact
-  await supabase.from('contact_topic_links').delete().eq('contact_id', secondary_id);
+  await supabase.from('contact_topic_links').delete().eq('contact_id', secondary_id).eq('user_id', user.id);
   await supabase.from('contacts').delete().eq('id', secondary_id).eq('user_id', user.id);
 
   // Fetch updated primary

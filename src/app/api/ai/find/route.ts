@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
     if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
 
-    const { data: existingItems } = await supabase.from('topic_items').select('title, source, external_id').eq('topic_id', topic_id);
+    const { data: existingItems } = await supabase.from('topic_items').select('title, source, external_id').eq('topic_id', topic_id).eq('user_id', user.id);
 
     const noteContext = await getTopicNoteContext(topic_id);
 

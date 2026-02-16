@@ -112,7 +112,9 @@ export function SearchPanel() {
   useEffect(() => {
     fetch('/api/topics').then(r => r.json()).then(data => {
       setTopics(data.topics || []);
-    }).catch(() => {});
+    }).catch(err => {
+      console.error('Failed to load topics for search:', err);
+    });
 
     try {
       const saved = localStorage.getItem('topicos_recent_searches');

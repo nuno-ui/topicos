@@ -22,6 +22,7 @@ export async function getValidGoogleToken(accountId: string) {
         grant_type: 'refresh_token',
       }),
     });
+    if (!res.ok) throw new Error(`Token refresh HTTP error: ${res.status} ${res.statusText}`);
     const tokenData = await res.json();
     if (tokenData.error) throw new Error(`Token refresh failed: ${tokenData.error}`);
 

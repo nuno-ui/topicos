@@ -75,7 +75,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   // Clean up related records first
   await Promise.all([
     supabase.from('topic_items').delete().eq('topic_id', id).eq('user_id', user.id),
-    supabase.from('contact_topic_links').delete().eq('topic_id', id),
+    supabase.from('contact_topic_links').delete().eq('topic_id', id).eq('user_id', user.id),
   ]);
 
   const { error } = await supabase

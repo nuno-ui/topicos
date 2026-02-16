@@ -11,7 +11,8 @@ export async function GET(request: Request) {
   const sortDir = searchParams.get('dir') === 'desc' ? false : true;
   const area = searchParams.get('area');
   const search = searchParams.get('q');
-  const limit = Math.min(parseInt(searchParams.get('limit') || '200'), 500);
+  const parsedLimit = parseInt(searchParams.get('limit') || '200');
+  const limit = Math.min(Number.isNaN(parsedLimit) ? 200 : parsedLimit, 500);
 
   let query = supabase
     .from('contacts')

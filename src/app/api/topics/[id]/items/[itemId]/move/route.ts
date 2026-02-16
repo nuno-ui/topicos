@@ -37,15 +37,16 @@ export async function POST(
   const { error } = await supabase
     .from('topic_items')
     .update({ topic_id: target_topic_id })
-    .eq('id', itemId);
+    .eq('id', itemId)
+    .eq('user_id', user.id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // Update both topics' timestamps
   const now = new Date().toISOString();
   await Promise.all([
-    supabase.from('topics').update({ updated_at: now }).eq('id', id),
-    supabase.from('topics').update({ updated_at: now }).eq('id', target_topic_id),
+    supabase.from('topics').update({ updated_at: now }).eq('id', id).eq('user_id', user.id),
+    supabase.from('topics').update({ updated_at: now }).eq('id', target_topic_id).eq('user_id', user.id),
   ]);
 
   return NextResponse.json({ success: true, moved_to: target_topic_id });

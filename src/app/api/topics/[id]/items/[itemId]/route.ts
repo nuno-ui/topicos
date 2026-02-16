@@ -18,7 +18,8 @@ export async function DELETE(
     .from('topic_items')
     .delete()
     .eq('id', itemId)
-    .eq('topic_id', id);
+    .eq('topic_id', id)
+    .eq('user_id', user.id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
@@ -53,12 +54,14 @@ export async function PATCH(
     .update(updateData)
     .eq('id', itemId)
     .eq('topic_id', id)
+    .eq('user_id', user.id)
     .select()
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  await supabase.from('topics').update({ updated_at: new Date().toISOString() }).eq('id', id);
+  // Best-effort: update parent topic timestamp
+  await supabase.from('topics').update({ updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', user.id);
 
   return NextResponse.json({ item: data });
 }

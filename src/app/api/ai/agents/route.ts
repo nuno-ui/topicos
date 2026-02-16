@@ -519,10 +519,11 @@ ${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
         if (newLinks.length > 0) {
           // Insert in batches
           for (let i = 0; i < newLinks.length; i += 50) {
-            await supabase.from('contact_topic_links').upsert(
+            const { error: batchError } = await supabase.from('contact_topic_links').upsert(
               newLinks.slice(i, i + 50),
               { onConflict: 'contact_id, topic_id' }
             );
+            if (batchError) console.error('Auto-link batch error:', batchError.message);
           }
         }
 

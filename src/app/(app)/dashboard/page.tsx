@@ -494,10 +494,10 @@ export default async function DashboardPage() {
                           <div className="flex items-center gap-2 mb-1">
                             <span className={healthDotClass(health.color)} title={`Health: ${health.label} (${health.score}%)`} />
                             <h3 className="font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">{topic.title}</h3>
-                            {topic.priority >= 4 && (
+                            {(topic.priority ?? 0) >= 4 && (
                               <span className="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-700 rounded-md font-bold uppercase">Urgent</span>
                             )}
-                            {topic.priority === 3 && (
+                            {(topic.priority ?? 0) === 3 && (
                               <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-md font-bold uppercase">High</span>
                             )}
                           </div>
