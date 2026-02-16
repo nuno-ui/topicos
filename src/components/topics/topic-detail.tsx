@@ -67,12 +67,41 @@ interface Topic {
   updated_at: string;
 }
 
+interface LinkedContact {
+  id: string;
+  contact_id: string;
+  topic_id: string;
+  role: string | null;
+  created_at: string;
+  contacts: {
+    id: string;
+    name: string;
+    email: string | null;
+    organization: string | null;
+    role: string | null;
+    area: string | null;
+  } | null;
+}
+
+type SectionTab = 'items' | 'intelligence' | 'search' | 'details' | 'contacts' | 'notes' | 'activity';
+
 const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion', 'manual', 'link'] as const;
 
-export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topic; initialItems: TopicItem[] }) {
+export function TopicDetail({ topic: initialTopic, initialItems, initialContacts = [] }: { topic: Topic; initialItems: TopicItem[]; initialContacts?: LinkedContact[] }) {
   const router = useRouter();
   const [topic, setTopic] = useState(initialTopic);
   const [items, setItems] = useState(initialItems);
+
+  // Tab navigation
+  const [activeSection, setActiveSection] = useState<SectionTab>('items');
+
+  // Contacts management
+  const [linkedContacts, setLinkedContacts] = useState<LinkedContact[]>(initialContacts);
+  const [showLinkContactForm, setShowLinkContactForm] = useState(false);
+  const [contactSearchQuery, setContactSearchQuery] = useState('');
+  const [allContacts, setAllContacts] = useState<Array<{id: string; name: string; email: string | null}>>([]);
+  const [contactSearchLoading, setContactSearchLoading] = useState(false);
+  const [linkingContact, setLinkingContact] = useState(false);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -170,9 +199,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
   // UX improvement state
   const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [showInfoDashboard, setShowInfoDashboard] = useState(false);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
-  const [showLinkedItems, setShowLinkedItems] = useState(true);
 
   // AI Agent success animation and last run tracking
   const [agentSuccess, setAgentSuccess] = useState<string | null>(null);
@@ -193,6 +220,61 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     return () => window.removeEventListener('topicos:add-note', handler);
   }, []);
 
+  // Contact search effects
+  useEffect(() => {
+    if (showLinkContactForm && allContacts.length === 0) searchContacts('');
+  }, [showLinkContactForm, allContacts.length]);
+
+  useEffect(() => {
+    if (!showLinkContactForm) return;
+    const timer = setTimeout(() => searchContacts(contactSearchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [contactSearchQuery, showLinkContactForm]);
+
+  // Contact management functions
+  const searchContacts = useCallback(async (query: string) => {
+    setContactSearchLoading(true);
+    try {
+      const res = await fetch(`/api/contacts?search=${encodeURIComponent(query)}&limit=20`);
+      if (res.ok) {
+        const data = await res.json();
+        setAllContacts(data.contacts || []);
+      }
+    } catch {}
+    setContactSearchLoading(false);
+  }, []);
+
+  const linkContact = async (contactId: string, role?: string) => {
+    setLinkingContact(true);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/contacts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact_id: contactId, role: role || null }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+      const data = await res.json();
+      setLinkedContacts(prev => [...prev.filter(c => c.contact_id !== contactId), data.link]);
+      setShowLinkContactForm(false);
+      setContactSearchQuery('');
+      toast.success('Contact linked');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed');
+    }
+    setLinkingContact(false);
+  };
+
+  const unlinkContact = async (contactId: string) => {
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/contacts?contact_id=${contactId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed');
+      setLinkedContacts(prev => prev.filter(c => c.contact_id !== contactId));
+      toast.success('Contact unlinked');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed');
+    }
+  };
+
   // Refresh topic data from server
   const refreshTopic = useCallback(async () => {
     try {
@@ -207,7 +289,6 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       // silent fail - data is still updated locally
     }
   }, [topic.id]);
-
   // Run an AI agent
   const runAgent = async (agent: string) => {
     setAgentLoading(agent);
@@ -892,11 +973,90 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       return next;
     });
   };
-
   return (
     <div className="space-y-6 md:space-y-8 animate-fade-in p-4 md:p-8">
+      {/* AI Agents Bar - compact, above title */}
+      <div className="-mx-4 md:-mx-8 -mt-4 md:-mt-8 px-4 md:px-8 py-2 bg-gradient-to-r from-blue-50/60 to-purple-50/60 border-b border-gray-100 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <Zap className="w-3.5 h-3.5 text-amber-500" />
+          <span className="font-medium text-gray-600">AI Agents</span>
+          {agentLoading && <Loader2 className="w-3 h-3 animate-spin text-purple-500" />}
+          {agentSuccess && !agentLoading && (
+            <span className="inline-flex items-center gap-1 text-green-600 text-xs font-medium animate-fade-in">
+              <Check className="w-3 h-3" /> Done
+            </span>
+          )}
+        </div>
+        <div className="relative">
+          <button onClick={() => setShowAgentMenu(!showAgentMenu)} disabled={!!agentLoading}
+            className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-xs font-medium hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-1.5 transition-all shadow-sm">
+            {agentLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+            Run Agent
+            <ChevronDown className="w-3 h-3" />
+          </button>
+          {showAgentMenu && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowAgentMenu(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 w-60 bg-white rounded-xl border border-gray-200 shadow-xl py-1.5 max-h-80 overflow-y-auto">
+                <p className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">General</p>
+                <button onClick={() => { runAgent('auto_tag'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'auto_tag' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <Tag className="w-3.5 h-3.5 text-blue-500" />}
+                  <span className="flex-1">Auto-Tag</span>
+                  {formatAgentLastRun('auto_tag') && <span className="text-[9px] text-gray-400">{formatAgentLastRun('auto_tag')}</span>}
+                </button>
+                <button onClick={() => { runAgent('suggest_title'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-purple-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'suggest_title' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" /> : <Wand2 className="w-3.5 h-3.5 text-purple-500" />} Suggest Title
+                </button>
+                <button onClick={() => { runAgent('generate_description'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-green-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'generate_description' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-green-500" /> : <FileText className="w-3.5 h-3.5 text-green-500" />} Generate Description
+                </button>
+                <div className="border-t border-gray-100 my-1.5" />
+                <p className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Requires linked items</p>
+                <button onClick={() => { runAgent('extract_action_items'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'extract_action_items' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" /> : <ListChecks className="w-3.5 h-3.5 text-amber-500" />} Extract Actions
+                </button>
+                <button onClick={() => { runAgent('summarize_thread'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'summarize_thread' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" /> : <Brain className="w-3.5 h-3.5 text-indigo-500" />} Summarize Thread
+                </button>
+                <button onClick={() => { runAgent('find_contacts'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-teal-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'find_contacts' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-500" /> : <Users className="w-3.5 h-3.5 text-teal-500" />} Find Contacts
+                </button>
+                <button onClick={() => { runAgent('deep_dive'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-purple-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'deep_dive' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" /> : <Eye className="w-3.5 h-3.5 text-purple-500" />} Deep Dive
+                </button>
+                <button onClick={() => { runAgent('recommend_content'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'recommend_content' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <Compass className="w-3.5 h-3.5 text-blue-500" />} Find More Content
+                </button>
+                <button onClick={() => { runAgent('extract_entities'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'extract_entities' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" /> : <Target className="w-3.5 h-3.5 text-emerald-500" />} Extract Entities
+                </button>
+                <div className="border-t border-gray-100 my-1.5" />
+                <p className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Cross-topic</p>
+                <button onClick={() => { runAgent('cross_topic_links'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-orange-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'cross_topic_links' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-500" /> : <GitBranch className="w-3.5 h-3.5 text-orange-500" />} Related Topics
+                </button>
+                <button onClick={() => { runAgent('completeness_check'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-rose-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'completeness_check' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-500" /> : <Award className="w-3.5 h-3.5 text-rose-500" />} Completeness Check
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* Header with gradient strip */}
-      <div className="topic-header-strip -mx-4 md:-mx-8 -mt-4 md:-mt-8 px-4 md:px-8 pt-5 pb-6 mb-2 rounded-b-2xl relative">
+      <div className="topic-header-strip -mx-4 md:-mx-8 px-4 md:px-8 pt-5 pb-6 mb-2 rounded-b-2xl relative">
         {/* Decorative dots */}
         <div className="absolute inset-0 dot-pattern opacity-30 pointer-events-none" />
         <div className="relative">
@@ -1245,1186 +1405,1221 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         )}
       </div>
 
-      {/* Topic Info Dashboard - collapsible */}
-      <button onClick={() => setShowInfoDashboard(!showInfoDashboard)}
-        className="w-full flex items-center justify-between px-5 py-3 bg-white rounded-xl border border-gray-100 shadow-sm hover:bg-gray-50/50 hover:shadow-md transition-all">
-        <div className="flex items-center gap-2.5 text-sm font-medium text-gray-600">
-          <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-            <Info className="w-3.5 h-3.5 text-blue-600" />
-          </span>
-          Topic Details
-          <span className="text-xs text-gray-400 font-normal">
-            {items.length} items &middot; {Object.keys(sourceCounts).length} sources
-          </span>
-        </div>
-        {showInfoDashboard ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-      </button>
-      {showInfoDashboard && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-slide-up">
-        {/* Key Metrics */}
-        <div className="bg-gradient-to-br from-white to-blue-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Overview</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="text-center p-2 bg-blue-50 rounded-lg">
-              <p className="text-lg font-bold text-blue-600">{items.length}</p>
-              <p className="text-xs text-gray-500">Linked Items</p>
-            </div>
-            <div className="text-center p-2 bg-purple-50 rounded-lg">
-              <p className="text-lg font-bold text-purple-600">{Object.keys(sourceCounts).length}</p>
-              <p className="text-xs text-gray-500">Sources</p>
-            </div>
-            <div className="text-center p-2 bg-green-50 rounded-lg">
-              <p className="text-lg font-bold text-green-600">{topic.priority || 0}</p>
-              <p className="text-xs text-gray-500">Priority</p>
-            </div>
-            <div className="text-center p-2 bg-amber-50 rounded-lg">
-              <p className="text-lg font-bold text-amber-600">{topic.progress_percent ?? 0}%</p>
-              <p className="text-xs text-gray-500">Progress</p>
-            </div>
-          </div>
-          {(topic.tags && topic.tags.length > 0) && (
-            <div className="mt-3 pt-3 border-t border-gray-100">
-              <p className="text-xs text-gray-500 mb-1.5">Tags</p>
-              <div className="flex gap-1 flex-wrap">
-                {topic.tags.map((tag, i) => (
-                  <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{tag}</span>
-                ))}
-              </div>
-            </div>
-          )}
-          {topic.goal && (
-            <div className="mt-3 pt-3 border-t border-gray-100">
-              <p className="text-xs text-gray-500 mb-1">Goal</p>
-              <p className="text-sm text-gray-700">{topic.goal}</p>
-            </div>
-          )}
-          {/* Topic Health Score */}
-          {(() => {
-            let score = 100;
-            const daysSinceUpdate = Math.floor((Date.now() - new Date(topic.updated_at).getTime()) / (1000 * 60 * 60 * 24));
-            if (daysSinceUpdate > 14) score -= 30;
-            else if (daysSinceUpdate > 7) score -= 15;
-            if (!topic.description) score -= 10;
-            if (items.length === 0) score -= 20;
-            if (topic.due_date && new Date(topic.due_date) < new Date()) score -= 25;
-            if (!topic.tags || topic.tags.length === 0) score -= 5;
-            score = Math.max(0, Math.min(100, score));
-            const color = score >= 80 ? 'text-green-600' : score >= 50 ? 'text-amber-600' : 'text-red-600';
-            const bg = score >= 80 ? 'bg-green-50' : score >= 50 ? 'bg-amber-50' : 'bg-red-50';
-            const barColor = score >= 80 ? 'bg-green-500' : score >= 50 ? 'bg-amber-500' : 'bg-red-500';
-            return (
-              <div className="mt-3 pt-3 border-t border-gray-100">
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-xs text-gray-500 flex items-center gap-1"><Heart className="w-3 h-3" /> Health</p>
-                  <span className={`text-xs font-bold ${color}`}>{score}%</span>
-                </div>
-                <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${score}%` }} />
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* Timeline */}
-        <div className="bg-gradient-to-br from-white to-purple-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1">
-            <Clock className="w-3 h-3" /> Timeline
-          </h3>
-          {items.length === 0 ? (
-            <p className="text-xs text-gray-400 text-center py-4">No items linked yet</p>
-          ) : (
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {items.slice(0, 8).map((item, idx) => (
-                <div key={item.id} className="flex items-start gap-2">
-                  <div className="flex flex-col items-center">
-                    <div className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 flex-shrink-0" />
-                    {idx < Math.min(items.length, 8) - 1 && <div className="w-0.5 h-full bg-gray-200 min-h-[16px]" />}
-                  </div>
-                  <div className="flex-1 min-w-0 pb-1">
-                    <p className="text-xs font-medium text-gray-800 truncate">{item.title}</p>
-                    <div className="flex gap-1 text-xs text-gray-400 items-center">
-                      <SourceIcon source={item.source} className="w-3 h-3" />
-                      <span>{formatRelativeDate(item.occurred_at)}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {items.length > 8 && (
-                <p className="text-xs text-gray-400 text-center">+{items.length - 8} more items</p>
-              )}
-            </div>
-          )}
-          <div className="mt-3 pt-3 border-t border-gray-100 space-y-1 text-xs text-gray-500">
-            {topic.start_date && <p>Started: {new Date(topic.start_date).toLocaleDateString()}</p>}
-            {topic.due_date && (
-              <p className={new Date(topic.due_date) < new Date() ? 'text-red-600 font-medium' : ''}>
-                Due: {new Date(topic.due_date).toLocaleDateString()}
-                {new Date(topic.due_date) < new Date() && ' (Overdue)'}
-              </p>
-            )}
-            {topic.created_at && <p>Created: {new Date(topic.created_at).toLocaleDateString()}</p>}
-          </div>
-        </div>
-
-        {/* People & Contacts */}
-        <div className="bg-gradient-to-br from-white to-teal-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1">
-            <Users className="w-3 h-3" /> People Involved
-          </h3>
-          {topic.owner && (
-            <div className="mb-2">
-              <p className="text-xs text-gray-500">Owner</p>
-              <p className="text-sm font-medium text-gray-800">{topic.owner}</p>
-            </div>
-          )}
-          {topic.stakeholders && topic.stakeholders.length > 0 && (
-            <div className="mb-3">
-              <p className="text-xs text-gray-500 mb-1">Stakeholders</p>
-              <div className="flex gap-1 flex-wrap">
-                {topic.stakeholders.map((s, i) => (
-                  <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-teal-50 text-teal-700">{s}</span>
-                ))}
-              </div>
-            </div>
-          )}
-          {topic.client && (
-            <div className="mb-2">
-              <p className="text-xs text-gray-500">Client</p>
-              <p className="text-sm text-gray-700">{topic.client}</p>
-            </div>
-          )}
-          {topic.company && (
-            <div className="mb-2">
-              <p className="text-xs text-gray-500">Company</p>
-              <p className="text-sm text-gray-700">{topic.company}</p>
-            </div>
-          )}
-          {/* Extract unique contacts from item metadata */}
-          {(() => {
-            const contacts = new Map<string, string>();
-            items.forEach(item => {
-              const meta = item.metadata || {};
-              if (meta.from && typeof meta.from === 'string') {
-                const name = meta.from.split('<')[0].trim();
-                if (name && !contacts.has(name.toLowerCase())) contacts.set(name.toLowerCase(), name);
-              }
-            });
-            const contactList = Array.from(contacts.values()).slice(0, 6);
-            if (contactList.length === 0) return null;
-            return (
-              <div className="mt-2 pt-2 border-t border-gray-100">
-                <p className="text-xs text-gray-500 mb-1">From Communications</p>
-                <div className="flex gap-1 flex-wrap">
-                  {contactList.map((name, i) => (
-                    <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{name}</span>
-                  ))}
-                  {contacts.size > 6 && <span className="text-xs text-gray-400">+{contacts.size - 6} more</span>}
-                </div>
-              </div>
-            );
-          })()}
-          {!topic.owner && (!topic.stakeholders || topic.stakeholders.length === 0) && items.length === 0 && (
-            <p className="text-xs text-gray-400 text-center py-4">No contacts associated yet</p>
-          )}
-          {topic.risk_level && (
-            <div className="mt-3 pt-3 border-t border-gray-100">
-              <p className="text-xs text-gray-500 mb-1">Risk Level</p>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                topic.risk_level === 'critical' ? 'bg-red-100 text-red-700' :
-                topic.risk_level === 'high' ? 'bg-orange-100 text-orange-700' :
-                topic.risk_level === 'medium' ? 'bg-amber-100 text-amber-700' :
-                'bg-green-100 text-green-700'
-              }`}>{topic.risk_level}</span>
-            </div>
-          )}
-        </div>
-      </div>}
-
-      {/* Search Panel */}
-      <div id="section-search" className="scroll-mt-8 bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover-lift">
-        <button onClick={() => setShowSearch(!showSearch)}
-          className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50/80 transition-colors">
-          <div className="flex items-center gap-2.5 text-sm font-medium text-gray-700">
-            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
-              <Search className="w-3.5 h-3.5 text-white" />
-            </span>
-            Search &amp; Link Content
-          </div>
-          {showSearch ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-        </button>
-        {showSearch && (
-          <div className="px-5 pb-5 space-y-3 border-t border-gray-100">
-            <div className="flex gap-2 mt-3">
-              <div className="flex-1 relative">
-                <Search className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                  placeholder="Search emails, messages, events, files..."
-                  className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl text-sm bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                />
-              </div>
-              <button onClick={handleSearch} disabled={searchLoading}
-                className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition-colors">
-                {searchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                Search
-              </button>
-              <button onClick={handleAiFind} disabled={aiFindLoading}
-                className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-sm font-medium hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-2 transition-all">
-                {aiFindLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                AI Find
-              </button>
-            </div>
-            {/* Source filter pills */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-gray-400 mr-1">Sources:</span>
-              {SOURCES.map(src => (
-                <button key={src} onClick={() => toggleSource(src)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                    searchSources.has(src)
-                      ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-sm'
-                      : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'
-                  }`}>
-                  <SourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Search Results */}
-      {searchResults.length > 0 && (
-        <div className="bg-white rounded-xl border border-blue-200 shadow-sm overflow-hidden animate-slide-up">
-          <div className="px-5 py-3 border-b border-blue-100 flex items-center justify-between bg-blue-50/30">
-            <div className="flex items-center gap-3">
-              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                <Search className="w-3.5 h-3.5 text-blue-500" />
-                Search Results
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">{searchResults.length}</span>
-              </h3>
-              {searchResults.filter(r => !r.already_linked).length > 0 && (
-                <button onClick={selectAllSearch}
-                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors">
-                  {selectedResults.size === searchResults.filter(r => !r.already_linked).length
-                    ? <><CheckSquare className="w-3 h-3" /> Deselect All</>
-                    : <><Square className="w-3 h-3" /> Select All</>}
-                </button>
-              )}
-            </div>
-            {selectedResults.size > 0 && (
-              <button onClick={linkSelectedSearch} disabled={linkingItems}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 shadow-sm transition-colors">
-                {linkingItems ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
-                Link {selectedResults.size} Selected
-              </button>
-            )}
-          </div>
-          <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto thin-scrollbar">
-            {searchResults.map((item) => {
-              const key = item.source + ':' + item.external_id;
-              return (
-                <div key={key} className={`px-5 py-3.5 flex items-start gap-3 transition-colors ${item.already_linked ? 'opacity-50 bg-gray-50' : 'hover:bg-blue-50/30'}`}>
-                  {!item.already_linked && (
-                    <input type="checkbox" checked={selectedResults.has(key)}
-                      onChange={() => toggleSearchResult(key)}
-                      className="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                  )}
-                  {item.already_linked && (
-                    <span className="mt-1 text-green-500 text-xs font-semibold flex items-center gap-0.5">
-                      <Check className="w-3 h-3" /> Linked
-                    </span>
-                  )}
-                  <span className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${sourceIconBgClass(item.source)}`}>
-                    <SourceIcon source={item.source} className="w-3.5 h-3.5" />
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{decodeHtmlEntities(item.title)}</p>
-                    <p className="text-xs text-gray-500 truncate mt-0.5">{decodeHtmlEntities(item.snippet)}</p>
-                    <div className="flex gap-2 mt-1.5 text-xs text-gray-400">
-                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
-                        {sourceLabel(item.source)}
-                      </span>
-                      <span>{formatRelativeDate(item.occurred_at)}</span>
-                    </div>
-                  </div>
-                  <a href={item.url} target="_blank" rel="noopener noreferrer"
-                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* AI Find Results */}
-      {showAiResults && (
-        <div className="bg-white rounded-xl border border-purple-200 shadow-sm overflow-hidden animate-slide-up">
-          <div className="px-5 py-3 border-b border-purple-100 flex items-center justify-between bg-gradient-to-r from-purple-50/50 to-pink-50/30">
-            <div className="flex items-center gap-3">
-              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-                  <Sparkles className="w-3.5 h-3.5 text-white" />
-                </span>
-                AI Find Results
-                {aiFindLoading && <Loader2 className="w-4 h-4 animate-spin text-purple-500" />}
-              </h3>
-              {aiFindResults.filter(r => !r.already_linked).length > 0 && !aiFindLoading && (
-                <button onClick={selectAllAi}
-                  className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 transition-colors">
-                  {selectedAiResults.size === aiFindResults.filter(r => !r.already_linked).length
-                    ? <><CheckSquare className="w-3 h-3" /> Deselect All</>
-                    : <><Square className="w-3 h-3" /> Select All</>}
-                </button>
-              )}
-            </div>
-            {selectedAiResults.size > 0 && (
-              <button onClick={linkSelectedAi} disabled={linkingItems}
-                className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg text-xs font-medium hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 flex items-center gap-1.5 shadow-sm transition-all">
-                {linkingItems ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
-                Link {selectedAiResults.size} Selected
-              </button>
-            )}
-          </div>
-          {aiFindResults.length === 0 && !aiFindLoading ? (
-            <p className="px-5 py-8 text-center text-sm text-gray-500">No results found. Try adding a more detailed description to your topic.</p>
-          ) : (
-            <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto thin-scrollbar">
-              {aiFindResults.map((item) => {
-                const key = item.source + ':' + item.external_id;
-                const confidencePercent = item.ai_confidence != null ? Math.round(item.ai_confidence * 100) : null;
-                return (
-                  <div key={key} className={`px-5 py-3.5 flex items-start gap-3 transition-colors ${item.already_linked ? 'opacity-50 bg-gray-50' : 'hover:bg-purple-50/20'}`}>
-                    {!item.already_linked && (
-                      <input type="checkbox" checked={selectedAiResults.has(key)}
-                        onChange={() => toggleAiResult(key)}
-                        className="mt-1 rounded border-gray-300 text-purple-600 focus:ring-purple-500" />
-                    )}
-                    {item.already_linked && (
-                      <span className="mt-1 text-green-500 text-xs font-semibold flex items-center gap-0.5">
-                        <Check className="w-3 h-3" /> Linked
-                      </span>
-                    )}
-                    <span className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${sourceIconBgClass(item.source)}`}>
-                      <SourceIcon source={item.source} className="w-3.5 h-3.5" />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{decodeHtmlEntities(item.title)}</p>
-                      <p className="text-xs text-gray-500 truncate mt-0.5">{decodeHtmlEntities(item.snippet)}</p>
-                      <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-400">
-                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
-                          {sourceLabel(item.source)}
-                        </span>
-                        <span>{formatRelativeDate(item.occurred_at)}</span>
-                        {/* AI confidence indicator */}
-                        {confidencePercent != null && (
-                          <span className="flex items-center gap-1.5">
-                            <span className={`text-[10px] font-bold ${confidencePercent >= 80 ? 'text-green-600' : confidencePercent >= 50 ? 'text-amber-600' : 'text-gray-500'}`}>
-                              {confidencePercent}%
-                            </span>
-                            <span className="confidence-meter w-12">
-                              <span className={`confidence-meter-fill ${confidencePercent >= 80 ? 'bg-green-500' : confidencePercent >= 50 ? 'bg-amber-500' : 'bg-gray-400'}`} style={{ width: `${confidencePercent}%` }} />
-                            </span>
-                          </span>
-                        )}
-                      </div>
-                      {item.ai_reason && (
-                        <p className="text-xs text-purple-600 mt-1.5 italic bg-purple-50/50 px-2 py-1 rounded">{item.ai_reason}</p>
-                      )}
-                    </div>
-                    <a href={item.url} target="_blank" rel="noopener noreferrer"
-                      className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Open in source">
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Linked Items - collapsible */}
-      <div id="section-items" className="scroll-mt-8">
-        <div className="flex items-center justify-between mb-4">
-          <button onClick={() => setShowLinkedItems(!showLinkedItems)}
-            className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
-              <Layers className="w-3.5 h-3.5 text-white" />
-            </span>
-            <h2 className="text-base font-bold text-gray-900">Linked Items</h2>
-            <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{items.length}</span>
-            {showLinkedItems ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-          </button>
-          <div className="flex items-center gap-1.5">
-            <button onClick={refreshItems} disabled={itemsRefreshing}
-              className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Refresh items">
-              <RefreshCw className={`w-3.5 h-3.5 ${itemsRefreshing ? 'animate-spin' : ''}`} />
-            </button>
-            <button onClick={() => { setShowLinkedItems(true); setShowLinkForm(v => !v); setShowNoteEditor(false); }}
-              className="px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border border-transparent hover:border-blue-200">
-              <Link2 className="w-3.5 h-3.5" /> Add Link
-            </button>
-            <button onClick={() => { setShowLinkedItems(true); setShowNoteEditor(true); setShowLinkForm(false); }}
-              className="px-3 py-1.5 text-green-600 hover:bg-green-50 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border border-transparent hover:border-green-200">
-              <StickyNote className="w-3.5 h-3.5" /> Add Note
-            </button>
-          </div>
-        </div>
-        {showLinkedItems && (<>
-        {/* Add Link Form */}
-        {showLinkForm && (
-          <div className="mb-4 p-4 bg-blue-50/50 border border-blue-200 rounded-xl space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">URL <span className="text-red-500">*</span></label>
-              <input
-                type="url"
-                value={linkUrl}
-                onChange={e => setLinkUrl(e.target.value)}
-                placeholder="https://example.com/article"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addLink(); } }}
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Title <span className="text-gray-400">(optional)</span></label>
-              <input
-                type="text"
-                value={linkTitle}
-                onChange={e => setLinkTitle(e.target.value)}
-                placeholder="Will use URL if left empty"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addLink(); } }}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={addLink} disabled={linkSaving || !linkUrl.trim()}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">
-                {linkSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
-                {linkSaving ? 'Adding...' : 'Add Link'}
-              </button>
-              <button onClick={() => { setShowLinkForm(false); setLinkUrl(''); setLinkTitle(''); }}
-                className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-        {/* Source tabs - polished with active indicator */}
-        <div className="flex gap-1 mb-4 border-b border-gray-100 -mx-1 px-1 overflow-x-auto">
-          <button onClick={() => setActiveTab('all')}
-            className={`px-4 py-2.5 text-xs font-medium transition-all relative whitespace-nowrap ${
-              activeTab === 'all' ? 'text-gray-900 tab-active' : 'text-gray-500 hover:text-gray-700'
-            }`}>
-            All
-            <span className={`ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-              activeTab === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
-            }`}>{items.length}</span>
-          </button>
-          {Object.entries(sourceCounts).map(([src, count]) => (
-            <button key={src} onClick={() => setActiveTab(src)}
+      {/* Sticky Tab Bar */}
+      <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-gray-200 -mx-4 md:-mx-8 px-4 md:px-8 shadow-sm">
+        <div className="flex gap-1 overflow-x-auto py-1">
+          {([
+            { key: 'items' as SectionTab, label: 'Items', icon: <Layers className="w-3.5 h-3.5" />, count: items.length },
+            { key: 'intelligence' as SectionTab, label: 'Intelligence', icon: <Bot className="w-3.5 h-3.5" />, count: analysis ? 1 : 0 },
+            { key: 'search' as SectionTab, label: 'Search', icon: <Search className="w-3.5 h-3.5" />, count: searchResults.length + aiFindResults.length },
+            { key: 'details' as SectionTab, label: 'Details', icon: <Info className="w-3.5 h-3.5" />, count: 0 },
+            { key: 'contacts' as SectionTab, label: 'Contacts', icon: <Users className="w-3.5 h-3.5" />, count: linkedContacts.length },
+            { key: 'notes' as SectionTab, label: 'Notes', icon: <StickyNote className="w-3.5 h-3.5" />, count: notes.trim() ? 1 : 0 },
+            { key: 'activity' as SectionTab, label: 'Activity', icon: <Clock className="w-3.5 h-3.5" />, count: 0 },
+          ]).map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveSection(tab.key)}
               className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-all relative whitespace-nowrap ${
-                activeTab === src ? 'text-gray-900 tab-active' : 'text-gray-500 hover:text-gray-700'
-              }`}>
-              <SourceIcon source={src} className="w-3.5 h-3.5" />
-              {sourceLabel(src)}
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                activeTab === src ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
-              }`}>{count}</span>
+                activeSection === tab.key ? 'text-gray-900 tab-active' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+              {tab.count > 0 && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                  activeSection === tab.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
+                }`}>{tab.count}</span>
+              )}
             </button>
           ))}
         </div>
-        {filteredItems.length === 0 ? (
-          <div className="py-12 bg-gradient-to-b from-white to-gray-50/50 rounded-xl border border-dashed border-gray-200">
-            {/* Illustration-style icon composition */}
-            <div className="flex items-center justify-center gap-2 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
-                <Search className="w-5 h-5 text-blue-400" />
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center -ml-2 mt-3">
-                <Layers className="w-5 h-5 text-purple-400" />
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center -ml-2 -mt-1">
-                <StickyNote className="w-5 h-5 text-green-400" />
-              </div>
+      </div>
+      {/* ===== ITEMS TAB ===== */}
+      {activeSection === 'items' && (
+        <div id="section-items" className="scroll-mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
+                <Layers className="w-3.5 h-3.5 text-white" />
+              </span>
+              <h2 className="text-base font-bold text-gray-900">Linked Items</h2>
+              <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{items.length}</span>
             </div>
-            <h3 className="text-gray-700 text-sm font-semibold text-center mb-1">Start building this topic</h3>
-            <p className="text-gray-400 text-xs text-center mb-5 max-w-xs mx-auto">Link content, add notes, or save links to organize everything in one place.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-lg mx-auto px-6">
-              <button onClick={() => setShowSearch(true)}
-                className="p-3 bg-white rounded-xl border border-blue-200 hover:border-blue-300 hover:shadow-md transition-all text-center group">
-                <Search className="w-5 h-5 text-blue-500 mx-auto mb-1.5 group-hover:scale-110 transition-transform" />
-                <p className="text-xs font-semibold text-gray-700">Search & Link</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">Find content to link</p>
+            <div className="flex items-center gap-1.5">
+              <button onClick={refreshItems} disabled={itemsRefreshing}
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Refresh items">
+                <RefreshCw className={`w-3.5 h-3.5 ${itemsRefreshing ? 'animate-spin' : ''}`} />
               </button>
-              <button onClick={() => setShowNoteEditor(true)}
-                className="p-3 bg-white rounded-xl border border-green-200 hover:border-green-300 hover:shadow-md transition-all text-center group">
-                <StickyNote className="w-5 h-5 text-green-500 mx-auto mb-1.5 group-hover:scale-110 transition-transform" />
-                <p className="text-xs font-semibold text-gray-700">Add a Note</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">Write a quick note</p>
+              <button onClick={() => { setShowLinkForm(v => !v); setShowNoteEditor(false); }}
+                className="px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border border-transparent hover:border-blue-200">
+                <Link2 className="w-3.5 h-3.5" /> Add Link
               </button>
-              <button onClick={() => setShowLinkForm(true)}
-                className="p-3 bg-white rounded-xl border border-purple-200 hover:border-purple-300 hover:shadow-md transition-all text-center group">
-                <Link2 className="w-5 h-5 text-purple-500 mx-auto mb-1.5 group-hover:scale-110 transition-transform" />
-                <p className="text-xs font-semibold text-gray-700">Add a Link</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">Save a URL reference</p>
+              <button onClick={() => { setShowNoteEditor(true); setShowLinkForm(false); }}
+                className="px-3 py-1.5 text-green-600 hover:bg-green-50 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border border-transparent hover:border-green-200">
+                <StickyNote className="w-3.5 h-3.5" /> Add Note
               </button>
             </div>
           </div>
-        ) : (
-          <div className="space-y-2 animate-stagger">
-            {filteredItems.map((item) => (
-              item.source === 'manual' ? (
-                <NoteCard
-                  key={item.id}
-                  item={item as any}
-                  onEdit={(note) => setEditingNote(note as any)}
-                  onDelete={(itemId) => unlinkItem(itemId)}
+          {/* Add Link Form */}
+          {showLinkForm && (
+            <div className="mb-4 p-4 bg-blue-50/50 border border-blue-200 rounded-xl space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">URL <span className="text-red-500">*</span></label>
+                <input
+                  type="url"
+                  value={linkUrl}
+                  onChange={e => setLinkUrl(e.target.value)}
+                  placeholder="https://example.com/article"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addLink(); } }}
+                  autoFocus
                 />
-              ) : (
-                <div key={item.id} className={`p-3.5 bg-white rounded-xl border-l-[3px] border border-gray-100 transition-all group item-card-hover ${sourceBorderClass(item.source)} ${
-                  item.metadata?.pinned ? 'ring-1 ring-amber-200 bg-amber-50/20' : ''
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Title <span className="text-gray-400">(optional)</span></label>
+                <input
+                  type="text"
+                  value={linkTitle}
+                  onChange={e => setLinkTitle(e.target.value)}
+                  placeholder="Will use URL if left empty"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addLink(); } }}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={addLink} disabled={linkSaving || !linkUrl.trim()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">
+                  {linkSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                  {linkSaving ? 'Adding...' : 'Add Link'}
+                </button>
+                <button onClick={() => { setShowLinkForm(false); setLinkUrl(''); setLinkTitle(''); }}
+                  className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Source tabs - polished with active indicator */}
+          <div className="flex gap-1 mb-4 border-b border-gray-100 -mx-1 px-1 overflow-x-auto">
+            <button onClick={() => setActiveTab('all')}
+              className={`px-4 py-2.5 text-xs font-medium transition-all relative whitespace-nowrap ${
+                activeTab === 'all' ? 'text-gray-900 tab-active' : 'text-gray-500 hover:text-gray-700'
+              }`}>
+              All
+              <span className={`ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                activeTab === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
+              }`}>{items.length}</span>
+            </button>
+            {Object.entries(sourceCounts).map(([src, count]) => (
+              <button key={src} onClick={() => setActiveTab(src)}
+                className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-all relative whitespace-nowrap ${
+                  activeTab === src ? 'text-gray-900 tab-active' : 'text-gray-500 hover:text-gray-700'
                 }`}>
-                  <div className="flex items-start gap-3">
-                    {/* Source icon with colored background circle */}
-                    <span className={`mt-0.5 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${sourceIconBgClass(item.source)}`}>
-                      <SourceIcon source={item.source} className="w-4 h-4" />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        {!!item.metadata?.pinned && <Pin className="w-3 h-3 text-amber-500 flex-shrink-0" />}
-                        <a href={item.url} target="_blank" rel="noopener noreferrer"
-                          className="font-semibold text-gray-900 hover:text-blue-600 text-sm truncate block transition-colors">
-                          {decodeHtmlEntities(item.title)}
-                        </a>
-                        {/* New badge for items added in last 24h */}
-                        {isNewItem(item.created_at) && (
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white new-badge flex-shrink-0">
-                            NEW
-                          </span>
-                        )}
-                        {/* Sent/Received indicator for emails */}
-                        {item.source === 'gmail' && (
-                          item.metadata?.is_sent
-                            ? <span className="flex items-center gap-0.5 text-xs text-blue-500 flex-shrink-0"><ArrowUp className="w-3 h-3" />Sent</span>
-                            : <span className="flex items-center gap-0.5 text-xs text-green-500 flex-shrink-0"><ArrowDown className="w-3 h-3" />Received</span>
-                        )}
-                      </div>
-                      {/* Source-specific details */}
-                      {item.source === 'gmail' && (
-                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
-                          {!!item.metadata?.from && <span className="truncate max-w-[200px]">{String(item.metadata.from).split('<')[0].trim()}</span>}
-                          {!!item.metadata?.has_attachments && <span className="text-gray-500">📎 {String(item.metadata.attachment_count || '')}</span>}
-                        </div>
-                      )}
-                      {item.source === 'calendar' && (
-                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
-                          {!!item.metadata?.start && <span>{new Date(String(item.metadata.start)).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
-                          {!!item.metadata?.location && <span className="truncate max-w-[150px]">📍 {String(item.metadata.location)}</span>}
-                          {!!item.metadata?.conference_link && <a href={String(item.metadata.conference_link)} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">🎥 Join</a>}
-                        </div>
-                      )}
-                      {item.source === 'drive' && (
-                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
-                          <span>{String(item.metadata?.mimeType || '').split('.').pop() || 'File'}</span>
-                          {!!item.metadata?.size && <span>{(Number(item.metadata.size) / 1024).toFixed(0)} KB</span>}
-                        </div>
-                      )}
-                      {item.source === 'slack' && (
-                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
-                          {!!item.metadata?.channel_name && <span>#{String(item.metadata.channel_name)}</span>}
-                          {!!item.metadata?.username && <span>@{String(item.metadata.username)}</span>}
-                          {Number(item.metadata?.reply_count || 0) > 0 && <span>💬 {String(item.metadata.reply_count)} replies</span>}
-                        </div>
-                      )}
-                      {item.snippet && !expandedContent[item.id] && (
-                        <p className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">{decodeHtmlEntities(item.snippet)}</p>
-                      )}
-                      {/* Expanded content */}
-                      {expandedContent[item.id] && (
-                        <div className="mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-700 max-h-80 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed thin-scrollbar">
-                          {expandedContent[item.id]}
-                        </div>
-                      )}
-                      <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
-                        <span className="inline-flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {formatRelativeDate(item.occurred_at)}
-                        </span>
-                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
-                          <SourceIcon source={item.source} className="w-2.5 h-2.5" />
-                          {sourceLabel(item.source)}
-                        </span>
-                        {item.linked_by === 'ai' && (
-                          <span className="text-purple-500 flex items-center gap-0.5 bg-purple-50 px-1.5 py-0.5 rounded text-[10px] font-medium">
-                            <Sparkles className="w-3 h-3" /> AI linked
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                      <button onClick={() => toggleContent(item.id)}
-                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title={expandedContent[item.id] ? 'Hide content' : 'View full content'}>
-                        {loadingContent.has(item.id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : expandedContent[item.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      </button>
-                      <button onClick={() => togglePinItem(item.id)}
-                        className={`p-1.5 rounded-lg transition-colors ${item.metadata?.pinned ? 'text-amber-500 bg-amber-50' : 'text-gray-400 hover:text-amber-500 hover:bg-amber-50'}`} title={item.metadata?.pinned ? 'Unpin' : 'Pin to top'}>
-                        <Pin className="w-3.5 h-3.5" />
-                      </button>
-                      <a href={item.url} target="_blank" rel="noopener noreferrer"
-                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                      <button onClick={() => unlinkItem(item.id)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Unlink from topic">
-                        <Unlink className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )
+                <SourceIcon source={src} className="w-3.5 h-3.5" />
+                {sourceLabel(src)}
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                  activeTab === src ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
+                }`}>{count}</span>
+              </button>
             ))}
           </div>
-        )}
-        </>)}
-      </div>
+          {filteredItems.length === 0 ? (
+            <div className="py-12 bg-gradient-to-b from-white to-gray-50/50 rounded-xl border border-dashed border-gray-200">
+              {/* Illustration-style icon composition */}
+              <div className="flex items-center justify-center gap-2 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                  <Search className="w-5 h-5 text-blue-400" />
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center -ml-2 mt-3">
+                  <Layers className="w-5 h-5 text-purple-400" />
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center -ml-2 -mt-1">
+                  <StickyNote className="w-5 h-5 text-green-400" />
+                </div>
+              </div>
+              <h3 className="text-gray-700 text-sm font-semibold text-center mb-1">Start building this topic</h3>
+              <p className="text-gray-400 text-xs text-center mb-5 max-w-xs mx-auto">Link content, add notes, or save links to organize everything in one place.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-lg mx-auto px-6">
+                <button onClick={() => setActiveSection('search')}
+                  className="p-3 bg-white rounded-xl border border-blue-200 hover:border-blue-300 hover:shadow-md transition-all text-center group">
+                  <Search className="w-5 h-5 text-blue-500 mx-auto mb-1.5 group-hover:scale-110 transition-transform" />
+                  <p className="text-xs font-semibold text-gray-700">Search & Link</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Find content to link</p>
+                </button>
+                <button onClick={() => setShowNoteEditor(true)}
+                  className="p-3 bg-white rounded-xl border border-green-200 hover:border-green-300 hover:shadow-md transition-all text-center group">
+                  <StickyNote className="w-5 h-5 text-green-500 mx-auto mb-1.5 group-hover:scale-110 transition-transform" />
+                  <p className="text-xs font-semibold text-gray-700">Add a Note</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Write a quick note</p>
+                </button>
+                <button onClick={() => setShowLinkForm(true)}
+                  className="p-3 bg-white rounded-xl border border-purple-200 hover:border-purple-300 hover:shadow-md transition-all text-center group">
+                  <Link2 className="w-5 h-5 text-purple-500 mx-auto mb-1.5 group-hover:scale-110 transition-transform" />
+                  <p className="text-xs font-semibold text-gray-700">Add a Link</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Save a URL reference</p>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2 animate-stagger">
+              {filteredItems.map((item) => (
+                item.source === 'manual' ? (
+                  <NoteCard
+                    key={item.id}
+                    item={item as any}
+                    onEdit={(note) => setEditingNote(note as any)}
+                    onDelete={(itemId) => unlinkItem(itemId)}
+                  />
+                ) : (
+                  <div key={item.id} className={`p-3.5 bg-white rounded-xl border-l-[3px] border border-gray-100 transition-all group item-card-hover ${sourceBorderClass(item.source)} ${
+                    item.metadata?.pinned ? 'ring-1 ring-amber-200 bg-amber-50/20' : ''
+                  }`}>
+                    <div className="flex items-start gap-3">
+                      {/* Source icon with colored background circle */}
+                      <span className={`mt-0.5 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${sourceIconBgClass(item.source)}`}>
+                        <SourceIcon source={item.source} className="w-4 h-4" />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          {!!item.metadata?.pinned && <Pin className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+                          <a href={item.url} target="_blank" rel="noopener noreferrer"
+                            className="font-semibold text-gray-900 hover:text-blue-600 text-sm truncate block transition-colors">
+                            {decodeHtmlEntities(item.title)}
+                          </a>
+                          {/* New badge for items added in last 24h */}
+                          {isNewItem(item.created_at) && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white new-badge flex-shrink-0">
+                              NEW
+                            </span>
+                          )}
+                          {/* Sent/Received indicator for emails */}
+                          {item.source === 'gmail' && (
+                            item.metadata?.is_sent
+                              ? <span className="flex items-center gap-0.5 text-xs text-blue-500 flex-shrink-0"><ArrowUp className="w-3 h-3" />Sent</span>
+                              : <span className="flex items-center gap-0.5 text-xs text-green-500 flex-shrink-0"><ArrowDown className="w-3 h-3" />Received</span>
+                          )}
+                        </div>
+                        {/* Source-specific details */}
+                        {item.source === 'gmail' && (
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
+                            {!!item.metadata?.from && <span className="truncate max-w-[200px]">{String(item.metadata.from).split('<')[0].trim()}</span>}
+                            {!!item.metadata?.has_attachments && <span className="text-gray-500">📎 {String(item.metadata.attachment_count || '')}</span>}
+                          </div>
+                        )}
+                        {item.source === 'calendar' && (
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
+                            {!!item.metadata?.start && <span>{new Date(String(item.metadata.start)).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
+                            {!!item.metadata?.location && <span className="truncate max-w-[150px]">📍 {String(item.metadata.location)}</span>}
+                            {!!item.metadata?.conference_link && <a href={String(item.metadata.conference_link)} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">🎥 Join</a>}
+                          </div>
+                        )}
+                        {item.source === 'drive' && (
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
+                            <span>{String(item.metadata?.mimeType || '').split('.').pop() || 'File'}</span>
+                            {!!item.metadata?.size && <span>{(Number(item.metadata.size) / 1024).toFixed(0)} KB</span>}
+                          </div>
+                        )}
+                        {item.source === 'slack' && (
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
+                            {!!item.metadata?.channel_name && <span>#{String(item.metadata.channel_name)}</span>}
+                            {!!item.metadata?.username && <span>@{String(item.metadata.username)}</span>}
+                            {Number(item.metadata?.reply_count || 0) > 0 && <span>💬 {String(item.metadata.reply_count)} replies</span>}
+                          </div>
+                        )}
+                        {item.snippet && !expandedContent[item.id] && (
+                          <p className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">{decodeHtmlEntities(item.snippet)}</p>
+                        )}
+                        {/* Expanded content */}
+                        {expandedContent[item.id] && (
+                          <div className="mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-700 max-h-80 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed thin-scrollbar">
+                            {expandedContent[item.id]}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {formatRelativeDate(item.occurred_at)}
+                          </span>
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
+                            <SourceIcon source={item.source} className="w-2.5 h-2.5" />
+                            {sourceLabel(item.source)}
+                          </span>
+                          {item.linked_by === 'ai' && (
+                            <span className="text-purple-500 flex items-center gap-0.5 bg-purple-50 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                              <Sparkles className="w-3 h-3" /> AI linked
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                        <button onClick={() => toggleContent(item.id)}
+                          className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title={expandedContent[item.id] ? 'Hide content' : 'View full content'}>
+                          {loadingContent.has(item.id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : expandedContent[item.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                        <button onClick={() => togglePinItem(item.id)}
+                          className={`p-1.5 rounded-lg transition-colors ${item.metadata?.pinned ? 'text-amber-500 bg-amber-50' : 'text-gray-400 hover:text-amber-500 hover:bg-amber-50'}`} title={item.metadata?.pinned ? 'Unpin' : 'Pin to top'}>
+                          <Pin className="w-3.5 h-3.5" />
+                        </button>
+                        <a href={item.url} target="_blank" rel="noopener noreferrer"
+                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                        <button onClick={() => unlinkItem(item.id)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Unlink from topic">
+                          <Unlink className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* AI Analysis */}
-      <div id="section-analysis" className="scroll-mt-8 rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift bg-gradient-to-br from-white via-white to-purple-50/20">
-        <button onClick={() => { setShowAnalysis(!showAnalysis); if (!showAnalysis) setTimeout(() => document.getElementById('section-analysis')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }}
-          className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-gray-50/50 transition-colors bg-gradient-to-r from-purple-50/30 to-blue-50/30">
-          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
-              <Bot className="w-4 h-4 text-white" />
-            </span>
-            Topic Intelligence
-            {analysis && !analysisLoading && (
-              <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-                <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/><path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="ai-success-check"/></svg>
-                Ready
+      {/* ===== INTELLIGENCE TAB ===== */}
+      {activeSection === 'intelligence' && (
+        <div id="section-analysis" className="scroll-mt-8 rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift bg-gradient-to-br from-white via-white to-purple-50/20">
+          <div className="px-5 py-3.5 flex items-center justify-between bg-gradient-to-r from-purple-50/30 to-blue-50/30 border-b border-purple-100/50">
+            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
+                <Bot className="w-4 h-4 text-white" />
               </span>
-            )}
-            {analysisLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" />}
-          </h2>
-          <div className="flex items-center gap-2">
-            <span onClick={(e) => { e.stopPropagation(); runAnalysis(); }}
+              Topic Intelligence
+              {analysis && !analysisLoading && (
+                <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                  <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/><path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="ai-success-check"/></svg>
+                  Ready
+                </span>
+              )}
+              {analysisLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" />}
+            </h2>
+            <span onClick={() => runAnalysis()}
               className="px-3 py-1.5 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg text-xs font-medium hover:from-purple-600 hover:to-blue-600 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm">
               {analysisLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
               {analysis ? 'Refresh' : 'Run'}
             </span>
-            {showAnalysis ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
           </div>
-        </button>
-        {showAnalysis && (
-        <div className="px-5 py-5 border-t border-purple-100/50">
-          {analysisLoading ? (
-            <div className="space-y-3 py-4">
-              {/* Shimmer loading effect */}
-              <div className="ai-shimmer h-5 w-3/4" />
-              <div className="ai-shimmer h-4 w-full" />
-              <div className="ai-shimmer h-4 w-5/6" />
-              <div className="ai-shimmer h-4 w-2/3" />
-              <div className="ai-shimmer h-5 w-1/2 mt-4" />
-              <div className="ai-shimmer h-4 w-full" />
-              <div className="ai-shimmer h-4 w-4/5" />
-              <p className="text-center text-xs text-purple-400 mt-4 flex items-center justify-center gap-2">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                {aiQuestion ? 'Answering your question...' : 'Analyzing linked items...'}
-              </p>
+          <div className="px-5 py-5">
+            {analysisLoading ? (
+              <div className="space-y-3 py-4">
+                {/* Shimmer loading effect */}
+                <div className="ai-shimmer h-5 w-3/4" />
+                <div className="ai-shimmer h-4 w-full" />
+                <div className="ai-shimmer h-4 w-5/6" />
+                <div className="ai-shimmer h-4 w-2/3" />
+                <div className="ai-shimmer h-5 w-1/2 mt-4" />
+                <div className="ai-shimmer h-4 w-full" />
+                <div className="ai-shimmer h-4 w-4/5" />
+                <p className="text-center text-xs text-purple-400 mt-4 flex items-center justify-center gap-2">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  {aiQuestion ? 'Answering your question...' : 'Analyzing linked items...'}
+                </p>
+              </div>
+            ) : analysis ? (
+              <div className="ai-glass-card rounded-xl p-5">
+                <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
+                  {analysis.split('\n').map((line, i) => {
+                    if (line.startsWith('## ')) {
+                      return <h3 key={i} className="font-bold text-gray-900 mt-5 mb-2 text-base border-b border-purple-100/50 pb-1.5">{line.replace('## ', '')}</h3>;
+                    }
+                    if (line.startsWith('# ')) {
+                      return <h2 key={i} className="font-bold text-gray-900 mt-4 mb-2 text-lg">{line.replace('# ', '')}</h2>;
+                    }
+                    if (line.startsWith('- ') || line.startsWith('* ')) {
+                      return <li key={i} className="ml-4 text-sm text-gray-700 mt-1 leading-relaxed">{line.slice(2)}</li>;
+                    }
+                    if (line.startsWith('**') && line.endsWith('**')) {
+                      return <p key={i} className="font-semibold text-gray-800 mt-3">{line.replace(/\*\*/g, '')}</p>;
+                    }
+                    if (line.trim() === '') return <br key={i} />;
+                    return <p key={i} className="text-sm text-gray-700 mt-1.5 leading-relaxed">{line}</p>;
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-100 to-blue-100 flex items-center justify-center mx-auto mb-3">
+                  <Brain className="w-7 h-7 text-purple-400" />
+                </div>
+                <p className="text-sm text-gray-500 font-medium">
+                  {items.length > 0
+                    ? 'Click "Run" to get AI-powered insights'
+                    : 'Link some items first, then run AI analysis'}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">Powered by AI topic intelligence</p>
+              </div>
+            )}
+
+            {/* Ask AI a question */}
+            {items.length > 0 && (
+              <div className="mt-5 pt-4 border-t border-gray-100">
+                <div className="flex gap-2">
+                  <div className="flex-1 relative">
+                    <MessageSquare className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      value={aiQuestion}
+                      onChange={e => setAiQuestion(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && aiQuestion.trim() && runAnalysis(aiQuestion)}
+                      placeholder="Ask AI a question about this topic..."
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                      disabled={analysisLoading}
+                    />
+                  </div>
+                  <button
+                    onClick={() => aiQuestion.trim() && runAnalysis(aiQuestion)}
+                    disabled={analysisLoading || !aiQuestion.trim()}
+                    className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-xs font-medium hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-1.5 transition-all"
+                  >
+                    {analysisLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                    Ask
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== SEARCH TAB ===== */}
+      {activeSection === 'search' && (
+        <div id="section-search" className="scroll-mt-8 space-y-4">
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover-lift">
+            <div className="px-5 py-4 space-y-3">
+              <div className="flex gap-2">
+                <div className="flex-1 relative">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                    placeholder="Search emails, messages, events, files..."
+                    className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl text-sm bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  />
+                </div>
+                <button onClick={handleSearch} disabled={searchLoading}
+                  className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition-colors">
+                  {searchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  Search
+                </button>
+                <button onClick={handleAiFind} disabled={aiFindLoading}
+                  className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-sm font-medium hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-2 transition-all">
+                  {aiFindLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  AI Find
+                </button>
+              </div>
+              {/* Source filter pills */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs text-gray-400 mr-1">Sources:</span>
+                {SOURCES.map(src => (
+                  <button key={src} onClick={() => toggleSource(src)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                      searchSources.has(src)
+                        ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-sm'
+                        : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'
+                    }`}>
+                    <SourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)}
+                  </button>
+                ))}
+              </div>
             </div>
-          ) : analysis ? (
-            <div className="ai-glass-card rounded-xl p-5">
-              <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
-                {analysis.split('\n').map((line, i) => {
-                  if (line.startsWith('## ')) {
-                    return <h3 key={i} className="font-bold text-gray-900 mt-5 mb-2 text-base border-b border-purple-100/50 pb-1.5">{line.replace('## ', '')}</h3>;
-                  }
-                  if (line.startsWith('# ')) {
-                    return <h2 key={i} className="font-bold text-gray-900 mt-4 mb-2 text-lg">{line.replace('# ', '')}</h2>;
-                  }
-                  if (line.startsWith('- ') || line.startsWith('* ')) {
-                    return <li key={i} className="ml-4 text-sm text-gray-700 mt-1 leading-relaxed">{line.slice(2)}</li>;
-                  }
-                  if (line.startsWith('**') && line.endsWith('**')) {
-                    return <p key={i} className="font-semibold text-gray-800 mt-3">{line.replace(/\*\*/g, '')}</p>;
-                  }
-                  if (line.trim() === '') return <br key={i} />;
-                  return <p key={i} className="text-sm text-gray-700 mt-1.5 leading-relaxed">{line}</p>;
+          </div>
+
+          {/* Search Results */}
+          {searchResults.length > 0 && (
+            <div className="bg-white rounded-xl border border-blue-200 shadow-sm overflow-hidden animate-slide-up">
+              <div className="px-5 py-3 border-b border-blue-100 flex items-center justify-between bg-blue-50/30">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Search className="w-3.5 h-3.5 text-blue-500" />
+                    Search Results
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">{searchResults.length}</span>
+                  </h3>
+                  {searchResults.filter(r => !r.already_linked).length > 0 && (
+                    <button onClick={selectAllSearch}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors">
+                      {selectedResults.size === searchResults.filter(r => !r.already_linked).length
+                        ? <><CheckSquare className="w-3 h-3" /> Deselect All</>
+                        : <><Square className="w-3 h-3" /> Select All</>}
+                    </button>
+                  )}
+                </div>
+                {selectedResults.size > 0 && (
+                  <button onClick={linkSelectedSearch} disabled={linkingItems}
+                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 shadow-sm transition-colors">
+                    {linkingItems ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
+                    Link {selectedResults.size} Selected
+                  </button>
+                )}
+              </div>
+              <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto thin-scrollbar">
+                {searchResults.map((item) => {
+                  const key = item.source + ':' + item.external_id;
+                  return (
+                    <div key={key} className={`px-5 py-3.5 flex items-start gap-3 transition-colors ${item.already_linked ? 'opacity-50 bg-gray-50' : 'hover:bg-blue-50/30'}`}>
+                      {!item.already_linked && (
+                        <input type="checkbox" checked={selectedResults.has(key)}
+                          onChange={() => toggleSearchResult(key)}
+                          className="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      )}
+                      {item.already_linked && (
+                        <span className="mt-1 text-green-500 text-xs font-semibold flex items-center gap-0.5">
+                          <Check className="w-3 h-3" /> Linked
+                        </span>
+                      )}
+                      <span className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${sourceIconBgClass(item.source)}`}>
+                        <SourceIcon source={item.source} className="w-3.5 h-3.5" />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{decodeHtmlEntities(item.title)}</p>
+                        <p className="text-xs text-gray-500 truncate mt-0.5">{decodeHtmlEntities(item.snippet)}</p>
+                        <div className="flex gap-2 mt-1.5 text-xs text-gray-400">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
+                            {sourceLabel(item.source)}
+                          </span>
+                          <span>{formatRelativeDate(item.occurred_at)}</span>
+                        </div>
+                      </div>
+                      <a href={item.url} target="_blank" rel="noopener noreferrer"
+                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+                  );
                 })}
               </div>
             </div>
-          ) : (
-            <div className="text-center py-8">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-100 to-blue-100 flex items-center justify-center mx-auto mb-3">
-                <Brain className="w-7 h-7 text-purple-400" />
-              </div>
-              <p className="text-sm text-gray-500 font-medium">
-                {items.length > 0
-                  ? 'Click "Run" to get AI-powered insights'
-                  : 'Link some items first, then run AI analysis'}
-              </p>
-              <p className="text-xs text-gray-400 mt-1">Powered by AI topic intelligence</p>
-            </div>
           )}
 
-          {/* Ask AI a question */}
-          {items.length > 0 && (
-            <div className="mt-5 pt-4 border-t border-gray-100">
-              <div className="flex gap-2">
-                <div className="flex-1 relative">
-                  <MessageSquare className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    value={aiQuestion}
-                    onChange={e => setAiQuestion(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && aiQuestion.trim() && runAnalysis(aiQuestion)}
-                    placeholder="Ask AI a question about this topic..."
-                    className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-                    disabled={analysisLoading}
-                  />
+          {/* AI Find Results */}
+          {showAiResults && (
+            <div className="bg-white rounded-xl border border-purple-200 shadow-sm overflow-hidden animate-slide-up">
+              <div className="px-5 py-3 border-b border-purple-100 flex items-center justify-between bg-gradient-to-r from-purple-50/50 to-pink-50/30">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                      <Sparkles className="w-3.5 h-3.5 text-white" />
+                    </span>
+                    AI Find Results
+                    {aiFindLoading && <Loader2 className="w-4 h-4 animate-spin text-purple-500" />}
+                  </h3>
+                  {aiFindResults.filter(r => !r.already_linked).length > 0 && !aiFindLoading && (
+                    <button onClick={selectAllAi}
+                      className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 transition-colors">
+                      {selectedAiResults.size === aiFindResults.filter(r => !r.already_linked).length
+                        ? <><CheckSquare className="w-3 h-3" /> Deselect All</>
+                        : <><Square className="w-3 h-3" /> Select All</>}
+                    </button>
+                  )}
                 </div>
-                <button
-                  onClick={() => aiQuestion.trim() && runAnalysis(aiQuestion)}
-                  disabled={analysisLoading || !aiQuestion.trim()}
-                  className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-xs font-medium hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-1.5 transition-all"
-                >
-                  {analysisLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                  Ask
-                </button>
+                {selectedAiResults.size > 0 && (
+                  <button onClick={linkSelectedAi} disabled={linkingItems}
+                    className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg text-xs font-medium hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 flex items-center gap-1.5 shadow-sm transition-all">
+                    {linkingItems ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
+                    Link {selectedAiResults.size} Selected
+                  </button>
+                )}
               </div>
+              {aiFindResults.length === 0 && !aiFindLoading ? (
+                <p className="px-5 py-8 text-center text-sm text-gray-500">No results found. Try adding a more detailed description to your topic.</p>
+              ) : (
+                <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto thin-scrollbar">
+                  {aiFindResults.map((item) => {
+                    const key = item.source + ':' + item.external_id;
+                    const confidencePercent = item.ai_confidence != null ? Math.round(item.ai_confidence * 100) : null;
+                    return (
+                      <div key={key} className={`px-5 py-3.5 flex items-start gap-3 transition-colors ${item.already_linked ? 'opacity-50 bg-gray-50' : 'hover:bg-purple-50/20'}`}>
+                        {!item.already_linked && (
+                          <input type="checkbox" checked={selectedAiResults.has(key)}
+                            onChange={() => toggleAiResult(key)}
+                            className="mt-1 rounded border-gray-300 text-purple-600 focus:ring-purple-500" />
+                        )}
+                        {item.already_linked && (
+                          <span className="mt-1 text-green-500 text-xs font-semibold flex items-center gap-0.5">
+                            <Check className="w-3 h-3" /> Linked
+                          </span>
+                        )}
+                        <span className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${sourceIconBgClass(item.source)}`}>
+                          <SourceIcon source={item.source} className="w-3.5 h-3.5" />
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{decodeHtmlEntities(item.title)}</p>
+                          <p className="text-xs text-gray-500 truncate mt-0.5">{decodeHtmlEntities(item.snippet)}</p>
+                          <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-400">
+                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
+                              {sourceLabel(item.source)}
+                            </span>
+                            <span>{formatRelativeDate(item.occurred_at)}</span>
+                            {/* AI confidence indicator */}
+                            {confidencePercent != null && (
+                              <span className="flex items-center gap-1.5">
+                                <span className={`text-[10px] font-bold ${confidencePercent >= 80 ? 'text-green-600' : confidencePercent >= 50 ? 'text-amber-600' : 'text-gray-500'}`}>
+                                  {confidencePercent}%
+                                </span>
+                                <span className="confidence-meter w-12">
+                                  <span className={`confidence-meter-fill ${confidencePercent >= 80 ? 'bg-green-500' : confidencePercent >= 50 ? 'bg-amber-500' : 'bg-gray-400'}`} style={{ width: `${confidencePercent}%` }} />
+                                </span>
+                              </span>
+                            )}
+                          </div>
+                          {item.ai_reason && (
+                            <p className="text-xs text-purple-600 mt-1.5 italic bg-purple-50/50 px-2 py-1 rounded">{item.ai_reason}</p>
+                          )}
+                        </div>
+                        <a href={item.url} target="_blank" rel="noopener noreferrer"
+                          className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Open in source">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
-        )}
-      </div>
-
-      {/* AI Agents */}
-      <div id="section-agents" className="scroll-mt-8 rounded-xl border border-gray-100 shadow-sm hover-lift bg-gradient-to-br from-white via-white to-blue-50/20">
-        <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-50/40 to-purple-50/40">
-          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
-              <Zap className="w-3.5 h-3.5 text-white" />
-            </span>
-            AI Agents
-            {agentLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" />}
-            {agentSuccess && !agentLoading && (
-              <span className="inline-flex items-center gap-1 text-green-600 text-xs font-medium animate-fade-in">
-                <Check className="w-3.5 h-3.5" /> Done
-              </span>
-            )}
-          </h2>
-          <div className="relative">
-            <button onClick={() => setShowAgentMenu(!showAgentMenu)} disabled={!!agentLoading}
-              className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-xs font-medium hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-1.5 transition-all shadow-sm">
-              {agentLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-              Run Agent
-              <ChevronDown className="w-3 h-3" />
-            </button>
-            {showAgentMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowAgentMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 z-50 w-60 bg-white rounded-xl border border-gray-200 shadow-xl py-1.5 max-h-80 overflow-y-auto">
-                  <p className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">General</p>
-                  <button onClick={() => { runAgent('auto_tag'); setShowAgentMenu(false); }} disabled={!!agentLoading}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'auto_tag' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <Tag className="w-3.5 h-3.5 text-blue-500" />}
-                    <span className="flex-1">Auto-Tag</span>
-                    {formatAgentLastRun('auto_tag') && <span className="text-[9px] text-gray-400">{formatAgentLastRun('auto_tag')}</span>}
-                  </button>
-                  <button onClick={() => { runAgent('suggest_title'); setShowAgentMenu(false); }} disabled={!!agentLoading}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-purple-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'suggest_title' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" /> : <Wand2 className="w-3.5 h-3.5 text-purple-500" />} Suggest Title
-                  </button>
-                  <button onClick={() => { runAgent('generate_description'); setShowAgentMenu(false); }} disabled={!!agentLoading}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-green-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'generate_description' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-green-500" /> : <FileText className="w-3.5 h-3.5 text-green-500" />} Generate Description
-                  </button>
-                  <div className="border-t border-gray-100 my-1.5" />
-                  <p className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Requires linked items</p>
-                  <button onClick={() => { runAgent('extract_action_items'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'extract_action_items' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" /> : <ListChecks className="w-3.5 h-3.5 text-amber-500" />} Extract Actions
-                  </button>
-                  <button onClick={() => { runAgent('summarize_thread'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'summarize_thread' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" /> : <Brain className="w-3.5 h-3.5 text-indigo-500" />} Summarize Thread
-                  </button>
-                  <button onClick={() => { runAgent('find_contacts'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-teal-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'find_contacts' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-500" /> : <Users className="w-3.5 h-3.5 text-teal-500" />} Find Contacts
-                  </button>
-                  <button onClick={() => { runAgent('deep_dive'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-purple-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'deep_dive' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" /> : <Eye className="w-3.5 h-3.5 text-purple-500" />} Deep Dive
-                  </button>
-                  <button onClick={() => { runAgent('recommend_content'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'recommend_content' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <Compass className="w-3.5 h-3.5 text-blue-500" />} Find More Content
-                  </button>
-                  <button onClick={() => { runAgent('extract_entities'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'extract_entities' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" /> : <Target className="w-3.5 h-3.5 text-emerald-500" />} Extract Entities
-                  </button>
-                  <div className="border-t border-gray-100 my-1.5" />
-                  <p className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Cross-topic</p>
-                  <button onClick={() => { runAgent('cross_topic_links'); setShowAgentMenu(false); }} disabled={!!agentLoading}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-orange-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'cross_topic_links' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-500" /> : <GitBranch className="w-3.5 h-3.5 text-orange-500" />} Related Topics
-                  </button>
-                  <button onClick={() => { runAgent('completeness_check'); setShowAgentMenu(false); }} disabled={!!agentLoading}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-rose-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
-                    {agentLoading === 'completeness_check' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-500" /> : <Award className="w-3.5 h-3.5 text-rose-500" />} Completeness Check
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Title suggestions */}
-        {showTitleSuggestions && titleSuggestions.length > 0 && (
-          <div className="px-4 py-3 border-b border-gray-100 bg-purple-50/50">
-            <p className="text-xs text-purple-700 font-medium mb-2">Suggested Titles:</p>
-            <div className="space-y-1">
-              {titleSuggestions.map((s, i) => (
-                <button key={i} onClick={() => applyTitle(s)}
-                  className="block w-full text-left px-3 py-2 text-sm bg-white rounded border border-purple-100 hover:border-purple-300 hover:bg-purple-50 transition-colors">
-                  {s}
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setShowTitleSuggestions(false)} className="text-xs text-purple-600 hover:underline mt-2">Dismiss</button>
-          </div>
-        )}
-
-        {/* Action items */}
-        {showActionItems && actionItems.length > 0 && (
-          <div className="px-4 py-3 border-b border-gray-100 bg-amber-50/50">
-            <p className="text-xs text-amber-700 font-medium mb-2">Action Items ({actionItems.length}):</p>
-            <div className="space-y-1.5">
-              {actionItems.map((item, i) => (
-                <div key={i} className="flex items-start gap-2 text-sm p-2 bg-white rounded border border-amber-100">
-                  <ListChecks className="w-3.5 h-3.5 text-amber-500 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-gray-800">{item.task}</p>
-                    <div className="flex gap-2 mt-0.5 text-xs text-gray-400">
-                      <span>Assignee: {item.assignee}</span>
-                      <span>Due: {item.due}</span>
-                      <span className={`font-medium ${item.priority === 'high' ? 'text-red-500' : item.priority === 'medium' ? 'text-amber-500' : 'text-gray-500'}`}>{item.priority}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => setShowActionItems(false)} className="text-xs text-amber-600 hover:underline mt-2">Dismiss</button>
-          </div>
-        )}
-
-        {/* Thread summary */}
-        {showThreadSummary && threadSummary && (
-          <div className="px-4 py-3 border-b border-gray-100 bg-indigo-50/50">
-            <p className="text-xs text-indigo-700 font-medium mb-2">Thread Summary:</p>
-            <div className="prose prose-sm max-w-none text-gray-700 text-sm">
-              {threadSummary.split('\n').map((line, i) => {
-                if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-gray-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
-                if (line.startsWith('- ')) return <li key={i} className="ml-4 text-sm mt-0.5">{line.slice(2)}</li>;
-                if (line.trim() === '') return <br key={i} />;
-                return <p key={i} className="text-sm mt-1">{line}</p>;
-              })}
-            </div>
-            <button onClick={() => setShowThreadSummary(false)} className="text-xs text-indigo-600 hover:underline mt-2">Dismiss</button>
-          </div>
-        )}
-
-        {/* Extracted contacts */}
-        {showExtractedContacts && extractedContacts.length > 0 && (
-          <div className="px-4 py-3 bg-teal-50/50">
-            <p className="text-xs text-teal-700 font-medium mb-2">Extracted Contacts ({extractedContacts.length}):</p>
-            <div className="space-y-1.5">
-              {extractedContacts.map((c, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm p-2 bg-white rounded border border-teal-100">
-                  <div className="w-7 h-7 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-medium flex-shrink-0">
-                    {c.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-gray-800 font-medium truncate">{c.name}</p>
-                    <p className="text-xs text-gray-400">{c.email} &bull; {c.role}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => setShowExtractedContacts(false)} className="text-xs text-teal-600 hover:underline mt-2">Dismiss</button>
-          </div>
-        )}
-
-        {/* Deep Dive Report */}
-        {showDeepDive && deepDiveReport && (
-          <div className="px-4 py-3 border-t border-gray-100 bg-gradient-to-r from-purple-50/50 to-pink-50/50">
-            <p className="text-xs text-purple-700 font-medium mb-2 flex items-center gap-1">
-              <Eye className="w-3 h-3" /> Deep Dive Report
-            </p>
-            <div className="prose prose-sm max-w-none text-gray-700 text-sm max-h-96 overflow-y-auto">
-              {deepDiveReport.split('\n').map((line, i) => {
-                if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-gray-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
-                if (line.startsWith('# ')) return <h2 key={i} className="font-bold text-gray-900 mt-2 mb-1 text-base">{line.replace('# ', '')}</h2>;
-                if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-sm mt-0.5">{line.slice(2)}</li>;
-                if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-semibold text-gray-800 mt-2">{line.replace(/\*\*/g, '')}</p>;
-                if (line.trim() === '') return <br key={i} />;
-                return <p key={i} className="text-sm mt-1">{line}</p>;
-              })}
-            </div>
-            <button onClick={() => setShowDeepDive(false)} className="text-xs text-purple-600 hover:underline mt-2">Dismiss</button>
-          </div>
-        )}
-
-        {/* Content Recommendations */}
-        {showRecommendations && recommendations.length > 0 && (
-          <div className="px-4 py-3 border-t border-gray-100 bg-gradient-to-r from-blue-50/50 to-cyan-50/50">
-            <p className="text-xs text-blue-700 font-medium mb-2 flex items-center gap-1">
-              <Compass className="w-3 h-3" /> Content Recommendations
-            </p>
-            <div className="space-y-2">
-              {recommendations.map((rec, i) => (
-                <div key={i} className="flex items-start gap-2 p-2 bg-white rounded-lg border border-blue-100">
-                  <span className="mt-0.5"><SourceIcon source={rec.source} className="w-4 h-4" /></span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-800 font-medium">{rec.reason}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Search: <code className="bg-gray-100 px-1 rounded">{rec.query}</code></p>
-                    <p className="text-xs text-blue-500 mt-0.5">{rec.expected_type}</p>
-                  </div>
-                  <button onClick={() => { setSearchQuery(rec.query); setShowSearch(true); }}
-                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex-shrink-0">
-                    Search
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => setShowRecommendations(false)} className="text-xs text-blue-600 hover:underline mt-2">Dismiss</button>
-          </div>
-        )}
-
-        {/* Extracted Entities */}
-        {showEntities && entities && (
-          <div className="px-4 py-3 border-t border-gray-100 bg-gradient-to-r from-emerald-50/50 to-green-50/50">
-            <p className="text-xs text-emerald-700 font-medium mb-2 flex items-center gap-1">
-              <Target className="w-3 h-3" /> Extracted Entities
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-              {(entities.people as Array<{name: string; email: string; role: string; mention_count: number}>)?.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-gray-500 mb-1">People</p>
-                  {(entities.people as Array<{name: string; email: string; role: string; mention_count: number}>).slice(0, 8).map((p, i) => (
-                    <div key={i} className="flex items-center gap-1.5 text-xs p-1">
-                      <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[10px] font-bold">{p.name.charAt(0)}</span>
-                      <span className="font-medium">{p.name}</span>
-                      {p.role && <span className="text-gray-400">({p.role})</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {(entities.action_items as Array<{task: string; assignee: string; due: string; status: string}>)?.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-gray-500 mb-1">Action Items</p>
-                  {(entities.action_items as Array<{task: string; assignee: string; due: string; status: string}>).slice(0, 6).map((a, i) => (
-                    <div key={i} className="text-xs p-1 flex items-start gap-1">
-                      <ListChecks className="w-3 h-3 text-emerald-500 mt-0.5 flex-shrink-0" />
-                      <span>{a.task} {a.assignee !== 'unknown' && <span className="text-gray-400">→ {a.assignee}</span>}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {(entities.dates as Array<{date: string; description: string; type: string}>)?.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-gray-500 mb-1">Key Dates</p>
-                  {(entities.dates as Array<{date: string; description: string; type: string}>).slice(0, 5).map((d, i) => (
-                    <div key={i} className="text-xs p-1 flex items-start gap-1">
-                      <Clock className="w-3 h-3 text-emerald-500 mt-0.5 flex-shrink-0" />
-                      <span>{d.date}: {d.description}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {(entities.amounts as Array<{value: string; currency: string; context: string}>)?.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-gray-500 mb-1">Amounts</p>
-                  {(entities.amounts as Array<{value: string; currency: string; context: string}>).slice(0, 5).map((a, i) => (
-                    <div key={i} className="text-xs p-1">💰 {a.value} {a.currency} — {a.context}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <button onClick={() => setShowEntities(false)} className="text-xs text-emerald-600 hover:underline mt-2">Dismiss</button>
-          </div>
-        )}
-
-        {/* Related Topics */}
-        {showRelatedTopics && relatedTopics.length > 0 && (
-          <div className="px-4 py-3 border-t border-gray-100 bg-gradient-to-r from-orange-50/50 to-amber-50/50">
-            <p className="text-xs text-orange-700 font-medium mb-2 flex items-center gap-1">
-              <GitBranch className="w-3 h-3" /> Related Topics
-            </p>
-            <div className="space-y-1.5">
-              {relatedTopics.map((rt, i) => (
-                <Link key={i} href={`/topics/${rt.topic_id}`}
-                  className="flex items-center gap-2 p-2 bg-white rounded-lg border border-orange-100 hover:border-orange-300 transition-colors">
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                    rt.relationship === 'parent' ? 'bg-blue-100 text-blue-700' :
-                    rt.relationship === 'child' ? 'bg-green-100 text-green-700' :
-                    rt.relationship === 'dependent' ? 'bg-amber-100 text-amber-700' :
-                    'bg-gray-100 text-gray-600'
-                  }`}>{rt.relationship}</span>
-                  <span className="text-sm font-medium text-gray-800 flex-1">{rt.title}</span>
-                  <span className="text-xs text-orange-500">{Math.round(rt.confidence * 100)}%</span>
-                </Link>
-              ))}
-            </div>
-            <button onClick={() => setShowRelatedTopics(false)} className="text-xs text-orange-600 hover:underline mt-2">Dismiss</button>
-          </div>
-        )}
-
-        {/* Completeness Check */}
-        {showCompleteness && completenessScore && (
-          <div className="px-4 py-3 border-t border-gray-100 bg-gradient-to-r from-rose-50/50 to-pink-50/50">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="relative w-14 h-14">
-                <svg className="w-14 h-14 transform -rotate-90">
-                  <circle cx="28" cy="28" r="24" stroke="#e5e7eb" strokeWidth="4" fill="none" />
-                  <circle cx="28" cy="28" r="24" stroke={(completenessScore.score as number) >= 80 ? '#22c55e' : (completenessScore.score as number) >= 50 ? '#f59e0b' : '#ef4444'} strokeWidth="4" fill="none"
-                    strokeDasharray={`${(completenessScore.score as number) * 1.508} 150.8`} strokeLinecap="round" />
-                </svg>
-                <span className="absolute inset-0 flex items-center justify-center text-sm font-bold">{completenessScore.score as number}%</span>
+      )}
+      {/* ===== DETAILS TAB ===== */}
+      {activeSection === 'details' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-slide-up">
+          {/* Key Metrics */}
+          <div className="bg-gradient-to-br from-white to-blue-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Overview</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="text-center p-2 bg-blue-50 rounded-lg">
+                <p className="text-lg font-bold text-blue-600">{items.length}</p>
+                <p className="text-xs text-gray-500">Linked Items</p>
               </div>
-              <div>
-                <p className="text-sm font-medium text-gray-800">Topic Completeness</p>
-                <p className="text-xs text-gray-500">{String((completenessScore.stats as Record<string, unknown>)?.item_count || 0)} items, {String((completenessScore.stats as Record<string, unknown>)?.source_count || 0)} sources</p>
+              <div className="text-center p-2 bg-purple-50 rounded-lg">
+                <p className="text-lg font-bold text-purple-600">{Object.keys(sourceCounts).length}</p>
+                <p className="text-xs text-gray-500">Sources</p>
+              </div>
+              <div className="text-center p-2 bg-green-50 rounded-lg">
+                <p className="text-lg font-bold text-green-600">{topic.priority || 0}</p>
+                <p className="text-xs text-gray-500">Priority</p>
+              </div>
+              <div className="text-center p-2 bg-amber-50 rounded-lg">
+                <p className="text-lg font-bold text-amber-600">{topic.progress_percent ?? 0}%</p>
+                <p className="text-xs text-gray-500">Progress</p>
               </div>
             </div>
-            {(completenessScore.suggestions as string[])?.length > 0 && (
+            {(topic.tags && topic.tags.length > 0) && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <p className="text-xs text-gray-500 mb-1.5">Tags</p>
+                <div className="flex gap-1 flex-wrap">
+                  {topic.tags.map((tag, i) => (
+                    <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{tag}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {topic.goal && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <p className="text-xs text-gray-500 mb-1">Goal</p>
+                <p className="text-sm text-gray-700">{topic.goal}</p>
+              </div>
+            )}
+            {/* Topic Health Score */}
+            {(() => {
+              let score = 100;
+              const daysSinceUpdate = Math.floor((Date.now() - new Date(topic.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+              if (daysSinceUpdate > 14) score -= 30;
+              else if (daysSinceUpdate > 7) score -= 15;
+              if (!topic.description) score -= 10;
+              if (items.length === 0) score -= 20;
+              if (topic.due_date && new Date(topic.due_date) < new Date()) score -= 25;
+              if (!topic.tags || topic.tags.length === 0) score -= 5;
+              score = Math.max(0, Math.min(100, score));
+              const color = score >= 80 ? 'text-green-600' : score >= 50 ? 'text-amber-600' : 'text-red-600';
+              const barColor = score >= 80 ? 'bg-green-500' : score >= 50 ? 'bg-amber-500' : 'bg-red-500';
+              return (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs text-gray-500 flex items-center gap-1"><Heart className="w-3 h-3" /> Health</p>
+                    <span className={`text-xs font-bold ${color}`}>{score}%</span>
+                  </div>
+                  <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${score}%` }} />
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Timeline */}
+          <div className="bg-gradient-to-br from-white to-purple-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1">
+              <Clock className="w-3 h-3" /> Timeline
+            </h3>
+            {items.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-4">No items linked yet</p>
+            ) : (
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {items.slice(0, 8).map((item, idx) => (
+                  <div key={item.id} className="flex items-start gap-2">
+                    <div className="flex flex-col items-center">
+                      <div className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 flex-shrink-0" />
+                      {idx < Math.min(items.length, 8) - 1 && <div className="w-0.5 h-full bg-gray-200 min-h-[16px]" />}
+                    </div>
+                    <div className="flex-1 min-w-0 pb-1">
+                      <p className="text-xs font-medium text-gray-800 truncate">{item.title}</p>
+                      <div className="flex gap-1 text-xs text-gray-400 items-center">
+                        <SourceIcon source={item.source} className="w-3 h-3" />
+                        <span>{formatRelativeDate(item.occurred_at)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {items.length > 8 && (
+                  <p className="text-xs text-gray-400 text-center">+{items.length - 8} more items</p>
+                )}
+              </div>
+            )}
+            <div className="mt-3 pt-3 border-t border-gray-100 space-y-1 text-xs text-gray-500">
+              {topic.start_date && <p>Started: {new Date(topic.start_date).toLocaleDateString()}</p>}
+              {topic.due_date && (
+                <p className={new Date(topic.due_date) < new Date() ? 'text-red-600 font-medium' : ''}>
+                  Due: {new Date(topic.due_date).toLocaleDateString()}
+                  {new Date(topic.due_date) < new Date() && ' (Overdue)'}
+                </p>
+              )}
+              {topic.created_at && <p>Created: {new Date(topic.created_at).toLocaleDateString()}</p>}
+            </div>
+          </div>
+
+          {/* People & Contacts */}
+          <div className="bg-gradient-to-br from-white to-teal-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1">
+              <Users className="w-3 h-3" /> People Involved
+            </h3>
+            {topic.owner && (
               <div className="mb-2">
-                <p className="text-xs font-medium text-rose-600 mb-1">Suggestions</p>
-                {(completenessScore.suggestions as string[]).map((s, i) => (
-                  <p key={i} className="text-xs text-gray-600 flex items-start gap-1 mt-0.5"><ArrowRight className="w-3 h-3 text-rose-400 mt-0.5 flex-shrink-0" />{s}</p>
-                ))}
+                <p className="text-xs text-gray-500">Owner</p>
+                <p className="text-sm font-medium text-gray-800">{topic.owner}</p>
               </div>
             )}
-            {(completenessScore.strengths as string[])?.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-green-600 mb-1">Strengths</p>
-                {(completenessScore.strengths as string[]).map((s, i) => (
-                  <p key={i} className="text-xs text-gray-600 flex items-start gap-1 mt-0.5"><span className="text-green-500">✓</span> {s}</p>
-                ))}
+            {topic.stakeholders && topic.stakeholders.length > 0 && (
+              <div className="mb-3">
+                <p className="text-xs text-gray-500 mb-1">Stakeholders</p>
+                <div className="flex gap-1 flex-wrap">
+                  {topic.stakeholders.map((s, i) => (
+                    <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-teal-50 text-teal-700">{s}</span>
+                  ))}
+                </div>
               </div>
             )}
-            <button onClick={() => setShowCompleteness(false)} className="text-xs text-rose-600 hover:underline mt-2">Dismiss</button>
+            {topic.client && (
+              <div className="mb-2">
+                <p className="text-xs text-gray-500">Client</p>
+                <p className="text-sm text-gray-700">{topic.client}</p>
+              </div>
+            )}
+            {topic.company && (
+              <div className="mb-2">
+                <p className="text-xs text-gray-500">Company</p>
+                <p className="text-sm text-gray-700">{topic.company}</p>
+              </div>
+            )}
+            {/* Extract unique contacts from item metadata */}
+            {(() => {
+              const contacts = new Map<string, string>();
+              items.forEach(item => {
+                const meta = item.metadata || {};
+                if (meta.from && typeof meta.from === 'string') {
+                  const name = meta.from.split('<')[0].trim();
+                  if (name && !contacts.has(name.toLowerCase())) contacts.set(name.toLowerCase(), name);
+                }
+              });
+              const contactList = Array.from(contacts.values()).slice(0, 6);
+              if (contactList.length === 0) return null;
+              return (
+                <div className="mt-2 pt-2 border-t border-gray-100">
+                  <p className="text-xs text-gray-500 mb-1">From Communications</p>
+                  <div className="flex gap-1 flex-wrap">
+                    {contactList.map((name, i) => (
+                      <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{name}</span>
+                    ))}
+                    {contacts.size > 6 && <span className="text-xs text-gray-400">+{contacts.size - 6} more</span>}
+                  </div>
+                </div>
+              );
+            })()}
+            {!topic.owner && (!topic.stakeholders || topic.stakeholders.length === 0) && items.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-4">No contacts associated yet</p>
+            )}
+            {topic.risk_level && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <p className="text-xs text-gray-500 mb-1">Risk Level</p>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  topic.risk_level === 'critical' ? 'bg-red-100 text-red-700' :
+                  topic.risk_level === 'high' ? 'bg-orange-100 text-orange-700' :
+                  topic.risk_level === 'medium' ? 'bg-amber-100 text-amber-700' :
+                  'bg-green-100 text-green-700'
+                }`}>{topic.risk_level}</span>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Notes */}
-      <div id="section-notes" className="scroll-mt-8 bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift">
-        <div className="px-5 py-3 flex items-center justify-between border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <StickyNote className="w-4 h-4 text-amber-500" />
-            Quick Notes
-            <span className="text-xs text-gray-400 font-normal">&middot; included in AI analysis</span>
-          </h2>
-          <div className="flex items-center gap-3">
-            {/* Auto-save indicator */}
-            {notesSaving && (
-              <span className="text-xs text-gray-400 flex items-center gap-1">
-                <Loader2 className="w-3 h-3 animate-spin" /> Saving...
+      {/* ===== CONTACTS TAB ===== */}
+      {activeSection === 'contacts' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center">
+                <Users className="w-3.5 h-3.5 text-white" />
               </span>
-            )}
-            {notesSaved && !notesSaving && (
-              <span className="text-xs text-green-500 flex items-center gap-1 saved-indicator">
-                <Check className="w-3 h-3" /> Saved
-              </span>
-            )}
-            {/* Word count */}
-            <span className="text-[10px] text-gray-300 font-mono tabular-nums">
-              {noteWordCount} {noteWordCount === 1 ? 'word' : 'words'}
-            </span>
-            <button onClick={saveNotes} disabled={notesSaving}
-              className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1.5 transition-colors">
-              {notesSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-              Save
+              <h2 className="text-base font-bold text-gray-900">Linked Contacts</h2>
+              <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{linkedContacts.length}</span>
+            </div>
+            <button onClick={() => setShowLinkContactForm(v => !v)}
+              className="px-3 py-1.5 bg-teal-600 text-white rounded-lg text-xs font-medium hover:bg-teal-700 flex items-center gap-1.5 transition-colors shadow-sm">
+              <Users className="w-3.5 h-3.5" /> Link Contact
             </button>
           </div>
-        </div>
-        <div className="p-4">
-          <textarea
-            value={notes}
-            onChange={e => handleNotesChange(e.target.value)}
-            onFocus={() => setNotesFocused(true)}
-            onBlur={() => setNotesFocused(false)}
-            placeholder="Add notes about this topic... (auto-saves after 2s)"
-            className={`w-full min-h-[120px] px-4 py-3 border rounded-lg text-sm text-gray-700 bg-gray-50/30 focus:bg-white focus:outline-none resize-y transition-all leading-relaxed font-[system-ui] ${
-              notesFocused ? 'notes-textarea border-blue-300' : 'border-gray-200'
-            }`}
-          />
-        </div>
-      </div>
 
-      {/* Activity Feed */}
-      <div id="section-activity" className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift">
-        <div className="px-5 py-3 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <Clock className="w-4 h-4 text-blue-500" />
-            Activity
-          </h2>
-        </div>
-        <div className="p-5">
-          <div className="relative pl-6 space-y-4">
-            {/* Created */}
-            <div className="relative">
-              <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-blue-400 ring-2 ring-white" />
-              <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
-              <p className="text-xs font-medium text-gray-700">Topic created</p>
-              <p className="text-[11px] text-gray-400">{formatSmartDate(topic.created_at)}</p>
-            </div>
-            {/* Last updated */}
-            {topic.updated_at !== topic.created_at && (
+          {/* Link Contact Form */}
+          {showLinkContactForm && (
+            <div className="p-4 bg-teal-50/50 border border-teal-200 rounded-xl space-y-3 animate-slide-up">
               <div className="relative">
-                <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-green-400 ring-2 ring-white" />
-                <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
-                <p className="text-xs font-medium text-gray-700">Last updated</p>
-                <p className="text-[11px] text-gray-400">{formatSmartDate(topic.updated_at)}</p>
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  value={contactSearchQuery}
+                  onChange={e => setContactSearchQuery(e.target.value)}
+                  placeholder="Search contacts by name or email..."
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                  autoFocus
+                />
+                {contactSearchLoading && <Loader2 className="w-4 h-4 animate-spin text-teal-500 absolute right-3 top-1/2 -translate-y-1/2" />}
               </div>
-            )}
-            {/* Linked items count */}
-            <div className="relative">
-              <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-purple-400 ring-2 ring-white" />
-              <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
-              <p className="text-xs font-medium text-gray-700">{items.length} linked item{items.length !== 1 ? 's' : ''}</p>
-              <p className="text-[11px] text-gray-400">
-                {Object.entries(sourceCounts).map(([src, count]) => `${count} ${sourceLabel(src).toLowerCase()}`).join(', ') || 'No items yet'}
-              </p>
+              {allContacts.length > 0 && (
+                <div className="max-h-48 overflow-y-auto space-y-1 thin-scrollbar">
+                  {allContacts
+                    .filter(c => !linkedContacts.some(lc => lc.contact_id === c.id))
+                    .map(contact => (
+                      <button
+                        key={contact.id}
+                        onClick={() => linkContact(contact.id)}
+                        disabled={linkingContact}
+                        className="w-full flex items-center gap-3 p-2.5 bg-white rounded-lg border border-gray-100 hover:border-teal-300 hover:bg-teal-50/30 transition-all text-left disabled:opacity-50"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-sm font-semibold flex-shrink-0">
+                          {contact.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{contact.name}</p>
+                          {contact.email && <p className="text-xs text-gray-400 truncate">{contact.email}</p>}
+                        </div>
+                        <Link2 className="w-3.5 h-3.5 text-teal-500 flex-shrink-0" />
+                      </button>
+                    ))}
+                </div>
+              )}
+              {allContacts.length === 0 && !contactSearchLoading && contactSearchQuery && (
+                <p className="text-xs text-gray-400 text-center py-3">No contacts found</p>
+              )}
+              <button onClick={() => { setShowLinkContactForm(false); setContactSearchQuery(''); }}
+                className="text-xs text-gray-500 hover:text-gray-700 hover:underline">Cancel</button>
             </div>
-            {/* Linked contacts count */}
-            <div className="relative">
-              <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-teal-400 ring-2 ring-white" />
-              <p className="text-xs font-medium text-gray-700">
-                {(() => {
-                  const contactNames = new Set<string>();
-                  items.forEach(item => {
-                    const from = item.metadata?.from;
-                    if (from && typeof from === 'string') {
-                      contactNames.add(from.split('<')[0].trim().toLowerCase());
-                    }
-                  });
-                  (topic.stakeholders || []).forEach(s => contactNames.add(s.toLowerCase()));
-                  if (topic.owner) contactNames.add(topic.owner.toLowerCase());
-                  return `${contactNames.size} linked contact${contactNames.size !== 1 ? 's' : ''}`;
-                })()}
-              </p>
-              <p className="text-[11px] text-gray-400">From communications and stakeholders</p>
+          )}
+
+          {/* Contact Cards */}
+          {linkedContacts.length > 0 ? (
+            <div className="space-y-2">
+              {linkedContacts.map(lc => (
+                <div key={lc.id} className="p-3.5 bg-white rounded-xl border border-gray-100 shadow-sm flex items-center gap-3 group hover:shadow-md transition-all">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-teal-100 to-cyan-100 text-teal-700 flex items-center justify-center text-base font-semibold flex-shrink-0">
+                    {lc.contacts?.name?.charAt(0)?.toUpperCase() || '?'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{lc.contacts?.name || 'Unknown'}</p>
+                    <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5">
+                      {lc.contacts?.email && <span className="truncate">{lc.contacts.email}</span>}
+                      {lc.contacts?.organization && <span className="truncate">{lc.contacts.organization}</span>}
+                    </div>
+                  </div>
+                  {lc.role && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 flex-shrink-0">
+                      {lc.role}
+                    </span>
+                  )}
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <Link href={`/contacts/${lc.contact_id}`}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="View contact">
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </Link>
+                    <button onClick={() => unlinkContact(lc.contact_id)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Unlink contact">
+                      <Unlink className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : !showLinkContactForm && (
+            <div className="py-12 bg-gradient-to-b from-white to-gray-50/50 rounded-xl border border-dashed border-gray-200 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-teal-50 flex items-center justify-center mx-auto mb-3">
+                <Users className="w-6 h-6 text-teal-400" />
+              </div>
+              <h3 className="text-gray-700 text-sm font-semibold mb-1">No contacts linked yet</h3>
+              <p className="text-gray-400 text-xs mb-4">Associate people with this topic for better organization.</p>
+              <button onClick={() => setShowLinkContactForm(true)}
+                className="px-4 py-2 bg-teal-600 text-white rounded-lg text-xs font-medium hover:bg-teal-700 inline-flex items-center gap-1.5 transition-colors">
+                <Users className="w-3.5 h-3.5" /> Link a Contact
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== NOTES TAB ===== */}
+      {activeSection === 'notes' && (
+        <div id="section-notes" className="scroll-mt-8 bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift">
+          <div className="px-5 py-3 flex items-center justify-between border-b border-gray-100">
+            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <StickyNote className="w-4 h-4 text-amber-500" />
+              Quick Notes
+              <span className="text-xs text-gray-400 font-normal">&middot; included in AI analysis</span>
+            </h2>
+            <div className="flex items-center gap-3">
+              {/* Auto-save indicator */}
+              {notesSaving && (
+                <span className="text-xs text-gray-400 flex items-center gap-1">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Saving...
+                </span>
+              )}
+              {notesSaved && !notesSaving && (
+                <span className="text-xs text-green-500 flex items-center gap-1 saved-indicator">
+                  <Check className="w-3 h-3" /> Saved
+                </span>
+              )}
+              {/* Word count */}
+              <span className="text-[10px] text-gray-300 font-mono tabular-nums">
+                {noteWordCount} {noteWordCount === 1 ? 'word' : 'words'}
+              </span>
+              <button onClick={saveNotes} disabled={notesSaving}
+                className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1.5 transition-colors">
+                {notesSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                Save
+              </button>
+            </div>
+          </div>
+          <div className="p-4">
+            <textarea
+              value={notes}
+              onChange={e => handleNotesChange(e.target.value)}
+              onFocus={() => setNotesFocused(true)}
+              onBlur={() => setNotesFocused(false)}
+              placeholder="Add notes about this topic... (auto-saves after 2s)"
+              className={`w-full min-h-[120px] px-4 py-3 border rounded-lg text-sm text-gray-700 bg-gray-50/30 focus:bg-white focus:outline-none resize-y transition-all leading-relaxed font-[system-ui] ${
+                notesFocused ? 'notes-textarea border-blue-300' : 'border-gray-200'
+              }`}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ===== ACTIVITY TAB ===== */}
+      {activeSection === 'activity' && (
+        <div id="section-activity" className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift">
+          <div className="px-5 py-3 border-b border-gray-100">
+            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-blue-500" />
+              Activity
+            </h2>
+          </div>
+          <div className="p-5">
+            <div className="relative pl-6 space-y-4">
+              {/* Created */}
+              <div className="relative">
+                <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-blue-400 ring-2 ring-white" />
+                <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
+                <p className="text-xs font-medium text-gray-700">Topic created</p>
+                <p className="text-[11px] text-gray-400">{formatSmartDate(topic.created_at)}</p>
+              </div>
+              {/* Last updated */}
+              {topic.updated_at !== topic.created_at && (
+                <div className="relative">
+                  <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-green-400 ring-2 ring-white" />
+                  <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
+                  <p className="text-xs font-medium text-gray-700">Last updated</p>
+                  <p className="text-[11px] text-gray-400">{formatSmartDate(topic.updated_at)}</p>
+                </div>
+              )}
+              {/* Linked items count */}
+              <div className="relative">
+                <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-purple-400 ring-2 ring-white" />
+                <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
+                <p className="text-xs font-medium text-gray-700">{items.length} linked item{items.length !== 1 ? 's' : ''}</p>
+                <p className="text-[11px] text-gray-400">
+                  {Object.entries(sourceCounts).map(([src, count]) => `${count} ${sourceLabel(src).toLowerCase()}`).join(', ') || 'No items yet'}
+                </p>
+              </div>
+              {/* Linked contacts count */}
+              <div className="relative">
+                <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-teal-400 ring-2 ring-white" />
+                <p className="text-xs font-medium text-gray-700">
+                  {(() => {
+                    const contactNames = new Set<string>();
+                    items.forEach(item => {
+                      const from = item.metadata?.from;
+                      if (from && typeof from === 'string') {
+                        contactNames.add(from.split('<')[0].trim().toLowerCase());
+                      }
+                    });
+                    (topic.stakeholders || []).forEach(s => contactNames.add(s.toLowerCase()));
+                    if (topic.owner) contactNames.add(topic.owner.toLowerCase());
+                    return `${contactNames.size} linked contact${contactNames.size !== 1 ? 's' : ''}`;
+                  })()}
+                </p>
+                <p className="text-[11px] text-gray-400">From communications and stakeholders</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
+      {/* ===== AGENT RESULTS - shown regardless of active tab ===== */}
+
+      {/* Title suggestions */}
+      {showTitleSuggestions && titleSuggestions.length > 0 && (
+        <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden bg-purple-50/50 px-4 py-3">
+          <p className="text-xs text-purple-700 font-medium mb-2">Suggested Titles:</p>
+          <div className="space-y-1">
+            {titleSuggestions.map((s, i) => (
+              <button key={i} onClick={() => applyTitle(s)}
+                className="block w-full text-left px-3 py-2 text-sm bg-white rounded border border-purple-100 hover:border-purple-300 hover:bg-purple-50 transition-colors">
+                {s}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setShowTitleSuggestions(false)} className="text-xs text-purple-600 hover:underline mt-2">Dismiss</button>
+        </div>
+      )}
+
+      {/* Action items */}
+      {showActionItems && actionItems.length > 0 && (
+        <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden bg-amber-50/50 px-4 py-3">
+          <p className="text-xs text-amber-700 font-medium mb-2">Action Items ({actionItems.length}):</p>
+          <div className="space-y-1.5">
+            {actionItems.map((item, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm p-2 bg-white rounded border border-amber-100">
+                <ListChecks className="w-3.5 h-3.5 text-amber-500 mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-gray-800">{item.task}</p>
+                  <div className="flex gap-2 mt-0.5 text-xs text-gray-400">
+                    <span>Assignee: {item.assignee}</span>
+                    <span>Due: {item.due}</span>
+                    <span className={`font-medium ${item.priority === 'high' ? 'text-red-500' : item.priority === 'medium' ? 'text-amber-500' : 'text-gray-500'}`}>{item.priority}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={() => setShowActionItems(false)} className="text-xs text-amber-600 hover:underline mt-2">Dismiss</button>
+        </div>
+      )}
+
+      {/* Thread summary */}
+      {showThreadSummary && threadSummary && (
+        <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden bg-indigo-50/50 px-4 py-3">
+          <p className="text-xs text-indigo-700 font-medium mb-2">Thread Summary:</p>
+          <div className="prose prose-sm max-w-none text-gray-700 text-sm">
+            {threadSummary.split('\n').map((line, i) => {
+              if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-gray-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
+              if (line.startsWith('- ')) return <li key={i} className="ml-4 text-sm mt-0.5">{line.slice(2)}</li>;
+              if (line.trim() === '') return <br key={i} />;
+              return <p key={i} className="text-sm mt-1">{line}</p>;
+            })}
+          </div>
+          <button onClick={() => setShowThreadSummary(false)} className="text-xs text-indigo-600 hover:underline mt-2">Dismiss</button>
+        </div>
+      )}
+
+      {/* Extracted contacts */}
+      {showExtractedContacts && extractedContacts.length > 0 && (
+        <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden bg-teal-50/50 px-4 py-3">
+          <p className="text-xs text-teal-700 font-medium mb-2">Extracted Contacts ({extractedContacts.length}):</p>
+          <div className="space-y-1.5">
+            {extractedContacts.map((c, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm p-2 bg-white rounded border border-teal-100">
+                <div className="w-7 h-7 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-medium flex-shrink-0">
+                  {c.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-gray-800 font-medium truncate">{c.name}</p>
+                  <p className="text-xs text-gray-400">{c.email} &bull; {c.role}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={() => setShowExtractedContacts(false)} className="text-xs text-teal-600 hover:underline mt-2">Dismiss</button>
+        </div>
+      )}
+
+      {/* Deep Dive Report */}
+      {showDeepDive && deepDiveReport && (
+        <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden bg-gradient-to-r from-purple-50/50 to-pink-50/50 px-4 py-3">
+          <p className="text-xs text-purple-700 font-medium mb-2 flex items-center gap-1">
+            <Eye className="w-3 h-3" /> Deep Dive Report
+          </p>
+          <div className="prose prose-sm max-w-none text-gray-700 text-sm max-h-96 overflow-y-auto">
+            {deepDiveReport.split('\n').map((line, i) => {
+              if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-gray-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
+              if (line.startsWith('# ')) return <h2 key={i} className="font-bold text-gray-900 mt-2 mb-1 text-base">{line.replace('# ', '')}</h2>;
+              if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-sm mt-0.5">{line.slice(2)}</li>;
+              if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-semibold text-gray-800 mt-2">{line.replace(/\*\*/g, '')}</p>;
+              if (line.trim() === '') return <br key={i} />;
+              return <p key={i} className="text-sm mt-1">{line}</p>;
+            })}
+          </div>
+          <button onClick={() => setShowDeepDive(false)} className="text-xs text-purple-600 hover:underline mt-2">Dismiss</button>
+        </div>
+      )}
+
+      {/* Content Recommendations */}
+      {showRecommendations && recommendations.length > 0 && (
+        <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden bg-gradient-to-r from-blue-50/50 to-cyan-50/50 px-4 py-3">
+          <p className="text-xs text-blue-700 font-medium mb-2 flex items-center gap-1">
+            <Compass className="w-3 h-3" /> Content Recommendations
+          </p>
+          <div className="space-y-2">
+            {recommendations.map((rec, i) => (
+              <div key={i} className="flex items-start gap-2 p-2 bg-white rounded-lg border border-blue-100">
+                <span className="mt-0.5"><SourceIcon source={rec.source} className="w-4 h-4" /></span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-800 font-medium">{rec.reason}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Search: <code className="bg-gray-100 px-1 rounded">{rec.query}</code></p>
+                  <p className="text-xs text-blue-500 mt-0.5">{rec.expected_type}</p>
+                </div>
+                <button onClick={() => { setSearchQuery(rec.query); setActiveSection('search'); }}
+                  className="px-2 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex-shrink-0">
+                  Search
+                </button>
+              </div>
+            ))}
+          </div>
+          <button onClick={() => setShowRecommendations(false)} className="text-xs text-blue-600 hover:underline mt-2">Dismiss</button>
+        </div>
+      )}
+
+      {/* Extracted Entities */}
+      {showEntities && entities && (
+        <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden bg-gradient-to-r from-emerald-50/50 to-green-50/50 px-4 py-3">
+          <p className="text-xs text-emerald-700 font-medium mb-2 flex items-center gap-1">
+            <Target className="w-3 h-3" /> Extracted Entities
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            {(entities.people as Array<{name: string; email: string; role: string; mention_count: number}>)?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-1">People</p>
+                {(entities.people as Array<{name: string; email: string; role: string; mention_count: number}>).slice(0, 8).map((p, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-xs p-1">
+                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[10px] font-bold">{p.name.charAt(0)}</span>
+                    <span className="font-medium">{p.name}</span>
+                    {p.role && <span className="text-gray-400">({p.role})</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {(entities.action_items as Array<{task: string; assignee: string; due: string; status: string}>)?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-1">Action Items</p>
+                {(entities.action_items as Array<{task: string; assignee: string; due: string; status: string}>).slice(0, 6).map((a, i) => (
+                  <div key={i} className="text-xs p-1 flex items-start gap-1">
+                    <ListChecks className="w-3 h-3 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>{a.task} {a.assignee !== 'unknown' && <span className="text-gray-400">&rarr; {a.assignee}</span>}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(entities.dates as Array<{date: string; description: string; type: string}>)?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-1">Key Dates</p>
+                {(entities.dates as Array<{date: string; description: string; type: string}>).slice(0, 5).map((d, i) => (
+                  <div key={i} className="text-xs p-1 flex items-start gap-1">
+                    <Clock className="w-3 h-3 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>{d.date}: {d.description}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(entities.amounts as Array<{value: string; currency: string; context: string}>)?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-1">Amounts</p>
+                {(entities.amounts as Array<{value: string; currency: string; context: string}>).slice(0, 5).map((a, i) => (
+                  <div key={i} className="text-xs p-1">💰 {a.value} {a.currency} — {a.context}</div>
+                ))}
+              </div>
+            )}
+          </div>
+          <button onClick={() => setShowEntities(false)} className="text-xs text-emerald-600 hover:underline mt-2">Dismiss</button>
+        </div>
+      )}
+
+      {/* Related Topics */}
+      {showRelatedTopics && relatedTopics.length > 0 && (
+        <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden bg-gradient-to-r from-orange-50/50 to-amber-50/50 px-4 py-3">
+          <p className="text-xs text-orange-700 font-medium mb-2 flex items-center gap-1">
+            <GitBranch className="w-3 h-3" /> Related Topics
+          </p>
+          <div className="space-y-1.5">
+            {relatedTopics.map((rt, i) => (
+              <Link key={i} href={`/topics/${rt.topic_id}`}
+                className="flex items-center gap-2 p-2 bg-white rounded-lg border border-orange-100 hover:border-orange-300 transition-colors">
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                  rt.relationship === 'parent' ? 'bg-blue-100 text-blue-700' :
+                  rt.relationship === 'child' ? 'bg-green-100 text-green-700' :
+                  rt.relationship === 'dependent' ? 'bg-amber-100 text-amber-700' :
+                  'bg-gray-100 text-gray-600'
+                }`}>{rt.relationship}</span>
+                <span className="text-sm font-medium text-gray-800 flex-1">{rt.title}</span>
+                <span className="text-xs text-orange-500">{Math.round(rt.confidence * 100)}%</span>
+              </Link>
+            ))}
+          </div>
+          <button onClick={() => setShowRelatedTopics(false)} className="text-xs text-orange-600 hover:underline mt-2">Dismiss</button>
+        </div>
+      )}
+
+      {/* Completeness Check */}
+      {showCompleteness && completenessScore && (
+        <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden bg-gradient-to-r from-rose-50/50 to-pink-50/50 px-4 py-3">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="relative w-14 h-14">
+              <svg className="w-14 h-14 transform -rotate-90">
+                <circle cx="28" cy="28" r="24" stroke="#e5e7eb" strokeWidth="4" fill="none" />
+                <circle cx="28" cy="28" r="24" stroke={(completenessScore.score as number) >= 80 ? '#22c55e' : (completenessScore.score as number) >= 50 ? '#f59e0b' : '#ef4444'} strokeWidth="4" fill="none"
+                  strokeDasharray={`${(completenessScore.score as number) * 1.508} 150.8`} strokeLinecap="round" />
+              </svg>
+              <span className="absolute inset-0 flex items-center justify-center text-sm font-bold">{completenessScore.score as number}%</span>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-800">Topic Completeness</p>
+              <p className="text-xs text-gray-500">{String((completenessScore.stats as Record<string, unknown>)?.item_count || 0)} items, {String((completenessScore.stats as Record<string, unknown>)?.source_count || 0)} sources</p>
+            </div>
+          </div>
+          {(completenessScore.suggestions as string[])?.length > 0 && (
+            <div className="mb-2">
+              <p className="text-xs font-medium text-rose-600 mb-1">Suggestions</p>
+              {(completenessScore.suggestions as string[]).map((s, i) => (
+                <p key={i} className="text-xs text-gray-600 flex items-start gap-1 mt-0.5"><ArrowRight className="w-3 h-3 text-rose-400 mt-0.5 flex-shrink-0" />{s}</p>
+              ))}
+            </div>
+          )}
+          {(completenessScore.strengths as string[])?.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-green-600 mb-1">Strengths</p>
+              {(completenessScore.strengths as string[]).map((s, i) => (
+                <p key={i} className="text-xs text-gray-600 flex items-start gap-1 mt-0.5"><span className="text-green-500">&#10003;</span> {s}</p>
+              ))}
+            </div>
+          )}
+          <button onClick={() => setShowCompleteness(false)} className="text-xs text-rose-600 hover:underline mt-2">Dismiss</button>
+        </div>
+      )}
 
       {/* Note Editor Dialog */}
       {(showNoteEditor || editingNote) && (
