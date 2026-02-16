@@ -2552,9 +2552,16 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
           </div>
           <div className="space-y-1.5">
             {extractedContacts.map((c, i) => {
-              const alreadyLinked = linkedContacts.some(lc =>
-                lc.contacts?.email && c.email && lc.contacts.email.toLowerCase() === c.email.toLowerCase()
-              );
+              const alreadyLinked = linkedContacts.some(lc => {
+                if (lc.contacts?.email && c.email) {
+                  return lc.contacts.email.toLowerCase() === c.email.toLowerCase();
+                }
+                // For contacts without email, match by name
+                if (!c.email && lc.contacts?.name) {
+                  return lc.contacts.name.toLowerCase() === c.name.toLowerCase();
+                }
+                return false;
+              });
               const isSaving = savingExtractedContacts.has(i);
               return (
                 <div key={i} className={`flex items-center gap-2 text-sm p-2.5 bg-white rounded-lg border ${alreadyLinked ? 'border-green-200 bg-green-50/30' : 'border-teal-100'} transition-all`}>
