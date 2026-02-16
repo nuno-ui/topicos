@@ -156,6 +156,13 @@
   animation: slideInFromLeft 0.25s ease-out;
 }
 
+/* ===== Desktop sidebar smooth width transition ===== */
+
+.sidebar-transition {
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: width;
+}
+
 /* ===== Glass morphism effect ===== */
 
 .glass {
@@ -219,6 +226,257 @@
   background: #d1d5db;
 }
 
+/* ===== Shimmer text effect ===== */
+
+@keyframes shimmerText {
+  0% { background-position: -100% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer-text {
+  background: linear-gradient(90deg, #1f2937, #3b82f6, #8b5cf6, #1f2937);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmerText 3s linear infinite;
+}
+
+/* ===== Glow effect ===== */
+
+.glow-blue {
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.15), 0 0 30px rgba(59, 130, 246, 0.05);
+}
+
+.glow-purple {
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.15), 0 0 30px rgba(139, 92, 246, 0.05);
+}
+
+/* ===== Subtle grain texture overlay ===== */
+
+.grain-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  pointer-events: none;
+}
+
+/* ===== Hover lift ===== */
+
+.hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+}
+
+/* ===== Tab active indicator ===== */
+
+.tab-active {
+  position: relative;
+}
+.tab-active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+  border-radius: 2px 2px 0 0;
+}
+
+/* ===== Dot pattern background ===== */
+
+.dot-pattern {
+  background-image: radial-gradient(circle, #e5e7eb 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* ===== Animated border ===== */
+
+@keyframes borderRotate {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.animated-border {
+  position: relative;
+  overflow: hidden;
+}
+.animated-border::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 1.5px;
+  border-radius: inherit;
+  background: linear-gradient(270deg, #3b82f6, #8b5cf6, #ec4899, #3b82f6);
+  background-size: 300% 300%;
+  animation: borderRotate 4s ease infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+/* ===== Toast animations ===== */
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.toast-enter {
+  animation: toastIn 0.3s ease-out;
+}
+
+/* ===== Floating label effect ===== */
+
+.floating-label {
+  position: relative;
+}
+.floating-label input:not(:placeholder-shown) + label,
+.floating-label input:focus + label {
+  transform: translateY(-1.5em) scale(0.85);
+  color: #3b82f6;
+}
+.floating-label label {
+  position: absolute;
+  left: 0.75rem;
+  top: 0.75rem;
+  transition: transform 0.2s, color 0.2s;
+  transform-origin: left;
+  pointer-events: none;
+  color: #9ca3af;
+}
+
+/* ===== Better transitions ===== */
+
+.transition-smooth {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ===== Page transition ===== */
+
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(4px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-page-enter {
+  animation: pageEnter 0.35s ease-out;
+}
+
+/* ===== Login page floating particles ===== */
+
+@keyframes floatParticle1 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(30px, -40px) rotate(90deg); }
+  50% { transform: translate(-20px, -80px) rotate(180deg); }
+  75% { transform: translate(40px, -40px) rotate(270deg); }
+}
+
+@keyframes floatParticle2 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(-40px, -30px) rotate(-90deg); }
+  50% { transform: translate(30px, -60px) rotate(-180deg); }
+  75% { transform: translate(-20px, -30px) rotate(-270deg); }
+}
+
+@keyframes floatParticle3 {
+  0%, 100% { transform: translate(0, 0); opacity: 0.15; }
+  50% { transform: translate(20px, -50px); opacity: 0.3; }
+}
+
+.login-particle {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+}
+
+.login-particle-1 {
+  width: 80px;
+  height: 80px;
+  top: 15%;
+  left: 10%;
+  animation: floatParticle1 12s ease-in-out infinite;
+}
+
+.login-particle-2 {
+  width: 60px;
+  height: 60px;
+  top: 60%;
+  right: 15%;
+  animation: floatParticle2 10s ease-in-out infinite;
+  animation-delay: -3s;
+}
+
+.login-particle-3 {
+  width: 40px;
+  height: 40px;
+  top: 35%;
+  right: 30%;
+  animation: floatParticle3 8s ease-in-out infinite;
+  animation-delay: -5s;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.login-particle-4 {
+  width: 100px;
+  height: 100px;
+  bottom: 20%;
+  left: 20%;
+  animation: floatParticle2 14s ease-in-out infinite;
+  animation-delay: -2s;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.login-particle-5 {
+  width: 50px;
+  height: 50px;
+  top: 75%;
+  left: 55%;
+  animation: floatParticle1 9s ease-in-out infinite;
+  animation-delay: -4s;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.login-particle-6 {
+  width: 30px;
+  height: 30px;
+  top: 10%;
+  right: 20%;
+  animation: floatParticle3 11s ease-in-out infinite;
+  animation-delay: -1s;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  transform: rotate(45deg);
+}
+
+.login-particle-7 {
+  width: 70px;
+  height: 70px;
+  bottom: 35%;
+  right: 10%;
+  animation: floatParticle1 13s ease-in-out infinite;
+  animation-delay: -6s;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+}
+
+.login-particle-8 {
+  width: 20px;
+  height: 20px;
+  top: 50%;
+  left: 40%;
+  animation: floatParticle2 7s ease-in-out infinite;
+  animation-delay: -3s;
+  background: rgba(255, 255, 255, 0.15);
+}
+
 /* ===== Print styles ===== */
 
 @media print {
@@ -234,15 +492,31 @@
   .animate-slide-up,
   .animate-scale-in,
   .animate-float-up,
-  .sidebar-slide-in {
+  .sidebar-slide-in,
+  .shimmer-text,
+  .animate-count-up,
+  .toast-enter,
+  .animate-page-enter,
+  .login-particle {
     animation: none !important;
   }
-  .card-hover:hover {
+  .card-hover:hover,
+  .hover-lift:hover {
     transform: none;
   }
-  .skeleton {
+  .skeleton,
+  .animated-border::before {
     animation: none;
     background: #f3f4f6;
+  }
+  .floating-label label {
+    transition: none;
+  }
+  .transition-smooth {
+    transition: none;
+  }
+  .sidebar-transition {
+    transition: none;
   }
 }
 
@@ -261,6 +535,17 @@
 .animate-stagger > *:nth-child(8) { animation-delay: 350ms; }
 .animate-stagger > *:nth-child(9) { animation-delay: 400ms; }
 .animate-stagger > *:nth-child(10) { animation-delay: 450ms; }
+
+/* ===== Count-up animation for stat cards ===== */
+
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(10px) scale(0.8); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-count-up {
+  animation: countUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
 
 /* ===== Health/status dots ===== */
 

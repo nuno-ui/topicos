@@ -1,11 +1,64 @@
 'use client';
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { formatRelativeDate } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash } from 'lucide-react';
 import Link from 'next/link';
+
+// --- Area border color map for topic cards ---
+const areaBorderColors: Record<string, string> = {
+  work: 'border-l-blue-500',
+  personal: 'border-l-green-500',
+  career: 'border-l-purple-500',
+};
+
+// --- Tag color palette for pills ---
+const tagPillColors = [
+  'bg-sky-100 text-sky-700',
+  'bg-pink-100 text-pink-700',
+  'bg-teal-100 text-teal-700',
+  'bg-orange-100 text-orange-700',
+  'bg-violet-100 text-violet-700',
+  'bg-lime-100 text-lime-700',
+];
+
+const priorityMeta: Record<number, { label: string; color: string; flame: boolean }> = {
+  1: { label: 'Low', color: 'text-gray-400', flame: false },
+  2: { label: 'Medium', color: 'text-blue-400', flame: false },
+  3: { label: 'Medium-High', color: 'text-amber-500', flame: false },
+  4: { label: 'High', color: 'text-orange-500', flame: true },
+  5: { label: 'Critical', color: 'text-red-600', flame: true },
+};
+
+const areaColors: Record<string, string> = {
+  work: 'bg-blue-100 text-blue-700',
+  personal: 'bg-green-100 text-green-700',
+  career: 'bg-purple-100 text-purple-700',
+};
+
+const statusColors: Record<string, string> = {
+  active: 'bg-emerald-100 text-emerald-700',
+  completed: 'bg-gray-100 text-gray-600',
+  archived: 'bg-amber-100 text-amber-700',
+};
+
+// --- Helper: highlight matching text in search results ---
+function HighlightText({ text, query }: { text: string; query: string }) {
+  if (!query.trim()) return <>{text}</>;
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = text.split(regex);
+  return (
+    <>
+      {parts.map((part, i) =>
+        regex.test(part)
+          ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded px-0.5">{part}</mark>
+          : <span key={i}>{part}</span>
+      )}
+    </>
+  );
+}
 
 interface Topic {
   id: string;
@@ -48,6 +101,17 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   const [area, setArea] = useState('work');
   const [dueDate, setDueDate] = useState('');
   const [createFolderId, setCreateFolderId] = useState<string | null>(null);
+  const [createPriority, setCreatePriority] = useState(2);
+  const [createTags, setCreateTags] = useState('');
+  const [createStartDate, setCreateStartDate] = useState('');
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+
+  // Bulk area change state
+  const [showBulkAreaPicker, setShowBulkAreaPicker] = useState(false);
+
+  // AI analyze all state
+  const [aiAnalyzeAllLoading, setAiAnalyzeAllLoading] = useState(false);
 
   // Folder state
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(folders.map(f => f.id)));
@@ -88,22 +152,50 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
   const supabase = createClient();
 
+  const validateCreateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    if (title.trim().length < 2) errors.title = 'Title must be at least 2 characters';
+    if (dueDate) {
+      const due = new Date(dueDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (due < today) errors.dueDate = 'Due date cannot be in the past';
+    }
+    if (createStartDate && dueDate && new Date(createStartDate) > new Date(dueDate)) {
+      errors.startDate = 'Start date must be before due date';
+    }
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleCreate = async () => {
-    if (!title.trim()) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    const { data, error } = await supabase.from('topics').insert({
-      title: title.trim(),
-      description: description.trim() || null,
-      area,
-      due_date: dueDate || null,
-      folder_id: createFolderId || null,
-      user_id: user!.id,
-      status: 'active',
-    }).select('*, topic_items(count)').single();
-    if (error) { toast.error(error.message); return; }
-    setTopics([data, ...topics]);
-    setTitle(''); setDescription(''); setDueDate(''); setCreateFolderId(null); setShowCreate(false);
-    toast.success('Topic created');
+    if (!validateCreateForm()) return;
+    setCreateSubmitting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const parsedTags = createTags.split(',').map(t => t.trim()).filter(Boolean);
+      const { data, error } = await supabase.from('topics').insert({
+        title: title.trim(),
+        description: description.trim() || null,
+        area,
+        due_date: dueDate || null,
+        start_date: createStartDate || null,
+        priority: createPriority,
+        tags: parsedTags.length > 0 ? parsedTags : [],
+        folder_id: createFolderId || null,
+        user_id: user!.id,
+        status: 'active',
+      }).select('*, topic_items(count)').single();
+      if (error) { toast.error(error.message); return; }
+      setTopics([data, ...topics]);
+      setTitle(''); setDescription(''); setDueDate(''); setCreateFolderId(null);
+      setCreatePriority(2); setCreateTags(''); setCreateStartDate('');
+      setFormErrors({});
+      setShowCreate(false);
+      toast.success('Topic created successfully!');
+    } finally {
+      setCreateSubmitting(false);
+    }
   };
 
   // Folder CRUD
@@ -197,6 +289,47 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     toast.success(`Updated ${success} topic${success !== 1 ? 's' : ''} to ${newStatus}`);
   };
 
+  const bulkChangeArea = async (newArea: string) => {
+    if (selectedTopics.size === 0) return;
+    setBulkActionLoading(true);
+    let success = 0;
+    for (const topicId of selectedTopics) {
+      try {
+        const res = await fetch(`/api/topics/${topicId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ area: newArea }),
+        });
+        if (res.ok) {
+          setTopics(prev => prev.map(t => t.id === topicId ? { ...t, area: newArea } : t));
+          success++;
+        }
+      } catch {}
+    }
+    setSelectedTopics(new Set());
+    setBulkActionLoading(false);
+    setShowBulkAreaPicker(false);
+    toast.success(`Moved ${success} topic${success !== 1 ? 's' : ''} to ${newArea}`);
+  };
+
+  const handleAiAnalyzeAll = async () => {
+    if (selectedTopics.size === 0) { toast.error('Select topics first'); return; }
+    setAiAnalyzeAllLoading(true);
+    let success = 0;
+    for (const topicId of selectedTopics) {
+      try {
+        const res = await fetch('/api/ai/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topicId }),
+        });
+        if (res.ok) success++;
+      } catch {}
+    }
+    setAiAnalyzeAllLoading(false);
+    toast.success(`AI analyzed ${success} topic${success !== 1 ? 's' : ''}`);
+  };
+
   // AI Agents
   const runAgent = useCallback(async (agent: string, context: Record<string, unknown> = {}) => {
     setAiLoading(agent);
@@ -287,7 +420,30 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     return path;
   }, [folders]);
 
-  // Filtered and sorted topics
+  // Topic health score calculation (must be before filteredTopics)
+  const getTopicHealth = useCallback((t: Topic) => {
+    let score = 100;
+    const issues: string[] = [];
+    const daysSinceUpdate = Math.floor((Date.now() - new Date(t.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+    const itemCount = t.topic_items?.[0]?.count || 0;
+
+    if (daysSinceUpdate > 14) { score -= 30; issues.push('Stale (14+ days)'); }
+    else if (daysSinceUpdate > 7) { score -= 15; issues.push('Getting stale'); }
+    if (!t.description) { score -= 10; issues.push('No description'); }
+    if (itemCount === 0) { score -= 20; issues.push('No linked items'); }
+    if (t.due_date && new Date(t.due_date) < new Date()) { score -= 25; issues.push('Overdue'); }
+    if (!t.tags || t.tags.length === 0) { score -= 5; issues.push('No tags'); }
+    if (t.progress_percent === null || t.progress_percent === undefined) { score -= 5; }
+
+    score = Math.max(0, Math.min(100, score));
+    const color = score >= 80 ? 'text-green-500' : score >= 50 ? 'text-amber-500' : 'text-red-500';
+    const bgColor = score >= 80 ? 'bg-green-50' : score >= 50 ? 'bg-amber-50' : 'bg-red-50';
+    const label = score >= 80 ? 'Healthy' : score >= 50 ? 'Needs Attention' : 'Critical';
+
+    return { score, issues, color, bgColor, label };
+  }, []);
+
+  // Filtered and sorted topics (memoized)
   const filteredTopics = useMemo(() => {
     let result = [...topics];
     if (searchQuery.trim()) {
@@ -306,6 +462,11 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     } else if (statsFilter === 'recent') {
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
       result = result.filter(t => new Date(t.updated_at).getTime() >= sevenDaysAgo);
+    } else if (statsFilter === 'needsAttention') {
+      result = result.filter(t => {
+        const health = getTopicHealth(t);
+        return health.score < 50 && t.status === 'active';
+      });
     }
     result.sort((a, b) => {
       switch (sortBy) {
@@ -322,19 +483,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
       }
     });
     return result;
-  }, [topics, searchQuery, filterArea, filterStatus, sortBy, statsFilter]);
-
-  const areaColors: Record<string, string> = {
-    work: 'bg-blue-100 text-blue-700',
-    personal: 'bg-green-100 text-green-700',
-    career: 'bg-purple-100 text-purple-700',
-  };
-
-  const statusColors: Record<string, string> = {
-    active: 'bg-emerald-100 text-emerald-700',
-    completed: 'bg-gray-100 text-gray-600',
-    archived: 'bg-amber-100 text-amber-700',
-  };
+  }, [topics, searchQuery, filterArea, filterStatus, sortBy, statsFilter, getTopicHealth]);
 
   const areaCounts = useMemo(() => topics.reduce((acc, t) => { acc[t.area] = (acc[t.area] || 0) + 1; return acc; }, {} as Record<string, number>), [topics]);
 
@@ -348,13 +497,19 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     const totalItems = topics.reduce((sum, t) => sum + (t.topic_items?.[0]?.count || 0), 0);
     const avgItems = topics.length > 0 ? Math.round((totalItems / topics.length) * 10) / 10 : 0;
 
+    const needsAttention = topics.filter(t => {
+      const health = getTopicHealth(t);
+      return health.score < 50 && t.status === 'active';
+    }).length;
+
     return {
       active: activeTopics.length,
       overdue: overdueTopics.length,
       updatedThisWeek: updatedThisWeek.length,
       avgItems,
+      needsAttention,
     };
-  }, [topics]);
+  }, [topics, getTopicHealth]);
 
   // Helper: check if any filter is active
   const hasActiveFilters = searchQuery.trim() !== '' || filterArea !== 'all' || filterStatus !== 'active' || statsFilter !== null;
@@ -397,41 +552,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     return () => window.removeEventListener('keydown', handler);
   }, [hasActiveFilters]);
 
-  // Topic health score calculation
-  const getTopicHealth = useCallback((t: Topic) => {
-    let score = 100;
-    let issues: string[] = [];
-    const daysSinceUpdate = Math.floor((Date.now() - new Date(t.updated_at).getTime()) / (1000 * 60 * 60 * 24));
-    const itemCount = t.topic_items?.[0]?.count || 0;
-
-    // Stale check
-    if (daysSinceUpdate > 14) { score -= 30; issues.push('Stale (14+ days)'); }
-    else if (daysSinceUpdate > 7) { score -= 15; issues.push('Getting stale'); }
-
-    // Missing description
-    if (!t.description) { score -= 10; issues.push('No description'); }
-
-    // No items linked
-    if (itemCount === 0) { score -= 20; issues.push('No linked items'); }
-
-    // Overdue
-    if (t.due_date && new Date(t.due_date) < new Date()) { score -= 25; issues.push('Overdue'); }
-
-    // No tags
-    if (!t.tags || t.tags.length === 0) { score -= 5; issues.push('No tags'); }
-
-    // No progress tracking
-    if (t.progress_percent === null || t.progress_percent === undefined) { score -= 5; }
-
-    score = Math.max(0, Math.min(100, score));
-    const color = score >= 80 ? 'text-green-500' : score >= 50 ? 'text-amber-500' : 'text-red-500';
-    const bgColor = score >= 80 ? 'bg-green-50' : score >= 50 ? 'bg-amber-50' : 'bg-red-50';
-    const label = score >= 80 ? 'Healthy' : score >= 50 ? 'Needs Attention' : 'Critical';
-
-    return { score, issues, color, bgColor, label };
-  }, []);
-
-  // Freshness health dot helper
+  // Freshness health dot helper (kept for reference, no longer used in cards)
   const getFreshnessDot = (updatedAt: string) => {
     const daysSince = Math.floor((Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24));
     if (daysSince < 7) return { color: 'bg-green-500', ring: 'ring-green-500/20', label: 'Fresh' };
@@ -439,26 +560,41 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     return { color: 'bg-red-500', ring: 'ring-red-500/20', label: 'Very stale' };
   };
 
-  // Priority stars helper
-  const renderPriorityStars = (priority: number) => {
+  // Priority indicator helper -- flames for high/critical, stars for lower
+  const renderPriorityIndicator = (priority: number) => {
     if (priority <= 0) return null;
+    const meta = priorityMeta[Math.min(priority, 5)] || priorityMeta[2];
+    if (meta.flame) {
+      return (
+        <span className={`inline-flex items-center gap-0.5 ${meta.color}`} title={`Priority: ${meta.label}`}>
+          <Flame className="w-3.5 h-3.5 fill-current" />
+          <span className="text-[10px] font-semibold">{meta.label}</span>
+        </span>
+      );
+    }
     const stars = Math.min(priority, 5);
     return (
-      <span className="inline-flex items-center gap-0.5" title={`Priority ${priority}`}>
+      <span className="inline-flex items-center gap-0.5" title={`Priority: ${meta.label}`}>
         {Array.from({ length: stars }).map((_, i) => (
-          <Star key={i} className={`w-3 h-3 ${i < 3 ? 'fill-amber-400 text-amber-400' : i < 4 ? 'fill-amber-300 text-amber-300' : 'fill-amber-200 text-amber-200'}`} />
+          <Star key={i} className={`w-3 h-3 ${meta.color} fill-current`} />
         ))}
       </span>
     );
   };
 
-  // Render a topic card (enhanced - compact design)
+  // Render a topic card (enhanced - visual improvements)
   const renderTopicCard = (t: Topic) => {
     const itemCount = t.topic_items?.[0]?.count || 0;
-    const overdue = t.due_date && new Date(t.due_date) < new Date();
+    const overdue = !!(t.due_date && new Date(t.due_date) < new Date());
     const daysUntilDue = t.due_date ? Math.ceil((new Date(t.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
-    const freshness = getFreshnessDot(t.updated_at);
+    const health = getTopicHealth(t);
     const contactCount = (t.stakeholders || []).length;
+    const isUrgent = overdue || (t.priority >= 4);
+    const healthDotColor = health.score >= 80 ? 'bg-green-500' : health.score >= 50 ? 'bg-amber-500' : 'bg-red-500';
+    const healthDotRing = health.score >= 80 ? 'ring-green-500/20' : health.score >= 50 ? 'ring-amber-500/20' : 'ring-red-500/20';
+    const borderColor = areaBorderColors[t.area] || 'border-l-gray-300';
+    const progressNearComplete = t.progress_percent != null && t.progress_percent >= 80;
+    const tags = t.tags || [];
 
     return (
       <div key={t.id} className="group relative">
@@ -470,35 +606,54 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 opacity-0 group-hover:opacity-100 checked:opacity-100 transition-opacity cursor-pointer" />
         </div>
         <Link href={`/topics/${t.id}`}
-          className="block px-4 py-3 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-lg transition-all shadow-sm group-hover:bg-gray-50/30">
+          className={`block pl-4 pr-4 py-3 bg-white rounded-xl border border-gray-100 border-l-[3px] ${borderColor} hover:border-blue-200 hover:shadow-lg transition-all shadow-sm group-hover:bg-gray-50/30 ${isUrgent ? 'hover:shadow-red-100/50 hover:ring-1 hover:ring-red-200/50' : ''}`}>
           {/* Row 1: Health dot + Title + Status + Area + Priority */}
           <div className="flex items-center gap-2 min-w-0">
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ring-2 ${freshness.color} ${freshness.ring}`} title={freshness.label} />
-            <h3 className="font-semibold text-gray-900 truncate text-sm">{t.title}</h3>
+            <span className="relative group/health flex-shrink-0">
+              <span className={`block w-2.5 h-2.5 rounded-full ring-2 ${healthDotColor} ${healthDotRing}`} />
+              {/* Health tooltip */}
+              <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-gray-900 text-white text-[10px] rounded whitespace-nowrap opacity-0 group-hover/health:opacity-100 pointer-events-none transition-opacity z-20">
+                Health: {health.score}% - {health.label}
+                {health.issues.length > 0 && <><br />{health.issues.join(', ')}</>}
+              </span>
+            </span>
+            <h3 className="font-semibold text-gray-900 truncate text-sm">
+              {searchQuery.trim()
+                ? <HighlightText text={t.title} query={searchQuery} />
+                : t.title}
+            </h3>
             <span className={`text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 font-medium ${statusColors[t.status] || 'bg-gray-100 text-gray-600'}`}>
               {t.status}
             </span>
             <span className={`text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 font-medium ${areaColors[t.area] || 'bg-gray-100 text-gray-600'}`}>
               {t.area}
             </span>
-            {renderPriorityStars(t.priority)}
+            {renderPriorityIndicator(t.priority)}
             {overdue && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium flex-shrink-0 flex items-center gap-0.5">
+              <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium flex-shrink-0 flex items-center gap-0.5 animate-pulse">
                 <AlertTriangle className="w-3 h-3" /> Overdue
               </span>
             )}
-            {/* Tags inline */}
-            {(t.tags || []).slice(0, 2).map(tag => (
-              <span key={tag} className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0 hidden lg:inline-block">
+            {/* Tags as colored pills (max 3, then +N more) */}
+            {tags.slice(0, 3).map((tag, idx) => (
+              <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 font-medium hidden lg:inline-block ${tagPillColors[idx % tagPillColors.length]}`}>
                 {tag}
               </span>
             ))}
-            {(t.tags || []).length > 2 && (
-              <span className="text-[11px] text-gray-400 flex-shrink-0 hidden lg:inline-block">+{t.tags.length - 2}</span>
+            {tags.length > 3 && (
+              <span className="text-[10px] text-gray-400 flex-shrink-0 hidden lg:inline-block font-medium">+{tags.length - 3} more</span>
             )}
           </div>
+          {/* Row 1.5: Description truncated to 2 lines */}
+          {t.description && (
+            <p className="text-xs text-gray-500 mt-1 pl-5 line-clamp-2">
+              {searchQuery.trim()
+                ? <HighlightText text={t.description} query={searchQuery} />
+                : t.description}
+            </p>
+          )}
           {/* Row 2: Meta stats */}
-          <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 pl-4">
+          <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 pl-5">
             {itemCount > 0 && (
               <span className="flex items-center gap-1">
                 <Paperclip className="w-3 h-3" /> {itemCount} item{itemCount !== 1 ? 's' : ''}
@@ -510,17 +665,18 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               </span>
             )}
             {t.due_date && !overdue && (
-              <span className={`flex items-center gap-1 ${daysUntilDue !== null && daysUntilDue <= 3 ? 'text-amber-500' : ''}`}>
+              <span className={`flex items-center gap-1 ${daysUntilDue !== null && daysUntilDue <= 3 ? 'text-amber-500 font-medium' : ''}`}>
                 <Clock className="w-3 h-3" />
                 {daysUntilDue === 0 ? 'Due today' : `${daysUntilDue}d left`}
               </span>
             )}
             {t.progress_percent != null && (
-              <span className="flex items-center gap-1">
-                <div className="w-10 h-1 bg-gray-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${t.progress_percent}%` }} />
+              <span className="flex items-center gap-1.5">
+                <div className={`w-14 h-1.5 rounded-full overflow-hidden ${progressNearComplete ? 'bg-green-100' : 'bg-gray-200'}`}>
+                  <div className={`h-full rounded-full transition-all ${progressNearComplete ? 'bg-green-500' : 'bg-blue-500'} ${t.progress_percent === 100 ? 'animate-pulse' : ''}`}
+                    style={{ width: `${t.progress_percent}%` }} />
                 </div>
-                {t.progress_percent}%
+                <span className={progressNearComplete ? 'text-green-600 font-semibold' : ''}>{t.progress_percent}%</span>
               </span>
             )}
             {t.summary && (
@@ -614,11 +770,13 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               <ChevronDown className="w-4 h-4" />
             </span>
           </button>
-          {isExpanded ? (
-            <FolderOpen className="w-4 h-4 text-amber-500 flex-shrink-0" />
-          ) : (
-            <Folder className="w-4 h-4 text-amber-500 flex-shrink-0" />
-          )}
+          {(() => {
+            const folderColorMap: Record<string, string> = { work: 'text-blue-500', personal: 'text-green-500', career: 'text-purple-500' };
+            const fColor = node.folder.area ? folderColorMap[node.folder.area] || 'text-amber-500' : 'text-amber-500';
+            return isExpanded
+              ? <FolderOpen className={`w-4 h-4 ${fColor} flex-shrink-0`} />
+              : <Folder className={`w-4 h-4 ${fColor} flex-shrink-0`} />;
+          })()}
           {editingFolder === node.folder.id ? (
             <div className="flex items-center gap-1 flex-1">
               <input value={editFolderName} onChange={e => setEditFolderName(e.target.value)}
@@ -634,22 +792,22 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                   {node.folder.area}
                 </span>
               )}
-              <span className={`text-[11px] font-normal px-1.5 py-0.5 rounded-full flex-shrink-0 ${totalCount > 0 ? 'bg-gray-100 text-gray-600' : 'text-gray-300'}`}>
+              <span className={`text-[10px] font-semibold min-w-[20px] text-center px-1.5 py-0.5 rounded-full flex-shrink-0 ${totalCount > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-50 text-gray-300'}`}>
                 {totalCount}
               </span>
             </span>
           )}
-          <div className="flex gap-0.5 opacity-0 group-hover/folder:opacity-100 transition-opacity">
+          <div className="flex gap-0.5 opacity-0 group-hover/folder:opacity-100 transition-opacity bg-white/80 backdrop-blur-sm rounded-lg border border-gray-100 shadow-sm p-0.5">
             <button onClick={() => { setNewFolderParent(node.folder.id); setShowCreateFolder(true); }}
-              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Add subfolder">
+              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Add subfolder">
               <FolderPlus className="w-3.5 h-3.5" />
             </button>
             <button onClick={() => { setEditingFolder(node.folder.id); setEditFolderName(node.folder.name); }}
-              className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded" title="Rename">
+              className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors" title="Rename">
               <Edit3 className="w-3.5 h-3.5" />
             </button>
             <button onClick={() => deleteFolder(node.folder.id)}
-              className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete">
+              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete folder">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -676,12 +834,14 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   return (
     <div>
       {/* Dashboard Stats Cards */}
-      <div className="grid grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-5 gap-3 mb-4">
         <button onClick={() => { setStatsFilter(statsFilter === 'active' ? null : 'active'); setFilterStatus('active'); setFilterArea('all'); }}
-          className={`p-3 rounded-xl border text-left transition-all ${statsFilter === 'active' ? 'border-blue-300 bg-blue-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'active' ? 'border-blue-300 bg-blue-50 shadow-sm ring-1 ring-blue-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-500 font-medium">Active Topics</span>
-            <CircleDot className="w-3.5 h-3.5 text-blue-500" />
+            <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
+              <CircleDot className="w-3.5 h-3.5 text-blue-500" />
+            </div>
           </div>
           <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.active}</p>
         </button>
@@ -691,25 +851,46 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               setFilterStatus('active');
             }
           }}
-          className={`p-3 rounded-xl border text-left transition-all ${statsFilter === 'overdue' ? 'border-red-300 bg-red-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'overdue' ? 'border-red-300 bg-red-50 shadow-sm ring-1 ring-red-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-500 font-medium">Overdue</span>
-            <AlertTriangle className={`w-3.5 h-3.5 ${dashboardStats.overdue > 0 ? 'text-red-500' : 'text-gray-300'}`} />
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${dashboardStats.overdue > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+              <AlertTriangle className={`w-3.5 h-3.5 ${dashboardStats.overdue > 0 ? 'text-red-500' : 'text-gray-300'}`} />
+            </div>
           </div>
           <p className={`text-2xl font-bold mt-1 ${dashboardStats.overdue > 0 ? 'text-red-600' : 'text-gray-900'}`}>{dashboardStats.overdue}</p>
         </button>
+        <button onClick={() => {
+            if (dashboardStats.needsAttention > 0) {
+              setStatsFilter(statsFilter === 'needsAttention' ? null : 'needsAttention');
+              setFilterStatus('active');
+            }
+          }}
+          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'needsAttention' ? 'border-amber-300 bg-amber-50 shadow-sm ring-1 ring-amber-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500 font-medium">Needs Attention</span>
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${dashboardStats.needsAttention > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
+              <ShieldAlert className={`w-3.5 h-3.5 ${dashboardStats.needsAttention > 0 ? 'text-amber-500' : 'text-gray-300'}`} />
+            </div>
+          </div>
+          <p className={`text-2xl font-bold mt-1 ${dashboardStats.needsAttention > 0 ? 'text-amber-600' : 'text-gray-900'}`}>{dashboardStats.needsAttention}</p>
+        </button>
         <button onClick={() => { setStatsFilter(statsFilter === 'recent' ? null : 'recent'); }}
-          className={`p-3 rounded-xl border text-left transition-all ${statsFilter === 'recent' ? 'border-green-300 bg-green-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'recent' ? 'border-green-300 bg-green-50 shadow-sm ring-1 ring-green-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-500 font-medium">Updated This Week</span>
-            <TrendingUp className="w-3.5 h-3.5 text-green-500" />
+            <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
+              <TrendingUp className="w-3.5 h-3.5 text-green-500" />
+            </div>
           </div>
           <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.updatedThisWeek}</p>
         </button>
         <div className="p-3 rounded-xl border border-gray-100 bg-white text-left">
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-500 font-medium">Avg Items/Topic</span>
-            <BarChart3 className="w-3.5 h-3.5 text-purple-500" />
+            <div className="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center">
+              <BarChart3 className="w-3.5 h-3.5 text-purple-500" />
+            </div>
           </div>
           <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.avgItems}</p>
         </div>
@@ -720,11 +901,16 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
         <div className="flex-1 relative">
           <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input ref={searchInputRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search topics... (press / to focus)" className="w-full pl-10 pr-8 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            placeholder="Search titles, descriptions, tags... (press / to focus)" className="w-full pl-10 pr-20 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <X className="w-4 h-4" />
-            </button>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+              <span className="text-[11px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded font-medium">
+                {filteredTopics.length} result{filteredTopics.length !== 1 ? 's' : ''}
+              </span>
+              <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           )}
         </div>
         <button onClick={() => setShowCreate(!showCreate)}
@@ -766,12 +952,18 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
           return null;
         })()}
         <button onClick={runReorganize} disabled={reorgLoading || !!aiLoading}
-          className="px-3 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-medium hover:bg-indigo-100 flex items-center gap-1.5 disabled:opacity-50">
+          className="px-3 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-medium hover:bg-indigo-100 flex items-center gap-1.5 disabled:opacity-50 transition-colors">
           {reorgLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
-          AI Reorganize
+          {reorgLoading ? 'Analyzing...' : 'AI Reorganize'}
+        </button>
+        <button onClick={handleAiAnalyzeAll} disabled={aiAnalyzeAllLoading || selectedTopics.size === 0}
+          className="px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:bg-emerald-100 flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+          title={selectedTopics.size === 0 ? 'Select topics first' : `Analyze ${selectedTopics.size} selected topics`}>
+          {aiAnalyzeAllLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+          {aiAnalyzeAllLoading ? 'Analyzing...' : `AI Analyze${selectedTopics.size > 0 ? ` (${selectedTopics.size})` : ''}`}
         </button>
         <button onClick={() => setViewMode(viewMode === 'folders' ? 'flat' : 'folders')}
-          className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 border ${
+          className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 border transition-colors ${
             viewMode === 'folders' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-gray-600 border-gray-200'
           }`}>
           <Folder className="w-3.5 h-3.5" /> {viewMode === 'folders' ? 'Folder View' : 'Flat View'}
@@ -803,27 +995,54 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
         </div>
       )}
 
-      {/* AI Reorganization Suggestions */}
+      {/* AI Reorganization Suggestions - Modal-style Panel */}
       {showReorg && reorgSuggestions && (
-        <div className="mb-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-indigo-800 flex items-center gap-2">
-              <Wand2 className="w-4 h-4" /> Folder Reorganization Suggestions
-            </h3>
-            <button onClick={() => setShowReorg(false)} className="p-1 text-indigo-400 hover:text-indigo-600">
-              <X className="w-4 h-4" />
-            </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setShowReorg(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl border border-indigo-200 w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-indigo-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
+                  <Wand2 className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900">AI Reorganization Suggestions</h3>
+                  <p className="text-xs text-gray-500">Review and apply these suggestions to improve your folder structure</p>
+                </div>
+              </div>
+              <button onClick={() => setShowReorg(false)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="prose prose-sm max-w-none text-sm text-gray-700 space-y-1">
+                {reorgSuggestions.split('\n').map((line, i) => {
+                  if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-indigo-900 mt-4 mb-1 text-base border-b border-indigo-100 pb-1">{line.replace('## ', '')}</h3>;
+                  if (line.startsWith('### ')) return <h4 key={i} className="font-semibold text-indigo-800 mt-3 mb-1 text-sm">{line.replace('### ', '')}</h4>;
+                  if (line.startsWith('- ') || line.startsWith('* ')) {
+                    const text = line.slice(2);
+                    const isAction = text.toLowerCase().includes('move') || text.toLowerCase().includes('create') || text.toLowerCase().includes('merge') || text.toLowerCase().includes('rename');
+                    return (
+                      <div key={i} className={`flex items-start gap-2 ml-2 mt-1 p-2 rounded-lg ${isAction ? 'bg-indigo-50 border border-indigo-100' : ''}`}>
+                        <span className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${isAction ? 'bg-indigo-500' : 'bg-gray-400'}`} />
+                        <span className="text-sm text-gray-700">{text}</span>
+                      </div>
+                    );
+                  }
+                  if (line.trim() === '') return <div key={i} className="h-2" />;
+                  return <p key={i} className="text-sm text-gray-700 mt-1">{line}</p>;
+                })}
+              </div>
+            </div>
+            {/* Footer */}
+            <div className="flex items-center justify-between p-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl">
+              <p className="text-xs text-gray-400">These are AI suggestions. Review and apply them manually.</p>
+              <button onClick={() => setShowReorg(false)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
+                Done
+              </button>
+            </div>
           </div>
-          <div className="prose prose-sm max-w-none text-sm text-gray-700 bg-white rounded-lg p-4 border border-indigo-100 max-h-[500px] overflow-y-auto">
-            {reorgSuggestions.split('\n').map((line, i) => {
-              if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-indigo-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
-              if (line.startsWith('### ')) return <h4 key={i} className="font-semibold text-indigo-800 mt-2 mb-1 text-sm">{line.replace('### ', '')}</h4>;
-              if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-sm text-gray-700 mt-0.5">{line.slice(2)}</li>;
-              if (line.trim() === '') return <br key={i} />;
-              return <p key={i} className="text-sm text-gray-700 mt-1">{line}</p>;
-            })}
-          </div>
-          <p className="text-xs text-indigo-500 mt-2">These are AI suggestions. Review and apply them manually as needed.</p>
         </div>
       )}
 
@@ -929,55 +1148,182 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
         </div>
       )}
 
-      {/* Create topic form */}
+      {/* Create topic form - enhanced with priority, tags, start date, validation */}
       {showCreate && (
-        <div className="mb-4 p-4 bg-white rounded-xl border border-blue-200 shadow-sm space-y-3">
-          <h3 className="text-sm font-semibold text-gray-700">Create New Topic</h3>
-          <input value={title} onChange={e => setTitle(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleCreate()}
-            placeholder="Topic title" className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" autoFocus />
-          <textarea value={description} onChange={e => setDescription(e.target.value)}
-            placeholder="Description (optional)" className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} />
-          <div className="flex gap-3 items-center flex-wrap">
-            <select value={area} onChange={e => setArea(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
-              <option value="work">Work</option>
-              <option value="personal">Personal</option>
-              <option value="career">Career</option>
-            </select>
-            <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
-            {folders.length > 0 && (
-              <select value={createFolderId || ''} onChange={e => setCreateFolderId(e.target.value || null)} className="px-3 py-2 border rounded-lg text-sm">
-                <option value="">No folder</option>
-                {folders.map(f => (
-                  <option key={f.id} value={f.id}>{getFolderPath(f.id).join(' / ')}</option>
-                ))}
+        <div className="mb-4 p-5 bg-white rounded-xl border border-blue-200 shadow-md space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+              <Plus className="w-4 h-4 text-blue-600" /> Create New Topic
+            </h3>
+            <button onClick={() => { setShowCreate(false); setFormErrors({}); }} className="p-1 text-gray-400 hover:text-gray-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Title */}
+          <div>
+            <label className="text-xs font-medium text-gray-500 block mb-1">Title *</label>
+            <input value={title} onChange={e => { setTitle(e.target.value); setFormErrors(prev => ({ ...prev, title: '' })); }}
+              onKeyDown={e => e.key === 'Enter' && handleCreate()}
+              placeholder="What is this topic about?"
+              className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.title ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} autoFocus />
+            {formErrors.title && <p className="text-xs text-red-500 mt-1">{formErrors.title}</p>}
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="text-xs font-medium text-gray-500 block mb-1">Description</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)}
+              placeholder="Add a brief description (optional)"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={2} />
+          </div>
+
+          {/* Row: Area + Priority */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Area</label>
+              <select value={area} onChange={e => setArea(e.target.value)}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="work">Work</option>
+                <option value="personal">Personal</option>
+                <option value="career">Career</option>
               </select>
-            )}
-            <button onClick={handleCreate} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">Create</button>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Priority</label>
+              <div className="flex gap-1">
+                {([1, 2, 3, 4, 5] as const).map(p => {
+                  const meta = priorityMeta[p];
+                  return (
+                    <button key={p} type="button" onClick={() => setCreatePriority(p)}
+                      className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all border ${
+                        createPriority === p
+                          ? p >= 4
+                            ? 'bg-red-50 border-red-300 text-red-700 shadow-sm'
+                            : 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
+                          : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                      }`}>
+                      {meta.flame && <Flame className="w-3 h-3 inline mr-0.5" />}
+                      {meta.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Row: Start Date + Due Date */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Start Date</label>
+              <input type="date" value={createStartDate} onChange={e => { setCreateStartDate(e.target.value); setFormErrors(prev => ({ ...prev, startDate: '' })); }}
+                className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.startDate ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} />
+              {formErrors.startDate && <p className="text-xs text-red-500 mt-1">{formErrors.startDate}</p>}
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Due Date</label>
+              <input type="date" value={dueDate} onChange={e => { setDueDate(e.target.value); setFormErrors(prev => ({ ...prev, dueDate: '' })); }}
+                className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.dueDate ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} />
+              {formErrors.dueDate && <p className="text-xs text-red-500 mt-1">{formErrors.dueDate}</p>}
+            </div>
+          </div>
+
+          {/* Row: Tags + Folder */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">
+                <Hash className="w-3 h-3 inline mr-0.5" /> Tags
+              </label>
+              <input value={createTags} onChange={e => setCreateTags(e.target.value)}
+                placeholder="design, urgent, q1 (comma separated)"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {createTags && (
+                <div className="flex gap-1 mt-1.5 flex-wrap">
+                  {createTags.split(',').map(t => t.trim()).filter(Boolean).map((tag, idx) => (
+                    <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${tagPillColors[idx % tagPillColors.length]}`}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Folder</label>
+              {folders.length > 0 ? (
+                <select value={createFolderId || ''} onChange={e => setCreateFolderId(e.target.value || null)}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">No folder</option>
+                  {folders.map(f => (
+                    <option key={f.id} value={f.id}>{getFolderPath(f.id).join(' / ')}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-xs text-gray-400 py-2.5">No folders yet</p>
+              )}
+            </div>
+          </div>
+
+          {/* Submit */}
+          <div className="flex justify-end pt-1">
+            <button onClick={handleCreate} disabled={createSubmitting}
+              className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center gap-2 shadow-sm hover:shadow-md">
+              {createSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {createSubmitting ? 'Creating...' : 'Create Topic'}
+            </button>
           </div>
         </div>
       )}
 
-      {/* Bulk actions toolbar */}
+      {/* Bulk actions toolbar - floating action bar */}
       {selectedTopics.size > 0 && (
-        <div className="mb-3 p-3 bg-blue-50 rounded-xl border border-blue-200 flex items-center gap-3 animate-fade-in">
-          <span className="text-sm font-medium text-blue-700">{selectedTopics.size} selected</span>
-          <div className="flex gap-2">
+        <div className="mb-3 p-3 bg-white rounded-xl border border-blue-200 shadow-lg flex items-center gap-3 animate-fade-in sticky top-2 z-30">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+              <CheckCircle2 className="w-4 h-4 text-blue-600" />
+            </div>
+            <span className="text-sm font-semibold text-blue-700">{selectedTopics.size} selected</span>
+          </div>
+          <div className="h-6 w-px bg-gray-200" />
+          <div className="flex gap-2 flex-wrap">
             <button onClick={() => bulkChangeStatus('completed')} disabled={bulkActionLoading}
-              className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-xs font-medium hover:bg-green-200 disabled:opacity-50">
-              Mark Complete
+              className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" /> Complete
             </button>
             <button onClick={() => bulkChangeStatus('archived')} disabled={bulkActionLoading}
-              className="px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-xs font-medium hover:bg-amber-200 disabled:opacity-50">
-              Archive
+              className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+              <Archive className="w-3 h-3" /> Archive
             </button>
             <button onClick={() => bulkChangeStatus('active')} disabled={bulkActionLoading}
-              className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-200 disabled:opacity-50">
-              Reactivate
+              className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+              <CircleDot className="w-3 h-3" /> Reactivate
+            </button>
+            {/* Change Area picker */}
+            <div className="relative">
+              <button onClick={() => setShowBulkAreaPicker(!showBulkAreaPicker)} disabled={bulkActionLoading}
+                className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+                <Tag className="w-3 h-3" /> Change Area
+              </button>
+              {showBulkAreaPicker && (
+                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1 z-20 min-w-[120px]">
+                  {(['work', 'personal', 'career'] as const).map(a => (
+                    <button key={a} onClick={() => bulkChangeArea(a)}
+                      className={`w-full text-left px-3 py-1.5 rounded text-xs font-medium hover:bg-gray-50 flex items-center gap-2 ${areaColors[a]}`}>
+                      <span className={`w-2 h-2 rounded-full ${a === 'work' ? 'bg-blue-500' : a === 'personal' ? 'bg-green-500' : 'bg-purple-500'}`} />
+                      {a.charAt(0).toUpperCase() + a.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={handleAiAnalyzeAll} disabled={aiAnalyzeAllLoading || bulkActionLoading}
+              className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:bg-emerald-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+              {aiAnalyzeAllLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+              AI Analyze
             </button>
           </div>
-          <button onClick={() => setSelectedTopics(new Set())} className="ml-auto text-xs text-blue-600 hover:text-blue-800">
-            Clear selection
+          <button onClick={() => { setSelectedTopics(new Set()); setShowBulkAreaPicker(false); }}
+            className="ml-auto text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
+            <X className="w-3 h-3" /> Clear
           </button>
         </div>
       )}

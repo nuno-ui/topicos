@@ -1,7 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { Brain, Sparkles, BarChart3, Loader2, X, Clock } from 'lucide-react';
+import { Brain, Sparkles, BarChart3, Loader2, X, Clock, CheckCircle2 } from 'lucide-react';
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -13,6 +13,8 @@ function timeAgo(date: Date): string {
   return `${Math.floor(hours / 24)} day${Math.floor(hours / 24) !== 1 ? 's' : ''} ago`;
 }
 
+const MIN_INTERVAL_MS = 30_000; // 30 seconds rate limit between runs of same agent
+
 export function DashboardAgents() {
   const [loading, setLoading] = useState<string | null>(null);
   const [briefing, setBriefing] = useState<string | null>(null);
@@ -22,8 +24,17 @@ export function DashboardAgents() {
   const [suggestions, setSuggestions] = useState<Array<{ title: string; description: string; area: string; reason: string }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [lastRun, setLastRun] = useState<Record<string, Date>>({});
+  const [justCompleted, setJustCompleted] = useState<string | null>(null);
+  const completedTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const runAgent = async (agent: string) => {
+  const runAgent = useCallback(async (agent: string) => {
+    // Rate-limit: prevent running the same agent within 30s
+    const last = lastRun[agent];
+    if (last && Date.now() - last.getTime() < MIN_INTERVAL_MS) {
+      toast.info(`Please wait ${Math.ceil((MIN_INTERVAL_MS - (Date.now() - last.getTime())) / 1000)}s before running again`);
+      return;
+    }
+
     setLoading(agent);
     try {
       const res = await fetch('/api/ai/agents', {
@@ -32,7 +43,7 @@ export function DashboardAgents() {
         body: JSON.stringify({ agent, context: {} }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || 'Agent failed');
 
       switch (agent) {
         case 'daily_briefing':
@@ -52,11 +63,16 @@ export function DashboardAgents() {
           break;
       }
       setLastRun(prev => ({ ...prev, [agent]: new Date() }));
+
+      // Flash success indicator
+      setJustCompleted(agent);
+      if (completedTimerRef.current) clearTimeout(completedTimerRef.current);
+      completedTimerRef.current = setTimeout(() => setJustCompleted(null), 2000);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Agent failed');
     }
     setLoading(null);
-  };
+  }, [lastRun]);
 
   const createSuggestedTopic = async (s: { title: string; description: string; area: string }) => {
     try {
@@ -121,13 +137,19 @@ export function DashboardAgents() {
           const ran = lastRun[agent.id];
           return (
             <button key={agent.id} onClick={() => runAgent(agent.id)} disabled={!!loading}
-              className={`relative p-5 rounded-xl border bg-white text-left transition-all shadow-sm hover:shadow-md ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''} ${isRunning ? 'ring-2 ring-offset-1 ring-blue-300' : ''}`}>
+              className={`relative p-5 rounded-xl border bg-white text-left transition-all shadow-sm hover:shadow-md group ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'hover-lift'} ${isRunning ? 'ring-2 ring-offset-1 ring-blue-300' : ''} ${justCompleted === agent.id ? 'ring-2 ring-offset-1 ring-green-300' : ''}`}>
+              {justCompleted === agent.id && (
+                <div className="absolute top-2 right-2 w-5 h-5 bg-green-100 rounded-full flex items-center justify-center animate-scale-in">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                </div>
+              )}
               <div className="flex items-center gap-3 mb-2">
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${agent.iconBg}`}>
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${agent.iconBg} ${!isDisabled ? 'group-hover:scale-105' : ''}`}>
                   {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <agent.icon className="w-4 h-4" />}
                 </div>
                 <div>
                   <span className="font-semibold text-sm text-gray-900">{agent.label}</span>
+                  {isRunning && <span className="ml-2 text-[10px] text-blue-500 font-medium animate-pulse">Running...</span>}
                 </div>
               </div>
               <p className="text-xs text-gray-500 mb-2">{agent.desc}</p>

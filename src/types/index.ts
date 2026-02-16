@@ -3,8 +3,18 @@ export interface Topic {
   title: string;
   description: string | null;
   status: 'active' | 'archived' | 'completed';
-  area: 'work' | 'personal' | 'project';
+  area: 'work' | 'personal' | 'career';
   due_date: string | null;
+  start_date: string | null;
+  priority: number | null;
+  tags: string[];
+  folder_id: string | null;
+  summary: string | null;
+  notes: string | null;
+  progress_percent: number | null;
+  owner: string | null;
+  stakeholders: string[];
+  urgency_score: number | null;
   user_id: string;
   created_at: string;
   updated_at: string;
@@ -13,11 +23,12 @@ export interface Topic {
 export interface TopicItem {
   id: string;
   topic_id: string;
-  source: 'gmail' | 'calendar' | 'drive' | 'slack' | 'manual';
+  source: 'gmail' | 'calendar' | 'drive' | 'slack' | 'notion' | 'link' | 'manual';
   external_id: string;
   source_account_id: string | null;
   title: string;
   snippet: string;
+  body: string | null;
   url: string;
   occurred_at: string;
   metadata: Record<string, unknown>;
@@ -40,6 +51,16 @@ export interface SlackAccount {
   team_name: string;
   access_token: string;
   scope: string;
+}
+
+export interface NotionAccount {
+  id: string;
+  user_id: string;
+  workspace_id: string;
+  workspace_name: string;
+  access_token: string;
+  bot_id: string | null;
+  token_expires_at: string | null;
 }
 
 export interface Contact {

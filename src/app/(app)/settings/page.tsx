@@ -1,5 +1,11 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { SettingsPanel } from '@/components/settings/settings-panel';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'Settings - TopicOS',
+  description: 'Manage your connected sources and account settings',
+};
 
 export default async function SettingsPage() {
   const supabase = await createServerSupabaseClient();

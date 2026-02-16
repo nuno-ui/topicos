@@ -9,11 +9,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect('/login');
 
   return (
-    <div className="flex min-h-dvh bg-gray-50">
-      <Sidebar user={user} />
-      <main className="flex-1 min-w-0 overflow-auto">
-        {children}
-      </main>
+    <div className="flex flex-col min-h-dvh bg-gray-50">
+      {/* Brand gradient top border */}
+      <div className="h-[2px] brand-gradient flex-shrink-0" />
+      <div className="flex flex-1 min-h-0">
+        <Sidebar user={user} />
+        <main className="flex-1 min-w-0 overflow-auto" aria-label="Main content">
+          {children}
+        </main>
+      </div>
       <CommandPalette />
     </div>
   );

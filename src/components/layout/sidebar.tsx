@@ -4,7 +4,8 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, FolderKanban, Search, Users, Settings,
   LogOut, Keyboard, Command, Sparkles, Inbox,
-  PanelLeftClose, PanelLeftOpen, Menu, X
+  PanelLeftClose, PanelLeftOpen, Menu, X,
+  Plus, ChevronDown, StickyNote, UserPlus, FilePlus,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
@@ -50,11 +51,111 @@ export function MobileMenuButton({ onClick }: { onClick: () => void }) {
   );
 }
 
+/** Quick Create dropdown menu */
+function QuickCreateMenu({
+  collapsed,
+  isMobile,
+}: {
+  collapsed: boolean;
+  isMobile: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open]);
+
+  const showCollapsed = collapsed && !isMobile;
+
+  const actions = [
+    { label: 'New Topic', icon: FilePlus, action: () => router.push('/topics?create=true') },
+    { label: 'New Contact', icon: UserPlus, action: () => router.push('/contacts?create=true') },
+    { label: 'New Note', icon: StickyNote, action: () => router.push('/topics?note=true') },
+  ];
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        onClick={() => setOpen(prev => !prev)}
+        className={cn(
+          'flex items-center gap-2 brand-gradient text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-all shadow-sm',
+          showCollapsed
+            ? 'w-10 h-10 justify-center mx-auto'
+            : 'w-full px-3 py-2.5 justify-center'
+        )}
+        aria-label="Quick create"
+        aria-expanded={open}
+        aria-haspopup="true"
+      >
+        <Plus className="w-4 h-4" />
+        {!showCollapsed && (
+          <>
+            <span>Quick Create</span>
+            <ChevronDown className={cn('w-3.5 h-3.5 ml-auto transition-transform', open && 'rotate-180')} />
+          </>
+        )}
+      </button>
+
+      {/* Tooltip for collapsed state */}
+      {showCollapsed && !open && (
+        <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 peer-hover:opacity-100 transition-opacity z-50 shadow-lg hidden group-hover/qc:block group-hover/qc:opacity-100">
+          Quick Create
+        </div>
+      )}
+
+      {/* Dropdown */}
+      {open && (
+        <div
+          className={cn(
+            'absolute z-50 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-xl py-1 animate-scale-in',
+            showCollapsed ? 'left-full top-0 ml-2 w-48' : 'left-0 right-0 w-full'
+          )}
+        >
+          {actions.map((item) => (
+            <button
+              key={item.label}
+              onClick={() => {
+                setOpen(false);
+                item.action();
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition-colors first:rounded-t-xl last:rounded-b-xl"
+            >
+              <item.icon className="w-4 h-4 text-gray-400" />
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Sidebar({ user }: { user: User }) {
   const pathname = usePathname();
   const router = useRouter();
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [followUpCount, setFollowUpCount] = useState(0);
+  const [dashboardAlerts, setDashboardAlerts] = useState(0);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // Collapsed state persisted in localStorage
@@ -80,6 +181,10 @@ export function Sidebar({ user }: { user: User }) {
   const initials = useMemo(() => getInitials(user.email || 'U'), [user.email]);
   const avatarColor = useMemo(() => getAvatarColor(user.email || ''), [user.email]);
 
+  // Derive display name and full name from user metadata
+  const fullName = user.user_metadata?.full_name || user.user_metadata?.name || null;
+  const displayName = fullName || user.email?.split('@')[0] || 'User';
+
   // Fetch follow-up count for contacts badge
   useEffect(() => {
     const fetchFollowUpCount = async () => {
@@ -99,6 +204,30 @@ export function Sidebar({ user }: { user: User }) {
     const interval = setInterval(fetchFollowUpCount, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [user.id]);
+
+  // Fetch dashboard alert count (topics needing attention, overdue items, etc.)
+  useEffect(() => {
+    const fetchDashboardAlerts = async () => {
+      try {
+        const supabase = createClient();
+        // Count topics with stale status (no updates in 7 days)
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const { count: staleTopics } = await supabase
+          .from('topics')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('status', 'active')
+          .lt('updated_at', sevenDaysAgo);
+        setDashboardAlerts((staleTopics || 0) + (followUpCount > 0 ? 1 : 0));
+      } catch {
+        // If query fails (e.g. table doesn't exist), just use follow-up count
+        setDashboardAlerts(followUpCount > 0 ? 1 : 0);
+      }
+    };
+    fetchDashboardAlerts();
+    const interval = setInterval(fetchDashboardAlerts, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [user.id, followUpCount]);
 
   const handleLogout = async () => {
     const supabase = createClient();
@@ -184,23 +313,31 @@ export function Sidebar({ user }: { user: User }) {
     return () => { document.body.style.overflow = ''; };
   }, [mobileOpen]);
 
-  const displayName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
-
   // ---------- Shared sidebar content ----------
   const sidebarContent = (isMobile: boolean) => (
     <>
+      {/* Brand gradient line at the very top */}
+      <div className="h-[2px] brand-gradient flex-shrink-0" />
+
       {/* Logo / Brand */}
-      <div className={cn('p-5 pb-4', collapsed && !isMobile && 'px-3 py-4')}>
-        <div className="flex items-center gap-2.5">
+      <div className={cn(
+        'px-5 pt-5 pb-3 transition-all duration-200',
+        collapsed && !isMobile && 'px-3 pt-4 pb-3'
+      )}>
+        <div className={cn(
+          'flex items-center',
+          collapsed && !isMobile ? 'justify-center' : 'gap-2.5'
+        )}>
           <div className="w-9 h-9 brand-gradient rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
             <Sparkles className="w-4.5 h-4.5 text-white" />
           </div>
-          {(!collapsed || isMobile) && (
-            <div className="min-w-0 flex-1">
-              <h1 className="text-lg font-extrabold brand-gradient-text tracking-tight leading-tight">TopicOS</h1>
-              <p className="text-[10px] text-gray-400 font-medium tracking-wide uppercase">Search-First Productivity</p>
-            </div>
-          )}
+          <div className={cn(
+            'min-w-0 flex-1 overflow-hidden transition-all duration-200',
+            collapsed && !isMobile ? 'w-0 opacity-0' : 'w-auto opacity-100'
+          )}>
+            <h1 className="text-lg font-extrabold brand-gradient-text tracking-tight leading-tight whitespace-nowrap">TopicOS</h1>
+            <p className="text-[10px] text-gray-400 font-medium tracking-wide uppercase whitespace-nowrap">Search-First Productivity</p>
+          </div>
           {/* Mobile close button */}
           {isMobile && (
             <button
@@ -214,11 +351,20 @@ export function Sidebar({ user }: { user: User }) {
         </div>
       </div>
 
+      {/* Quick Create button */}
+      <div className={cn(
+        'px-3 pb-3',
+        collapsed && !isMobile && 'px-2 pb-3 group/qc'
+      )}>
+        <QuickCreateMenu collapsed={collapsed} isMobile={isMobile} />
+      </div>
+
       {/* Navigation */}
       <nav className={cn('flex-1 px-3 space-y-0.5', collapsed && !isMobile && 'px-2')}>
         {navItems.map((item) => {
           const isActive = pathname.startsWith(item.href);
           const showCollapsed = collapsed && !isMobile;
+          const hasDashboardBadge = item.href === '/dashboard' && dashboardAlerts > 0;
           return (
             <div key={item.href} className="relative group/nav">
               <Link
@@ -234,13 +380,23 @@ export function Sidebar({ user }: { user: User }) {
                 style={isActive ? { borderImage: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%) 1' } : undefined}
               >
                 <div className={cn('flex items-center', showCollapsed ? 'gap-0' : 'gap-3')}>
-                  <item.icon className={cn(
-                    'w-[18px] h-[18px] flex-shrink-0',
-                    isActive ? 'text-blue-600' : 'text-gray-400 group-hover:text-gray-600'
-                  )} />
+                  <div className="relative flex-shrink-0">
+                    <item.icon className={cn(
+                      'w-[18px] h-[18px]',
+                      isActive ? 'text-blue-600' : 'text-gray-400 group-hover:text-gray-600'
+                    )} />
+                    {/* Dashboard notification dot (collapsed) */}
+                    {showCollapsed && hasDashboardBadge && (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse-dot" />
+                    )}
+                  </div>
                   {!showCollapsed && (
                     <>
-                      {item.label}
+                      <span>{item.label}</span>
+                      {/* Dashboard notification badge (expanded) */}
+                      {hasDashboardBadge && (
+                        <span className="ml-0.5 w-2 h-2 bg-red-500 rounded-full animate-pulse-dot flex-shrink-0" title="Items need attention" />
+                      )}
                       {item.href === '/contacts' && followUpCount > 0 && (
                         <span
                           className="ml-1 px-1.5 py-0.5 bg-red-500 text-white text-[10px] rounded-full font-bold min-w-[18px] text-center leading-tight cursor-default"
@@ -252,19 +408,23 @@ export function Sidebar({ user }: { user: User }) {
                     </>
                   )}
                 </div>
+                {/* Keyboard shortcut display (expanded) */}
                 {!showCollapsed && (
                   <kbd className={cn(
-                    'hidden group-hover:inline-block text-[10px] px-1.5 py-0.5 rounded-md border font-mono',
-                    isActive ? 'border-blue-200 text-blue-400 bg-blue-50' : 'border-gray-200 text-gray-400 bg-gray-50'
+                    'text-[10px] px-1.5 py-0.5 rounded-md border font-mono transition-opacity',
+                    isActive
+                      ? 'border-blue-200 text-blue-400 bg-blue-50 opacity-60 group-hover:opacity-100'
+                      : 'border-gray-200 text-gray-400 bg-gray-50 opacity-0 group-hover:opacity-100'
                   )}>{item.shortcut}</kbd>
                 )}
               </Link>
               {/* Tooltip on collapsed hover */}
               {showCollapsed && (
-                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/nav:opacity-100 transition-opacity z-50 shadow-lg">
-                  {item.label}
+                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/nav:opacity-100 transition-opacity z-50 shadow-lg flex items-center gap-2">
+                  <span>{item.label}</span>
+                  <kbd className="text-[10px] px-1 py-0.5 rounded bg-gray-700 text-gray-300 font-mono">{item.shortcut}</kbd>
                   {item.href === '/contacts' && followUpCount > 0 && (
-                    <span className="ml-1.5 px-1.5 py-0.5 bg-red-500 rounded-full text-[10px] font-bold">
+                    <span className="ml-0.5 px-1.5 py-0.5 bg-red-500 rounded-full text-[10px] font-bold">
                       {followUpCount}
                     </span>
                   )}
@@ -287,7 +447,7 @@ export function Sidebar({ user }: { user: User }) {
           </button>
           <div className="flex items-center justify-center gap-1.5 px-3 py-1 text-[10px] text-gray-300">
             <Command className="w-2.5 h-2.5" />
-            <span>⌘K for command palette</span>
+            <span>Ctrl+K for command palette</span>
           </div>
         </div>
       ) : (
@@ -308,12 +468,20 @@ export function Sidebar({ user }: { user: User }) {
       {/* User section */}
       <div className={cn('p-3 border-t border-gray-100', collapsed && !isMobile && 'p-2')}>
         {(!collapsed || isMobile) ? (
-          <div className="flex items-center gap-3">
-            <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold', avatarColor)}>
+          <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 transition-colors">
+            <div className={cn(
+              'w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-white text-xs font-bold shadow-sm ring-2 ring-white',
+              avatarColor
+            )}>
               {initials}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-gray-900 truncate">{displayName}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-semibold text-gray-900 truncate">{displayName}</p>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-gray-100 text-gray-500 border border-gray-200 flex-shrink-0">
+                  Free
+                </span>
+              </div>
               <p className="text-[11px] text-gray-400 truncate">{user.email}</p>
             </div>
             <button onClick={handleLogout}
@@ -324,7 +492,10 @@ export function Sidebar({ user }: { user: User }) {
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2 group/user relative">
-            <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold', avatarColor)}>
+            <div className={cn(
+              'w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-white text-xs font-bold shadow-sm ring-2 ring-white',
+              avatarColor
+            )}>
               {initials}
             </div>
             <button onClick={handleLogout}
@@ -332,8 +503,12 @@ export function Sidebar({ user }: { user: User }) {
               title="Sign out">
               <LogOut className="w-4 h-4" />
             </button>
-            <div className="absolute left-full top-0 ml-2 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/user:opacity-100 transition-opacity z-50 shadow-lg">
-              {displayName}
+            <div className="absolute left-full top-0 ml-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/user:opacity-100 transition-opacity z-50 shadow-lg">
+              <p className="font-semibold">{displayName}</p>
+              <p className="text-gray-400 text-[10px]">{user.email}</p>
+              <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-gray-700 text-gray-300">
+                Free
+              </span>
             </div>
           </div>
         )}
@@ -341,14 +516,22 @@ export function Sidebar({ user }: { user: User }) {
 
       {/* Collapse toggle -- desktop only */}
       {!isMobile && (
-        <div className="px-3 pb-3">
+        <div className={cn('px-3 pb-3', collapsed && 'px-2')}>
           <button
             onClick={toggleCollapsed}
-            className="w-full flex items-center justify-center gap-2 p-2 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            className={cn(
+              'w-full flex items-center justify-center gap-2 p-2 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors',
+              collapsed && 'group/collapse relative'
+            )}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             {collapsed ? (
-              <PanelLeftOpen className="w-4 h-4" />
+              <>
+                <PanelLeftOpen className="w-4 h-4" />
+                <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/collapse:opacity-100 transition-opacity z-50 shadow-lg">
+                  Expand sidebar
+                </div>
+              </>
             ) : (
               <>
                 <PanelLeftClose className="w-4 h-4" />
@@ -387,8 +570,8 @@ export function Sidebar({ user }: { user: User }) {
 
       {/* Desktop sidebar */}
       <aside className={cn(
-        'hidden md:flex flex-col bg-white border-r border-gray-200 transition-all duration-200 ease-in-out',
-        collapsed ? 'w-16' : 'w-64'
+        'hidden md:flex flex-col bg-white border-r border-gray-200 sidebar-transition',
+        collapsed ? 'w-[68px]' : 'w-64'
       )}>
         {sidebarContent(false)}
       </aside>
@@ -440,7 +623,7 @@ export function Sidebar({ user }: { user: User }) {
                     <Command className="w-4 h-4 text-gray-400" />
                     Command Palette
                   </span>
-                  <kbd className="text-xs px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-lg font-mono text-gray-600 shadow-sm">⌘K</kbd>
+                  <kbd className="text-xs px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-lg font-mono text-gray-600 shadow-sm">Ctrl+K</kbd>
                 </div>
               </div>
             </div>

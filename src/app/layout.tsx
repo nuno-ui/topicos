@@ -3,13 +3,21 @@ import './globals.css';
 import { Toaster } from 'sonner';
 
 export const metadata: Metadata = {
-  title: 'TopicOS - Search-First Productivity',
+  title: {
+    template: '%s | TopicOS',
+    default: 'TopicOS - Search-First Productivity',
+  },
   description: 'AI-powered topic-centric productivity platform. Organize your work across Gmail, Slack, Notion, Calendar, and Drive.',
-  keywords: ['productivity', 'AI', 'topic management', 'search', 'organization'],
+  keywords: ['productivity', 'AI', 'topic management', 'search', 'organization', 'gmail', 'slack', 'notion'],
   openGraph: {
     title: 'TopicOS - Search-First Productivity',
     description: 'AI-powered topic-centric productivity. Unify your Gmail, Slack, Notion, Calendar, and Drive.',
     type: 'website',
+    siteName: 'TopicOS',
+  },
+  robots: {
+    index: false,
+    follow: false,
   },
 };
 

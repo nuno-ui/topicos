@@ -9,8 +9,12 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await request.json();
-    const { query, sources = ['gmail', 'calendar', 'drive', 'slack'], topic_id, date_from, date_to, max_results, account_ids } = body;
-    if (!query) return NextResponse.json({ error: 'Query is required' }, { status: 400 });
+    const { query, sources = ['gmail', 'calendar', 'drive', 'slack'], topic_id, date_from, date_to, max_results = 20, account_ids } = body;
+    if (!query || typeof query !== 'string' || query.trim().length === 0) {
+      return NextResponse.json({ error: 'Query is required' }, { status: 400 });
+    }
+    const sanitizedQuery = query.trim().slice(0, 500); // Limit query length
+    const safeMaxResults = Math.min(Math.max(1, max_results), 100); // Clamp 1-100
 
     // Fetch connected accounts info for the UI
     const [googleAccountsRes, slackAccountsRes, notionAccountsRes] = await Promise.all([
@@ -22,7 +26,7 @@ export async function POST(request: Request) {
     // Filter out 'manual' and 'link' from external sources search (they are searched separately below)
     const externalSources = (sources as string[]).filter((s: string) => s !== 'manual' && s !== 'link');
     const results = externalSources.length > 0
-      ? await searchAllSources(user.id, { query, sources: externalSources, topic_id, date_from, date_to, max_results, account_ids })
+      ? await searchAllSources(user.id, { query: sanitizedQuery, sources: externalSources, topic_id, date_from, date_to, max_results: safeMaxResults, account_ids })
       : [];
 
     // Search notes if 'manual' source is selected
@@ -35,9 +39,9 @@ export async function POST(request: Request) {
         .select('id, title, snippet, metadata, occurred_at, topic_id, topics(title)')
         .eq('user_id', user.id)
         .eq('source', 'manual')
-        .or(`title.ilike.%${query}%,snippet.ilike.%${query}%`)
+        .or(`title.ilike.%${sanitizedQuery}%,snippet.ilike.%${sanitizedQuery}%`)
         .order('occurred_at', { ascending: false })
-        .limit(max_results || 20);
+        .limit(safeMaxResults);
 
       if (noteItems && noteItems.length > 0) {
         for (const item of noteItems) {
@@ -61,7 +65,7 @@ export async function POST(request: Request) {
         .select('id, title, notes, updated_at')
         .eq('user_id', user.id)
         .not('notes', 'is', null)
-        .ilike('notes', `%${query}%`)
+        .ilike('notes', `%${sanitizedQuery}%`)
         .limit(10);
 
       if (topicNotes && topicNotes.length > 0) {
@@ -94,9 +98,9 @@ export async function POST(request: Request) {
         .select('id, title, snippet, url, metadata, occurred_at, topic_id, topics(title)')
         .eq('user_id', user.id)
         .eq('source', 'link')
-        .or(`title.ilike.%${query}%,snippet.ilike.%${query}%,url.ilike.%${query}%`)
+        .or(`title.ilike.%${sanitizedQuery}%,snippet.ilike.%${sanitizedQuery}%,url.ilike.%${sanitizedQuery}%`)
         .order('occurred_at', { ascending: false })
-        .limit(max_results || 20);
+        .limit(safeMaxResults);
 
       if (linkItems && linkItems.length > 0) {
         const linkResults = linkItems.map(item => ({

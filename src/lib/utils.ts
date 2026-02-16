@@ -132,6 +132,79 @@ export function getActivityLevel(lastInteractionAt: string | null): { label: str
   return { label: 'Cold', color: 'text-red-600', dotColor: 'bg-red-400' };
 }
 
+export function debounce<T extends (...args: unknown[]) => unknown>(fn: T, delay: number) {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const debounced = (...args: Parameters<T>) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
+  };
+  debounced.cancel = () => clearTimeout(timeoutId);
+  return debounced;
+}
+
+export function formatNumber(num: number): string {
+  if (Math.abs(num) >= 1_000_000) {
+    return (num / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  }
+  if (Math.abs(num) >= 1_000) {
+    return (num / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+  }
+  return num.toString();
+}
+
+export function generateId(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < 8; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+export function capitalize(str: string): string {
+  return str.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+export function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+export function groupBy<T>(items: T[], key: keyof T): Record<string, T[]> {
+  return items.reduce((acc, item) => {
+    const groupKey = String(item[key]);
+    if (!acc[groupKey]) {
+      acc[groupKey] = [];
+    }
+    acc[groupKey].push(item);
+    return acc;
+  }, {} as Record<string, T[]>);
+}
+
+export function sanitizeUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  // Block dangerous protocols
+  if (/^(javascript|data|vbscript):/i.test(trimmed)) {
+    return '';
+  }
+  // Add https:// if no protocol is present
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return 'https://' + trimmed;
+  }
+  return trimmed;
+}
+
+export function getContrastColor(hexColor: string): 'white' | 'black' {
+  // Remove # prefix if present
+  const hex = hexColor.replace(/^#/, '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  // Calculate relative luminance (WCAG formula)
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5 ? 'black' : 'white';
+}
+
 export function getTopicHealthScore(topic: {
   updated_at: string;
   description: string | null;

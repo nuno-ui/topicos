@@ -1,7 +1,7 @@
 'use client';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
-import { X, Save, StickyNote, Loader2 } from 'lucide-react';
+import { X, Save, StickyNote, Loader2, Bold, Italic, List, Heading2, Minus, Code, Link2 } from 'lucide-react';
 
 interface TopicItem {
   id: string;
@@ -27,7 +27,38 @@ export function NoteEditor({ topicId, note, onSave, onClose }: NoteEditorProps) 
     (note?.metadata?.content as string) || note?.snippet || ''
   );
   const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Track dirty state
+  useEffect(() => {
+    const originalTitle = note?.title || '';
+    const originalContent = (note?.metadata?.content as string) || note?.snippet || '';
+    setIsDirty(title !== originalTitle || content !== originalContent);
+  }, [title, content, note]);
+
+  // Warn on close if dirty
+  const handleClose = useCallback(() => {
+    if (isDirty) {
+      if (!window.confirm('You have unsaved changes. Are you sure you want to close?')) return;
+    }
+    onClose();
+  }, [isDirty, onClose]);
+
+  // Insert markdown at cursor
+  const insertMarkdown = useCallback((prefix: string, suffix: string = '') => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const selected = content.slice(start, end);
+    const newContent = content.slice(0, start) + prefix + selected + suffix + content.slice(end);
+    setContent(newContent);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + prefix.length, start + prefix.length + selected.length);
+    });
+  }, [content]);
 
   const autoGrow = useCallback(() => {
     const el = textareaRef.current;
@@ -97,14 +128,15 @@ export function NoteEditor({ topicId, note, onSave, onClose }: NoteEditorProps) 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={handleClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-scale-in">
         <div className="flex items-center justify-between p-4 border-b border-gray-100">
           <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
             <StickyNote className="w-4 h-4 text-green-600" />
             {note ? 'Edit Note' : 'Add Note'}
+            {isDirty && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse-dot" title="Unsaved changes" />}
           </h2>
-          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+          <button onClick={handleClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -120,9 +152,27 @@ export function NoteEditor({ topicId, note, onSave, onClose }: NoteEditorProps) 
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1.5">
-              Content <span className="text-gray-400 font-normal">(supports basic markdown: # headers, - lists, **bold**)</span>
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-gray-500">
+                Content <span className="text-gray-400 font-normal">(markdown supported)</span>
+              </label>
+              <div className="flex items-center gap-0.5">
+                {[
+                  { icon: Bold, action: () => insertMarkdown('**', '**'), tip: 'Bold' },
+                  { icon: Italic, action: () => insertMarkdown('*', '*'), tip: 'Italic' },
+                  { icon: Heading2, action: () => insertMarkdown('## '), tip: 'Heading' },
+                  { icon: List, action: () => insertMarkdown('- '), tip: 'List' },
+                  { icon: Code, action: () => insertMarkdown('`', '`'), tip: 'Code' },
+                  { icon: Link2, action: () => insertMarkdown('[', '](url)'), tip: 'Link' },
+                  { icon: Minus, action: () => insertMarkdown('\n---\n'), tip: 'Divider' },
+                ].map(({ icon: Icon, action, tip }) => (
+                  <button key={tip} onClick={action} title={tip} type="button"
+                    className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors">
+                    <Icon className="w-3.5 h-3.5" />
+                  </button>
+                ))}
+              </div>
+            </div>
             <textarea
               ref={textareaRef}
               value={content}
@@ -141,7 +191,7 @@ export function NoteEditor({ topicId, note, onSave, onClose }: NoteEditorProps) 
         <div className="flex items-center justify-between p-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl">
           <p className="text-xs text-gray-400">Notes are included in AI analysis</p>
           <div className="flex gap-2">
-            <button onClick={onClose}
+            <button onClick={handleClose}
               className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
               Cancel
             </button>

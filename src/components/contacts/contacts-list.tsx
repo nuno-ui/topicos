@@ -6,8 +6,8 @@ import {
   Plus, X, Users, Mail, Building, StickyNote, ChevronRight, Loader2, Search,
   Edit3, Save, Trash2, Sparkles, Brain, UserPlus, Network, Wand2, ExternalLink,
   Clock, TrendingUp, TrendingDown, Activity,
-  Upload, LayoutList, Building2, CheckSquare, Square, Filter, ArrowUpDown, ArrowRight,
-  ChevronDown, Download, Hash
+  Upload, LayoutList, Building2, CheckSquare, Square, Filter, ArrowRight,
+  ChevronDown, Download, Hash, ArrowUp, ArrowDown, AlertCircle
 } from 'lucide-react';
 
 interface Contact {
@@ -44,6 +44,77 @@ interface EnrichedProfile {
   key_topics: string[];
 }
 
+// ========== GRADIENT AVATAR HELPER ==========
+
+const avatarGradients = [
+  'from-blue-500 to-cyan-400',
+  'from-green-500 to-emerald-400',
+  'from-purple-500 to-violet-400',
+  'from-amber-500 to-orange-400',
+  'from-pink-500 to-rose-400',
+  'from-cyan-500 to-teal-400',
+  'from-indigo-500 to-blue-400',
+  'from-red-500 to-pink-400',
+  'from-emerald-500 to-green-400',
+  'from-violet-500 to-purple-400',
+];
+
+function getAvatarGradient(name: string): string {
+  const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return avatarGradients[hash % avatarGradients.length];
+}
+
+// ========== ACTIVITY LEVEL DOT COLOR ==========
+
+function getActivityDotColor(label: string): string {
+  switch (label) {
+    case 'Active': return 'bg-green-500';
+    case 'Recent': return 'bg-green-400';
+    case 'Idle': return 'bg-amber-400';
+    case 'Cold': return 'bg-red-400';
+    case 'New':
+    default:
+      return 'bg-gray-400';
+  }
+}
+
+// ========== AREA BADGE COLORS ==========
+
+function getAreaBadgeStyle(area: string | null): string {
+  switch (area) {
+    case 'work': return 'bg-blue-100 text-blue-700 border-blue-200';
+    case 'personal': return 'bg-green-100 text-green-700 border-green-200';
+    case 'career': return 'bg-purple-100 text-purple-700 border-purple-200';
+    default: return 'bg-gray-100 text-gray-500 border-gray-200';
+  }
+}
+
+// ========== EMAIL VALIDATION ==========
+
+function isValidEmail(email: string): boolean {
+  if (!email) return true; // empty is fine (optional field)
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// ========== HIGHLIGHT MATCHING TEXT ==========
+
+function HighlightText({ text, query }: { text: string; query: string }) {
+  if (!query.trim() || !text) return <>{text}</>;
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = text.split(regex);
+  return (
+    <>
+      {parts.map((part, i) =>
+        regex.test(part) ? (
+          <mark key={i} className="bg-yellow-200 text-yellow-900 rounded-sm px-0.5">{part}</mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
+}
+
 export function ContactsList({ initialContacts }: { initialContacts: Contact[] }) {
   const router = useRouter();
   const [contacts, setContacts] = useState(initialContacts);
@@ -59,6 +130,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
   const [newNotes, setNewNotes] = useState('');
   const [newArea, setNewArea] = useState('');
   const [creating, setCreating] = useState(false);
+  const [emailError, setEmailError] = useState('');
 
   // Edit state
   const [editingContact, setEditingContact] = useState<string | null>(null);
@@ -79,21 +151,22 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
   const [dedupeResults, setDedupeResults] = useState<string | null>(null);
   const [showDedupe, setShowDedupe] = useState(false);
 
-  // Improvement 21: Organization Grouping View
+  // Organization Grouping View
   const [viewMode, setViewMode] = useState<'list' | 'organizations'>('list');
   const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
 
-  // Improvement 26: Bulk Actions
+  // Bulk Actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
 
-  // Improvement 27: Enhanced Search with Filters
+  // Filters
   const [filterArea, setFilterArea] = useState<string>('');
   const [filterOrg, setFilterOrg] = useState<string>('');
   const [filterActivity, setFilterActivity] = useState<string>('');
   const [filterHasEmail, setFilterHasEmail] = useState(false);
+  const [filterHasTopics, setFilterHasTopics] = useState<string>('');
 
-  // Improvement 28: Sort Options (persisted in localStorage)
+  // Sort Options (persisted in localStorage)
   const [sortBy, setSortByState] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('contacts-sort') || 'name-asc';
@@ -107,15 +180,25 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     }
   }, []);
 
-  // Improvement 30: Import modal state
+  // Import modal state
   const [showImport, setShowImport] = useState(false);
 
-  // Improvement 38: Dashboard card filter
+  // Dashboard card filter
   const [dashboardFilter, setDashboardFilter] = useState<string>('');
 
-  // Improvement 36: Keyboard shortcuts
+  // Keyboard shortcuts
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Create form animation
+  const [createFormVisible, setCreateFormVisible] = useState(false);
+  useEffect(() => {
+    if (showCreate) {
+      requestAnimationFrame(() => setCreateFormVisible(true));
+    } else {
+      setCreateFormVisible(false);
+    }
+  }, [showCreate]);
 
   // ========== HELPER FUNCTIONS ==========
 
@@ -141,12 +224,6 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     return name.slice(0, 2).toUpperCase();
   };
 
-  const avatarColors = ['bg-blue-100 text-blue-700', 'bg-green-100 text-green-700', 'bg-purple-100 text-purple-700', 'bg-amber-100 text-amber-700', 'bg-pink-100 text-pink-700', 'bg-cyan-100 text-cyan-700'];
-  const getAvatarColor = (name: string) => {
-    const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return avatarColors[hash % avatarColors.length];
-  };
-
   const getRelativeTime = (dateStr: string | null) => {
     if (!dateStr) return 'Never';
     const diff = Date.now() - new Date(dateStr).getTime();
@@ -156,9 +233,12 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     const hours = Math.floor(mins / 60);
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
-    if (days < 7) return `${days}d ago`;
-    if (days < 30) return `${Math.floor(days / 7)}w ago`;
-    if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+    if (days === 1) return '1 day ago';
+    if (days < 7) return `${days} days ago`;
+    if (days < 14) return '1 week ago';
+    if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
+    if (days < 60) return '1 month ago';
+    if (days < 365) return `${Math.floor(days / 30)} months ago`;
     return `${Math.floor(days / 365)}y ago`;
   };
 
@@ -170,7 +250,20 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     return Array.from(orgs).sort();
   }, [contacts]);
 
-  // ========== FILTERED + SORTED CONTACTS (Improvements 27, 28, 38) ==========
+  // ========== ACTIVE FILTER COUNT ==========
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filterArea) count++;
+    if (filterOrg) count++;
+    if (filterActivity) count++;
+    if (filterHasEmail) count++;
+    if (filterHasTopics) count++;
+    if (dashboardFilter) count++;
+    return count;
+  }, [filterArea, filterOrg, filterActivity, filterHasEmail, filterHasTopics, dashboardFilter]);
+
+  // ========== FILTERED + SORTED CONTACTS ==========
 
   const filteredContacts = useMemo(() => {
     let result = contacts;
@@ -214,7 +307,14 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       result = result.filter(c => !!c.email);
     }
 
-    // Dashboard filter (Improvement 38)
+    // Filter: Has Topics
+    if (filterHasTopics === 'yes') {
+      result = result.filter(c => c.contact_topic_links && c.contact_topic_links.length > 0);
+    } else if (filterHasTopics === 'no') {
+      result = result.filter(c => !c.contact_topic_links || c.contact_topic_links.length === 0);
+    }
+
+    // Dashboard filter
     if (dashboardFilter) {
       const now = Date.now();
       const thirtyDays = 30 * 24 * 60 * 60 * 1000;
@@ -224,16 +324,12 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
         result = result.filter(c => !!c.organization);
       } else if (dashboardFilter === 'active30') {
         result = result.filter(c => c.last_interaction_at && (now - new Date(c.last_interaction_at).getTime()) <= thirtyDays);
-      } else if (dashboardFilter === 'followup') {
-        result = result.filter(c =>
-          c.last_interaction_at &&
-          (now - new Date(c.last_interaction_at).getTime()) > thirtyDays &&
-          c.interaction_count > 0
-        );
+      } else if (dashboardFilter === 'avgInteractions') {
+        // show all for avg interactions, just highlight the stat
       }
     }
 
-    // Sort (Improvement 28)
+    // Sort
     const sorted = [...result];
     switch (sortBy) {
       case 'name-asc':
@@ -262,35 +358,37 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     }
 
     return sorted;
-  }, [contacts, searchQuery, filterArea, filterOrg, filterActivity, filterHasEmail, sortBy, dashboardFilter]);
+  }, [contacts, searchQuery, filterArea, filterOrg, filterActivity, filterHasEmail, filterHasTopics, sortBy, dashboardFilter]);
 
-  // ========== DASHBOARD STATS (Improvement 38) ==========
+  // ========== DASHBOARD STATS ==========
 
   const dashboardStats = useMemo(() => {
     const now = Date.now();
     const thirtyDays = 30 * 24 * 60 * 60 * 1000;
     const orgs = new Set<string>();
     let active30 = 0;
-    let needsFollowup = 0;
+    let totalInteractions = 0;
 
     contacts.forEach(c => {
       if (c.organization) orgs.add(c.organization);
+      totalInteractions += c.interaction_count || 0;
       if (c.last_interaction_at) {
         const timeSince = now - new Date(c.last_interaction_at).getTime();
         if (timeSince <= thirtyDays) active30++;
-        else if (c.interaction_count > 0) needsFollowup++;
       }
     });
+
+    const avgInteractions = contacts.length > 0 ? Math.round((totalInteractions / contacts.length) * 10) / 10 : 0;
 
     return {
       total: contacts.length,
       organizations: orgs.size,
       active30,
-      needsFollowup,
+      avgInteractions,
     };
   }, [contacts]);
 
-  // ========== FOLLOW-UP CONTACTS (Improvement 39) ==========
+  // ========== FOLLOW-UP CONTACTS ==========
 
   const followUpContacts = useMemo(() => {
     const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
@@ -301,21 +399,39 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     );
   }, [contacts]);
 
-  // ========== KEYBOARD SHORTCUTS (Improvement 36) ==========
+  // ========== KEYBOARD SHORTCUTS ==========
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
+    // Escape works even in inputs
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (showCreate) { setShowCreate(false); return; }
+      if (editingContact) { setEditingContact(null); return; }
+      if (selectedContact) { setSelectedContact(null); return; }
+      if (searchQuery) { setSearchQuery(''); searchInputRef.current?.blur(); return; }
+      if (selectedIds.size > 0) { deselectAll(); setSelectMode(false); return; }
+      setSelectedIndex(-1);
+      return;
+    }
+
+    // '/' focuses search even from non-input
+    if (e.key === '/' && !isInput) {
+      e.preventDefault();
+      searchInputRef.current?.focus();
+      return;
+    }
+
+    if (isInput) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
 
     switch (e.key) {
       case 'n':
+      case 'N':
         e.preventDefault();
         setShowCreate(true);
-        break;
-      case '/':
-        e.preventDefault();
-        searchInputRef.current?.focus();
         break;
       case 'j':
         setSelectedIndex(prev => Math.min(prev + 1, filteredContacts.length - 1));
@@ -335,14 +451,6 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           startEdit(c);
         }
         break;
-      case 'Escape':
-        if (showCreate) setShowCreate(false);
-        else if (editingContact) setEditingContact(null);
-        else if (selectedContact) setSelectedContact(null);
-        else if (searchQuery) { setSearchQuery(''); searchInputRef.current?.blur(); }
-        else if (selectedIds.size > 0) { deselectAll(); setSelectMode(false); }
-        else setSelectedIndex(-1);
-        break;
     }
   }, [selectedIndex, filteredContacts, showCreate, editingContact, selectedContact, searchQuery, selectedIds, router]);
 
@@ -359,7 +467,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     }
   }, [selectedIndex]);
 
-  // ========== ORGANIZATION GROUPING (Improvements 21, 22) ==========
+  // ========== ORGANIZATION GROUPING ==========
 
   const organizationGroups = useMemo(() => {
     const groups: Record<string, Contact[]> = {};
@@ -368,7 +476,6 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       if (!groups[key]) groups[key] = [];
       groups[key].push(c);
     });
-    // Sort org names, put "No Organization" last
     const sortedKeys = Object.keys(groups).sort((a, b) => {
       if (a === '__no_org__') return 1;
       if (b === '__no_org__') return -1;
@@ -378,6 +485,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       name: key === '__no_org__' ? 'No Organization' : key,
       key,
       contacts: groups[key],
+      totalTopics: groups[key].reduce((sum, c) => sum + (c.contact_topic_links?.length || 0), 0),
       sharedTopics: Array.from(new Set(
         groups[key].flatMap(c => c.contact_topic_links?.map(l => l.topics?.title || 'Unknown') || [])
       )),
@@ -392,7 +500,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     });
   };
 
-  // ========== BULK ACTIONS (Improvement 26) ==========
+  // ========== BULK ACTIONS ==========
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -447,20 +555,34 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
   // ========== FILTER HELPERS ==========
 
-  const hasActiveFilters = filterArea || filterOrg || filterActivity || filterHasEmail || dashboardFilter;
+  const hasActiveFilters = filterArea || filterOrg || filterActivity || filterHasEmail || filterHasTopics || dashboardFilter;
 
   const clearAllFilters = () => {
     setFilterArea('');
     setFilterOrg('');
     setFilterActivity('');
     setFilterHasEmail(false);
+    setFilterHasTopics('');
     setDashboardFilter('');
+  };
+
+  // ========== SORT DIRECTION HELPERS ==========
+
+  const getSortIcon = () => {
+    if (sortBy.includes('desc') || sortBy === 'most-active' || sortBy === 'recently-added' || sortBy === 'most-topics') {
+      return <ArrowDown className="w-3.5 h-3.5 text-blue-500" />;
+    }
+    return <ArrowUp className="w-3.5 h-3.5 text-blue-500" />;
   };
 
   // ========== CRUD HANDLERS ==========
 
   const handleCreate = async () => {
     if (!newName.trim()) { toast.error('Name is required'); return; }
+    if (newEmail && !isValidEmail(newEmail)) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
     setCreating(true);
     try {
       const res = await fetch('/api/contacts', {
@@ -479,6 +601,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       if (!res.ok) throw new Error(data.error);
       setContacts(prev => [...prev, data.contact].sort((a, b) => a.name.localeCompare(b.name)));
       setNewName(''); setNewEmail(''); setNewOrganization(''); setNewRole(''); setNewNotes(''); setNewArea('');
+      setEmailError('');
       setShowCreate(false);
       toast.success('Contact added');
     } catch (err) {
@@ -660,37 +783,50 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     setAgentLoading(null);
   };
 
-  // ========== RENDER: Contact Card (Improvement 29) ==========
-
-  const isRecentActivity = (c: Contact) => {
-    if (!c.last_interaction_at) return false;
-    const daysSince = Math.floor((Date.now() - new Date(c.last_interaction_at).getTime()) / (1000 * 60 * 60 * 24));
-    return daysSince <= 7;
-  };
+  // ========== RENDER: Contact Card ==========
 
   const renderContactCard = (c: Contact, index: number = -1) => {
     const interaction = getInteractionScore(c);
     const isSelected = selectedIds.has(c.id);
     const isKeyboardSelected = index === selectedIndex && index >= 0;
-    const hasRecentActivity = isRecentActivity(c);
+    const topicCount = c.contact_topic_links?.length || 0;
+    const activityDotColor = getActivityDotColor(interaction.label);
 
     return (
       <div key={c.id} id={`contact-card-${index}`}>
         <div
-          className={`w-full bg-white rounded-xl border transition-all text-left cursor-pointer group relative overflow-hidden ${
+          onClick={() => router.push(`/contacts/${c.id}`)}
+          className={`w-full bg-white rounded-xl border transition-all duration-200 text-left cursor-pointer group relative overflow-hidden ${
             isSelected
               ? 'border-blue-400 bg-blue-50/30 shadow-sm'
               : isKeyboardSelected
                 ? 'border-indigo-300 bg-indigo-50/20 shadow-md ring-1 ring-indigo-200'
-                : 'border-gray-100 shadow-sm hover:shadow-md hover:border-blue-200 hover:-translate-y-px'
+                : 'border-gray-100 shadow-sm hover:shadow-md hover:border-gray-200 hover:-translate-y-px'
           }`}
+          style={{ borderLeftWidth: '3px', borderLeftColor: isSelected ? undefined : 'transparent' }}
+          onMouseEnter={(e) => {
+            if (!isSelected) {
+              const el = e.currentTarget;
+              const grad = getAvatarGradient(c.name);
+              // Map gradient class to a simple color for the left border
+              if (grad.includes('blue')) el.style.borderLeftColor = '#3b82f6';
+              else if (grad.includes('green') || grad.includes('emerald')) el.style.borderLeftColor = '#10b981';
+              else if (grad.includes('purple') || grad.includes('violet')) el.style.borderLeftColor = '#8b5cf6';
+              else if (grad.includes('amber') || grad.includes('orange')) el.style.borderLeftColor = '#f59e0b';
+              else if (grad.includes('pink') || grad.includes('rose')) el.style.borderLeftColor = '#ec4899';
+              else if (grad.includes('cyan') || grad.includes('teal')) el.style.borderLeftColor = '#06b6d4';
+              else if (grad.includes('indigo')) el.style.borderLeftColor = '#6366f1';
+              else if (grad.includes('red')) el.style.borderLeftColor = '#ef4444';
+              else el.style.borderLeftColor = '#3b82f6';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isSelected) {
+              e.currentTarget.style.borderLeftColor = 'transparent';
+            }
+          }}
         >
-          {/* Gradient left border for recent activity */}
-          {hasRecentActivity && (
-            <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl bg-gradient-to-b from-green-400 via-emerald-500 to-teal-500" />
-          )}
-
-          <div className={`flex items-center gap-3 py-3 pr-4 ${hasRecentActivity ? 'pl-5' : 'pl-4'}`}>
+          <div className="flex items-center gap-3 py-3 pr-4 pl-4">
             {/* Checkbox for bulk select */}
             {(selectMode || isSelected) && (
               <button
@@ -712,24 +848,38 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
               </button>
             )}
 
-            {/* Avatar */}
-            <div className={`w-9 h-9 rounded-full font-semibold text-xs flex items-center justify-center flex-shrink-0 ${getAvatarColor(c.name)}`}>
-              {initials(c.name)}
+            {/* Avatar with gradient background and activity dot */}
+            <div className="relative flex-shrink-0">
+              <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${getAvatarGradient(c.name)} font-semibold text-xs text-white flex items-center justify-center shadow-sm`}>
+                {initials(c.name)}
+              </div>
+              {/* Activity level indicator dot */}
+              <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white ${activityDotColor}`}
+                title={`${interaction.label}`}
+              />
             </div>
 
-            {/* Row 1: Name + Area badge + Activity trend arrow */}
+            {/* Main content */}
             <div className="flex-1 min-w-0">
+              {/* Row 1: Name + Area badge + Activity trend */}
               <div className="flex items-center gap-2 flex-wrap">
-                <button className="font-semibold text-sm text-gray-900 hover:text-blue-700 transition-colors truncate" onClick={() => router.push(`/contacts/${c.id}`)}>
-                  {c.name}
-                </button>
+                <span className="font-semibold text-sm text-gray-900 group-hover:text-blue-700 transition-colors truncate">
+                  <HighlightText text={c.name} query={searchQuery} />
+                </span>
                 {c.area && (
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide ${
-                    c.area === 'work' ? 'bg-blue-100 text-blue-700' :
-                    c.area === 'personal' ? 'bg-green-100 text-green-700' :
-                    'bg-purple-100 text-purple-700'
-                  }`}>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide border ${getAreaBadgeStyle(c.area)}`}>
                     {c.area}
+                  </span>
+                )}
+                {topicCount > 0 && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-semibold border border-indigo-100">
+                    <Hash className="w-2.5 h-2.5" />
+                    {topicCount}
+                  </span>
+                )}
+                {c.interaction_count > 0 && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-gray-50 text-gray-500 font-medium border border-gray-100">
+                    {c.interaction_count} interaction{c.interaction_count !== 1 ? 's' : ''}
                   </span>
                 )}
                 {interaction.score >= 3
@@ -740,23 +890,25 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                 }
               </div>
 
-              {/* Row 2: Organization + Role + Topics count + Last interaction */}
+              {/* Row 2: Organization + Role + Last interaction */}
               <div className="flex items-center gap-2.5 text-xs text-gray-500 mt-0.5 flex-wrap">
                 {c.organization && (
                   <span className="flex items-center gap-1 text-gray-600">
-                    <Building className="w-3 h-3 text-gray-400" /> {c.organization}
+                    <Building className="w-3 h-3 text-gray-400" />
+                    <HighlightText text={c.organization} query={searchQuery} />
                   </span>
                 )}
                 {c.role && (
-                  <span className="text-gray-400 italic">{c.role}</span>
-                )}
-                {c.contact_topic_links && c.contact_topic_links.length > 0 && (
-                  <span className="flex items-center gap-0.5 text-blue-600 font-medium">
-                    <Hash className="w-3 h-3" />
-                    {c.contact_topic_links.length} topic{c.contact_topic_links.length !== 1 ? 's' : ''}
+                  <span className="text-gray-400 italic">
+                    <HighlightText text={c.role} query={searchQuery} />
                   </span>
                 )}
-                <span className="flex items-center gap-1 text-gray-400 ml-auto">
+                {c.email && (
+                  <span className="text-gray-400 truncate max-w-[180px]">
+                    <HighlightText text={c.email} query={searchQuery} />
+                  </span>
+                )}
+                <span className="flex items-center gap-1 text-gray-400 ml-auto whitespace-nowrap">
                   <Clock className="w-3 h-3" /> {getRelativeTime(c.last_interaction_at)}
                 </span>
               </div>
@@ -788,7 +940,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
         {/* Expanded detail */}
         {selectedContact === c.id && (
-          <div className="mt-1 ml-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
+          <div className="mt-1 ml-4 p-4 bg-gray-50 rounded-xl border border-gray-100" onClick={(e) => e.stopPropagation()}>
             {editingContact === c.id ? (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
@@ -927,13 +1079,13 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
   return (
     <div>
-      {/* ===== Dashboard Summary Cards ===== */}
+      {/* ===== Stats Dashboard ===== */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {([
           { key: 'total', value: dashboardStats.total, label: 'Total Contacts', icon: Users, colors: { border: 'border-blue-400', bg: 'bg-blue-50', iconBg: 'bg-blue-100', iconText: 'text-blue-600', hoverBorder: 'hover:border-blue-200' } },
+          { key: 'active30', value: dashboardStats.active30, label: 'Active (30 days)', icon: Activity, colors: { border: 'border-green-400', bg: 'bg-green-50', iconBg: 'bg-green-100', iconText: 'text-green-600', hoverBorder: 'hover:border-green-200' } },
           { key: 'organizations', value: dashboardStats.organizations, label: 'Organizations', icon: Building2, colors: { border: 'border-purple-400', bg: 'bg-purple-50', iconBg: 'bg-purple-100', iconText: 'text-purple-600', hoverBorder: 'hover:border-purple-200' } },
-          { key: 'active30', value: dashboardStats.active30, label: 'Active in 30d', icon: Activity, colors: { border: 'border-green-400', bg: 'bg-green-50', iconBg: 'bg-green-100', iconText: 'text-green-600', hoverBorder: 'hover:border-green-200' } },
-          { key: 'followup', value: dashboardStats.needsFollowup, label: 'Needs Follow-up', icon: Clock, colors: { border: 'border-amber-400', bg: 'bg-amber-50', iconBg: 'bg-amber-100', iconText: 'text-amber-600', hoverBorder: 'hover:border-amber-200' } },
+          { key: 'avgInteractions', value: dashboardStats.avgInteractions, label: 'Avg Interactions', icon: TrendingUp, colors: { border: 'border-amber-400', bg: 'bg-amber-50', iconBg: 'bg-amber-100', iconText: 'text-amber-600', hoverBorder: 'hover:border-amber-200' } },
         ] as const).map(stat => {
           const Icon = stat.icon;
           const isActive = dashboardFilter === stat.key;
@@ -993,21 +1145,30 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
             ref={searchInputRef}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search contacts..."
-            className="w-full pl-10 pr-14 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 focus:bg-white transition-colors"
+            placeholder="Search by name, email, org, or role..."
+            className="w-full pl-10 pr-20 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 focus:bg-white transition-colors"
           />
-          {searchQuery ? (
-            <button onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <X className="w-4 h-4" />
-            </button>
-          ) : (
-            <kbd className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-gray-400 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5 pointer-events-none">/</kbd>
-          )}
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+            {searchQuery && (
+              <>
+                <span className="text-[10px] text-gray-400 tabular-nums">{filteredContacts.length} result{filteredContacts.length !== 1 ? 's' : ''}</span>
+                <button onClick={() => setSearchQuery('')}
+                  className="text-gray-400 hover:text-gray-600 p-0.5 hover:bg-gray-100 rounded transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </>
+            )}
+            {!searchQuery && (
+              <kbd className="text-[10px] font-mono text-gray-400 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5 pointer-events-none">/</kbd>
+            )}
+          </div>
         </div>
 
-        {/* Sort dropdown (Improvement 28) */}
-        <div className="relative">
+        {/* Sort dropdown with direction indicator */}
+        <div className="relative flex items-center">
+          <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none flex items-center gap-0.5">
+            {getSortIcon()}
+          </div>
           <select
             value={sortBy}
             onChange={e => setSortBy(e.target.value)}
@@ -1021,10 +1182,9 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
             <option value="most-topics">Most Topics</option>
             <option value="organization">Organization</option>
           </select>
-          <ArrowUpDown className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
 
-        {/* View mode toggle (Improvement 21) */}
+        {/* View mode toggle */}
         <div className="flex border border-gray-200 rounded-lg overflow-hidden">
           <button
             onClick={() => setViewMode('list')}
@@ -1040,11 +1200,11 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
               viewMode === 'organizations' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
             }`}
           >
-            <Building2 className="w-3.5 h-3.5" /> Organizations
+            <Building2 className="w-3.5 h-3.5" /> Orgs
           </button>
         </div>
 
-        {/* Select toggle (Improvement 26) */}
+        {/* Select toggle */}
         <button
           onClick={() => { setSelectMode(!selectMode); if (selectMode) deselectAll(); }}
           className={`px-3 py-2.5 border rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
@@ -1061,9 +1221,16 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
         </button>
       </div>
 
-      {/* ===== Improvement 27: Filter Chips ===== */}
+      {/* ===== Filter Bar ===== */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <Filter className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <Filter className="w-3.5 h-3.5 text-gray-400" />
+          {activeFilterCount > 0 && (
+            <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+              {activeFilterCount}
+            </span>
+          )}
+        </div>
 
         {/* Area filter */}
         <select
@@ -1077,21 +1244,6 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           <option value="work">Work</option>
           <option value="personal">Personal</option>
           <option value="career">Career</option>
-        </select>
-
-        {/* Organization filter */}
-        <select
-          value={filterOrg}
-          onChange={e => setFilterOrg(e.target.value)}
-          className={`px-2.5 py-1.5 border rounded-full text-xs bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[180px] ${
-            filterOrg ? 'border-purple-300 text-purple-700 bg-purple-50' : 'border-gray-200 text-gray-600'
-          }`}
-        >
-          <option value="">All Organizations</option>
-          <option value="__none__">No Organization</option>
-          {uniqueOrganizations.map(org => (
-            <option key={org} value={org}>{org}</option>
-          ))}
         </select>
 
         {/* Activity filter */}
@@ -1110,6 +1262,34 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           <option value="New">New</option>
         </select>
 
+        {/* Has Topics filter */}
+        <select
+          value={filterHasTopics}
+          onChange={e => setFilterHasTopics(e.target.value)}
+          className={`px-2.5 py-1.5 border rounded-full text-xs bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+            filterHasTopics ? 'border-indigo-300 text-indigo-700 bg-indigo-50' : 'border-gray-200 text-gray-600'
+          }`}
+        >
+          <option value="">Topics: Any</option>
+          <option value="yes">Has Topics</option>
+          <option value="no">No Topics</option>
+        </select>
+
+        {/* Organization filter */}
+        <select
+          value={filterOrg}
+          onChange={e => setFilterOrg(e.target.value)}
+          className={`px-2.5 py-1.5 border rounded-full text-xs bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[180px] ${
+            filterOrg ? 'border-purple-300 text-purple-700 bg-purple-50' : 'border-gray-200 text-gray-600'
+          }`}
+        >
+          <option value="">All Organizations</option>
+          <option value="__none__">No Organization</option>
+          {uniqueOrganizations.map(org => (
+            <option key={org} value={org}>{org}</option>
+          ))}
+        </select>
+
         {/* Has Email toggle */}
         <button
           onClick={() => setFilterHasEmail(!filterHasEmail)}
@@ -1120,7 +1300,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           <Mail className="w-3 h-3" /> Has Email
         </button>
 
-        {/* Active filter pills + clear */}
+        {/* Active filter pills + clear all */}
         {hasActiveFilters && (
           <>
             <span className="text-xs text-gray-400 mx-1">|</span>
@@ -1148,6 +1328,12 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                 <button onClick={() => setFilterHasEmail(false)} className="hover:text-green-900"><X className="w-3 h-3" /></button>
               </span>
             )}
+            {filterHasTopics && (
+              <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs flex items-center gap-1">
+                {filterHasTopics === 'yes' ? 'Has Topics' : 'No Topics'}
+                <button onClick={() => setFilterHasTopics('')} className="hover:text-indigo-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
             {dashboardFilter && (
               <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-full text-xs flex items-center gap-1">
                 Dashboard: {dashboardFilter}
@@ -1156,7 +1342,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
             )}
             <button onClick={clearAllFilters}
               className="text-xs text-red-500 hover:text-red-700 font-medium ml-1">
-              Clear all
+              Clear all filters
             </button>
           </>
         )}
@@ -1166,6 +1352,11 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       <div className="flex items-center justify-between mb-4">
         <span className="text-xs text-gray-500">
           Showing {filteredContacts.length} of {contacts.length} contact{contacts.length !== 1 ? 's' : ''}
+          {searchQuery && (
+            <span className="ml-1 text-gray-400">
+              for &ldquo;{searchQuery}&rdquo;
+            </span>
+          )}
         </span>
         {selectMode && (
           <div className="flex items-center gap-2">
@@ -1194,7 +1385,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           <div className="space-y-2">
             {extractedContacts.map((ec, i) => (
               <div key={i} className="flex items-center gap-3 p-3 bg-white rounded-lg border border-purple-100">
-                <div className={`w-8 h-8 rounded-full text-xs font-medium flex items-center justify-center ${getAvatarColor(ec.name)}`}>
+                <div className={`w-8 h-8 rounded-full text-xs font-medium flex items-center justify-center bg-gradient-to-br ${getAvatarGradient(ec.name)} text-white`}>
                   {initials(ec.name)}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -1240,39 +1431,88 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
         </div>
       )}
 
-      {/* Create form */}
+      {/* ===== Create Form with animation ===== */}
       {showCreate && (
-        <div className="mb-6 p-4 bg-white rounded-xl border border-blue-200 shadow-sm space-y-3">
-          <h3 className="text-sm font-semibold text-gray-700">Add New Contact</h3>
+        <div
+          className={`mb-6 p-5 bg-white rounded-xl border border-blue-200 shadow-sm transition-all duration-300 ease-out overflow-hidden ${
+            createFormVisible ? 'opacity-100 max-h-[500px] translate-y-0' : 'opacity-0 max-h-0 -translate-y-2'
+          }`}
+        >
+          <h3 className="text-sm font-semibold text-gray-700 mb-4">Add New Contact</h3>
           <div className="grid grid-cols-2 gap-3">
-            <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Name *"
-              onKeyDown={e => e.key === 'Enter' && handleCreate()}
-              className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" autoFocus />
-            <input value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="Email"
-              className="px-3 py-2 border rounded-lg text-sm" type="email" />
-            <input value={newOrganization} onChange={e => setNewOrganization(e.target.value)} placeholder="Organization"
-              className="px-3 py-2 border rounded-lg text-sm" />
-            <input value={newRole} onChange={e => setNewRole(e.target.value)} placeholder="Role"
-              className="px-3 py-2 border rounded-lg text-sm" />
-            <select value={newArea} onChange={e => setNewArea(e.target.value)}
-              className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-              <option value="">Area (optional)</option>
-              <option value="work">Work</option>
-              <option value="personal">Personal</option>
-              <option value="career">Career</option>
-            </select>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Full Name *</label>
+              <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. John Smith"
+                onKeyDown={e => e.key === 'Enter' && handleCreate()}
+                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" autoFocus />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+              <input value={newEmail}
+                onChange={e => {
+                  setNewEmail(e.target.value);
+                  if (emailError && isValidEmail(e.target.value)) setEmailError('');
+                }}
+                onBlur={() => {
+                  if (newEmail && !isValidEmail(newEmail)) {
+                    setEmailError('Please enter a valid email address');
+                  } else {
+                    setEmailError('');
+                  }
+                }}
+                placeholder="e.g. john@company.com"
+                className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 ${emailError ? 'border-red-300 focus:ring-red-500' : 'focus:ring-blue-500'}`}
+                type="email" />
+              {emailError && (
+                <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" /> {emailError}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Organization</label>
+              <input value={newOrganization} onChange={e => setNewOrganization(e.target.value)} placeholder="e.g. Acme Corp"
+                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
+              <input value={newRole} onChange={e => setNewRole(e.target.value)} placeholder="e.g. Engineering Manager"
+                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Area</label>
+              <select value={newArea} onChange={e => setNewArea(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                <option value="">Select an area (optional)</option>
+                <option value="work">Work</option>
+                <option value="personal">Personal</option>
+                <option value="career">Career</option>
+              </select>
+            </div>
           </div>
-          <textarea value={newNotes} onChange={e => setNewNotes(e.target.value)} placeholder="Notes (optional)"
-            className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} />
-          <button onClick={handleCreate} disabled={creating}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition-colors">
-            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            Add Contact
-          </button>
+          <div className="mt-3">
+            <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
+            <textarea value={newNotes} onChange={e => setNewNotes(e.target.value)} placeholder="Any additional notes about this contact..."
+              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={2} />
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <button onClick={handleCreate} disabled={creating || !newName.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition-colors">
+              {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Add Contact
+            </button>
+            <button onClick={() => setShowCreate(false)}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm font-medium transition-colors">
+              Cancel
+            </button>
+            <span className="text-[11px] text-gray-400 ml-auto">
+              Press <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-200 rounded text-[10px] font-mono">Esc</kbd> to close
+            </span>
+          </div>
         </div>
       )}
 
-      {/* Import Modal placeholder (Improvement 30) */}
+      {/* Import Modal */}
       {showImport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl p-6 shadow-xl max-w-md w-full mx-4">
@@ -1298,7 +1538,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
         </div>
       )}
 
-      {/* ===== Improvement 39: Needs Follow-up Section ===== */}
+      {/* ===== Needs Follow-up Section ===== */}
       {followUpContacts.length > 0 && !dashboardFilter && (
         <div className="mb-4 p-4 bg-amber-50 rounded-xl border border-amber-200">
           <div className="flex items-center justify-between mb-2">
@@ -1306,14 +1546,14 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
               <Clock className="w-4 h-4" /> Needs Follow-up ({followUpContacts.length})
             </h3>
             <button onClick={() => setDashboardFilter('followup')} className="text-xs text-amber-600 hover:text-amber-800 font-medium">
-              View all →
+              View all
             </button>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {followUpContacts.slice(0, 5).map(c => (
               <button key={c.id} onClick={() => router.push(`/contacts/${c.id}`)}
                 className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-amber-100 hover:border-amber-300 transition-colors flex-shrink-0">
-                <div className={`w-7 h-7 rounded-full text-xs font-medium flex items-center justify-center ${getAvatarColor(c.name)}`}>
+                <div className={`w-7 h-7 rounded-full text-xs font-medium flex items-center justify-center bg-gradient-to-br ${getAvatarGradient(c.name)} text-white`}>
                   {initials(c.name)}
                 </div>
                 <div className="text-left">
@@ -1330,7 +1570,6 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       {contacts.length === 0 && !searchQuery ? (
         /* ===== Empty State with Onboarding ===== */
         <div className="text-center py-16">
-          {/* Illustration */}
           <div className="relative w-24 h-24 mx-auto mb-6">
             <div className="absolute inset-0 bg-gradient-to-br from-blue-100 via-purple-50 to-green-100 rounded-3xl rotate-6" />
             <div className="absolute inset-0 bg-white rounded-3xl shadow-sm flex items-center justify-center">
@@ -1394,16 +1633,21 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           </p>
         </div>
       ) : filteredContacts.length === 0 ? (
+        /* ===== No Results State ===== */
         <div className="text-center py-16 bg-white rounded-xl border border-gray-100 shadow-sm">
           <Search className="w-8 h-8 text-gray-300 mx-auto mb-3" />
-          <p className="text-gray-500">No contacts match your current filters</p>
+          <p className="text-gray-500 font-medium">No contacts match your filters</p>
+          <p className="text-sm text-gray-400 mt-1">
+            {searchQuery && <>No results for &ldquo;{searchQuery}&rdquo;. </>}
+            Try adjusting your search or filters.
+          </p>
           <button onClick={() => { clearAllFilters(); setSearchQuery(''); }}
-            className="mt-3 text-sm text-blue-600 hover:text-blue-800 font-medium">
+            className="mt-4 px-4 py-2 text-sm text-blue-600 hover:text-blue-800 font-medium bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
             Clear all filters
           </button>
         </div>
       ) : viewMode === 'organizations' ? (
-        /* ===== Improvement 21 & 22: Organization Grouping View ===== */
+        /* ===== Organization Grouping View ===== */
         <div className="space-y-3">
           {organizationGroups.map(group => {
             const isExpanded = expandedOrgs.has(group.key);
@@ -1428,11 +1672,16 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                         <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                           {group.contacts.length} member{group.contacts.length !== 1 ? 's' : ''}
                         </span>
+                        {group.totalTopics > 0 && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
+                            {group.totalTopics} topic{group.totalTopics !== 1 ? 's' : ''}
+                          </span>
+                        )}
                       </div>
                       {/* Avatar row: first 5 members */}
                       <div className="flex items-center gap-1 mt-1.5">
                         {group.contacts.slice(0, 5).map(c => (
-                          <div key={c.id} className={`w-6 h-6 rounded-full text-xs font-medium flex items-center justify-center ${getAvatarColor(c.name)}`}>
+                          <div key={c.id} className={`w-6 h-6 rounded-full text-[9px] font-medium flex items-center justify-center bg-gradient-to-br ${getAvatarGradient(c.name)} text-white`}>
                             {initials(c.name)}
                           </div>
                         ))}
@@ -1445,7 +1694,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                   </div>
                 </button>
 
-                {/* Expanded: Improvement 22 - Organization Detail Panel */}
+                {/* Expanded: Organization Detail Panel */}
                 {isExpanded && (
                   <div className="border-t border-gray-100">
                     {/* Quick stats */}
@@ -1454,7 +1703,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                         <Users className="w-3 h-3" /> {group.contacts.length} contact{group.contacts.length !== 1 ? 's' : ''}
                       </span>
                       <span className="flex items-center gap-1">
-                        <StickyNote className="w-3 h-3" /> {group.sharedTopics.length} topic{group.sharedTopics.length !== 1 ? 's' : ''}
+                        <StickyNote className="w-3 h-3" /> {group.totalTopics} topic{group.totalTopics !== 1 ? 's' : ''}
                       </span>
                       {group.sharedTopics.length > 0 && (
                         <div className="flex items-center gap-1 flex-wrap">
@@ -1506,7 +1755,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           {/* Assign Area dropdown */}
           <div className="relative">
             <select
-              onChange={e => { if (e.target.value !== '') bulkSetArea(e.target.value); e.target.value = '__placeholder__'; }}
+              onChange={e => { if (e.target.value !== '__placeholder__') bulkSetArea(e.target.value); e.target.value = '__placeholder__'; }}
               defaultValue="__placeholder__"
               className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
@@ -1569,7 +1818,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
         </div>
       )}
 
-      {/* ===== Improvement 40: Mobile Floating Action Button ===== */}
+      {/* Mobile Floating Action Button */}
       <button
         onClick={() => setShowCreate(true)}
         className="fixed bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 flex items-center justify-center z-30 md:hidden transition-colors"
