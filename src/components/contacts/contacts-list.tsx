@@ -1,7 +1,14 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Plus, X, Users, Mail, Building, StickyNote, ChevronRight, Loader2, Search, Edit3, Save, Trash2, Sparkles, Brain, UserPlus, Network, Wand2, ExternalLink, Clock, TrendingUp, Activity } from 'lucide-react';
+import {
+  Plus, X, Users, Mail, Building, StickyNote, ChevronRight, Loader2, Search,
+  Edit3, Save, Trash2, Sparkles, Brain, UserPlus, Network, Wand2, ExternalLink,
+  Clock, TrendingUp, TrendingDown, Activity,
+  Upload, LayoutList, Building2, CheckSquare, Square, Filter, ArrowUpDown, ArrowRight,
+  ChevronDown
+} from 'lucide-react';
 
 interface Contact {
   id: string;
@@ -9,7 +16,13 @@ interface Contact {
   email: string | null;
   organization: string | null;
   role: string | null;
+  area: string | null;
   notes: string | null;
+  last_interaction_at: string | null;
+  interaction_count: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
   contact_topic_links?: Array<{
     topic_id: string;
     role: string | null;
@@ -32,6 +45,7 @@ interface EnrichedProfile {
 }
 
 export function ContactsList({ initialContacts }: { initialContacts: Contact[] }) {
+  const router = useRouter();
   const [contacts, setContacts] = useState(initialContacts);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedContact, setSelectedContact] = useState<string | null>(null);
@@ -43,6 +57,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
   const [newOrganization, setNewOrganization] = useState('');
   const [newRole, setNewRole] = useState('');
   const [newNotes, setNewNotes] = useState('');
+  const [newArea, setNewArea] = useState('');
   const [creating, setCreating] = useState(false);
 
   // Edit state
@@ -52,6 +67,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
   const [editOrganization, setEditOrganization] = useState('');
   const [editRole, setEditRole] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editArea, setEditArea] = useState('');
   const [saving, setSaving] = useState(false);
 
   // AI Agent state
@@ -62,6 +78,373 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
   const [showExtracted, setShowExtracted] = useState(false);
   const [dedupeResults, setDedupeResults] = useState<string | null>(null);
   const [showDedupe, setShowDedupe] = useState(false);
+
+  // Improvement 21: Organization Grouping View
+  const [viewMode, setViewMode] = useState<'list' | 'organizations'>('list');
+  const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
+
+  // Improvement 26: Bulk Actions
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+
+  // Improvement 27: Enhanced Search with Filters
+  const [filterArea, setFilterArea] = useState<string>('');
+  const [filterOrg, setFilterOrg] = useState<string>('');
+  const [filterActivity, setFilterActivity] = useState<string>('');
+  const [filterHasEmail, setFilterHasEmail] = useState(false);
+
+  // Improvement 28: Sort Options
+  const [sortBy, setSortBy] = useState<string>('name-asc');
+
+  // Improvement 30: Import modal state
+  const [showImport, setShowImport] = useState(false);
+
+  // Improvement 38: Dashboard card filter
+  const [dashboardFilter, setDashboardFilter] = useState<string>('');
+
+  // Improvement 36: Keyboard shortcuts
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // ========== HELPER FUNCTIONS ==========
+
+  const getInteractionScore = (c: Contact) => {
+    const lastAt = c.last_interaction_at;
+    const count = c.interaction_count || 0;
+
+    if (!lastAt || count === 0) {
+      return { label: 'New', color: 'text-gray-500 bg-gray-50', score: 0 };
+    }
+
+    const daysSince = Math.floor((Date.now() - new Date(lastAt).getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysSince <= 7) return { label: 'Active', color: 'text-green-600 bg-green-50', score: 5 };
+    if (daysSince <= 30) return { label: 'Recent', color: 'text-blue-600 bg-blue-50', score: 3 };
+    if (daysSince <= 90) return { label: 'Idle', color: 'text-amber-600 bg-amber-50', score: 1 };
+    return { label: 'Cold', color: 'text-red-600 bg-red-50', score: 0 };
+  };
+
+  const initials = (name: string) => {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  };
+
+  const avatarColors = ['bg-blue-100 text-blue-700', 'bg-green-100 text-green-700', 'bg-purple-100 text-purple-700', 'bg-amber-100 text-amber-700', 'bg-pink-100 text-pink-700', 'bg-cyan-100 text-cyan-700'];
+  const getAvatarColor = (name: string) => {
+    const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return avatarColors[hash % avatarColors.length];
+  };
+
+  const getRelativeTime = (dateStr: string | null) => {
+    if (!dateStr) return 'Never';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    if (days < 30) return `${Math.floor(days / 7)}w ago`;
+    if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+    return `${Math.floor(days / 365)}y ago`;
+  };
+
+  // ========== UNIQUE VALUES FOR FILTERS ==========
+
+  const uniqueOrganizations = useMemo(() => {
+    const orgs = new Set<string>();
+    contacts.forEach(c => { if (c.organization) orgs.add(c.organization); });
+    return Array.from(orgs).sort();
+  }, [contacts]);
+
+  // ========== FILTERED + SORTED CONTACTS (Improvements 27, 28, 38) ==========
+
+  const filteredContacts = useMemo(() => {
+    let result = contacts;
+
+    // Search query
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.organization || '').toLowerCase().includes(q) ||
+        (c.role || '').toLowerCase().includes(q)
+      );
+    }
+
+    // Filter: Area
+    if (filterArea) {
+      result = result.filter(c => c.area === filterArea);
+    }
+
+    // Filter: Organization
+    if (filterOrg) {
+      if (filterOrg === '__none__') {
+        result = result.filter(c => !c.organization);
+      } else {
+        result = result.filter(c => c.organization === filterOrg);
+      }
+    }
+
+    // Filter: Activity
+    if (filterActivity) {
+      result = result.filter(c => {
+        const score = getInteractionScore(c);
+        if (filterActivity === 'All') return true;
+        return score.label === filterActivity;
+      });
+    }
+
+    // Filter: Has Email
+    if (filterHasEmail) {
+      result = result.filter(c => !!c.email);
+    }
+
+    // Dashboard filter (Improvement 38)
+    if (dashboardFilter) {
+      const now = Date.now();
+      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+      if (dashboardFilter === 'total') {
+        // no additional filter
+      } else if (dashboardFilter === 'organizations') {
+        result = result.filter(c => !!c.organization);
+      } else if (dashboardFilter === 'active30') {
+        result = result.filter(c => c.last_interaction_at && (now - new Date(c.last_interaction_at).getTime()) <= thirtyDays);
+      } else if (dashboardFilter === 'followup') {
+        result = result.filter(c =>
+          c.last_interaction_at &&
+          (now - new Date(c.last_interaction_at).getTime()) > thirtyDays &&
+          c.interaction_count > 0
+        );
+      }
+    }
+
+    // Sort (Improvement 28)
+    const sorted = [...result];
+    switch (sortBy) {
+      case 'name-asc':
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case 'name-desc':
+        sorted.sort((a, b) => b.name.localeCompare(a.name));
+        break;
+      case 'most-active':
+        sorted.sort((a, b) => getInteractionScore(b).score - getInteractionScore(a).score);
+        break;
+      case 'least-active':
+        sorted.sort((a, b) => getInteractionScore(a).score - getInteractionScore(b).score);
+        break;
+      case 'recently-added':
+        sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        break;
+      case 'most-topics':
+        sorted.sort((a, b) => (b.contact_topic_links?.length || 0) - (a.contact_topic_links?.length || 0));
+        break;
+      case 'organization':
+        sorted.sort((a, b) => (a.organization || 'zzz').localeCompare(b.organization || 'zzz'));
+        break;
+      default:
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    return sorted;
+  }, [contacts, searchQuery, filterArea, filterOrg, filterActivity, filterHasEmail, sortBy, dashboardFilter]);
+
+  // ========== DASHBOARD STATS (Improvement 38) ==========
+
+  const dashboardStats = useMemo(() => {
+    const now = Date.now();
+    const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+    const orgs = new Set<string>();
+    let active30 = 0;
+    let needsFollowup = 0;
+
+    contacts.forEach(c => {
+      if (c.organization) orgs.add(c.organization);
+      if (c.last_interaction_at) {
+        const timeSince = now - new Date(c.last_interaction_at).getTime();
+        if (timeSince <= thirtyDays) active30++;
+        else if (c.interaction_count > 0) needsFollowup++;
+      }
+    });
+
+    return {
+      total: contacts.length,
+      organizations: orgs.size,
+      active30,
+      needsFollowup,
+    };
+  }, [contacts]);
+
+  // ========== FOLLOW-UP CONTACTS (Improvement 39) ==========
+
+  const followUpContacts = useMemo(() => {
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    return contacts.filter(c =>
+      c.interaction_count > 0 &&
+      c.last_interaction_at &&
+      new Date(c.last_interaction_at).getTime() < thirtyDaysAgo
+    );
+  }, [contacts]);
+
+  // ========== KEYBOARD SHORTCUTS (Improvement 36) ==========
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    switch (e.key) {
+      case 'n':
+        e.preventDefault();
+        setShowCreate(true);
+        break;
+      case '/':
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        break;
+      case 'j':
+        setSelectedIndex(prev => Math.min(prev + 1, filteredContacts.length - 1));
+        break;
+      case 'k':
+        setSelectedIndex(prev => Math.max(prev - 1, 0));
+        break;
+      case 'Enter':
+        if (selectedIndex >= 0 && selectedIndex < filteredContacts.length) {
+          router.push(`/contacts/${filteredContacts[selectedIndex].id}`);
+        }
+        break;
+      case 'e':
+        if (selectedIndex >= 0 && selectedIndex < filteredContacts.length) {
+          const c = filteredContacts[selectedIndex];
+          setSelectedContact(c.id);
+          startEdit(c);
+        }
+        break;
+      case 'Escape':
+        if (showCreate) setShowCreate(false);
+        else if (editingContact) setEditingContact(null);
+        else if (selectedContact) setSelectedContact(null);
+        else setSelectedIndex(-1);
+        break;
+    }
+  }, [selectedIndex, filteredContacts, showCreate, editingContact, selectedContact, router]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
+  // Scroll selected card into view
+  useEffect(() => {
+    if (selectedIndex >= 0) {
+      const el = document.getElementById(`contact-card-${selectedIndex}`);
+      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [selectedIndex]);
+
+  // ========== ORGANIZATION GROUPING (Improvements 21, 22) ==========
+
+  const organizationGroups = useMemo(() => {
+    const groups: Record<string, Contact[]> = {};
+    filteredContacts.forEach(c => {
+      const key = c.organization || '__no_org__';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(c);
+    });
+    // Sort org names, put "No Organization" last
+    const sortedKeys = Object.keys(groups).sort((a, b) => {
+      if (a === '__no_org__') return 1;
+      if (b === '__no_org__') return -1;
+      return a.localeCompare(b);
+    });
+    return sortedKeys.map(key => ({
+      name: key === '__no_org__' ? 'No Organization' : key,
+      key,
+      contacts: groups[key],
+      sharedTopics: Array.from(new Set(
+        groups[key].flatMap(c => c.contact_topic_links?.map(l => l.topics?.title || 'Unknown') || [])
+      )),
+    }));
+  }, [filteredContacts]);
+
+  const toggleOrgExpanded = (key: string) => {
+    setExpandedOrgs(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  // ========== BULK ACTIONS (Improvement 26) ==========
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedIds(new Set(filteredContacts.map(c => c.id)));
+  };
+
+  const deselectAll = () => {
+    setSelectedIds(new Set());
+  };
+
+  const bulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} selected contact(s)? This cannot be undone.`)) return;
+    const ids = Array.from(selectedIds);
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        const res = await fetch(`/api/contacts/${id}`, { method: 'DELETE' });
+        if (res.ok) deleted++;
+      } catch { /* skip */ }
+    }
+    setContacts(prev => prev.filter(c => !selectedIds.has(c.id)));
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    toast.success(`Deleted ${deleted} contact(s)`);
+  };
+
+  const bulkSetArea = async (area: string) => {
+    if (selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
+    let updated = 0;
+    for (const id of ids) {
+      try {
+        const res = await fetch(`/api/contacts/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ area: area || null }),
+        });
+        if (res.ok) updated++;
+      } catch { /* skip */ }
+    }
+    setContacts(prev => prev.map(c => selectedIds.has(c.id) ? { ...c, area: area || null } : c));
+    toast.success(`Updated area for ${updated} contact(s)`);
+  };
+
+  // ========== FILTER HELPERS ==========
+
+  const hasActiveFilters = filterArea || filterOrg || filterActivity || filterHasEmail || dashboardFilter;
+
+  const clearAllFilters = () => {
+    setFilterArea('');
+    setFilterOrg('');
+    setFilterActivity('');
+    setFilterHasEmail(false);
+    setDashboardFilter('');
+  };
+
+  // ========== CRUD HANDLERS ==========
 
   const handleCreate = async () => {
     if (!newName.trim()) { toast.error('Name is required'); return; }
@@ -76,12 +459,13 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           organization: newOrganization.trim() || null,
           role: newRole.trim() || null,
           notes: newNotes.trim() || null,
+          area: newArea || null,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setContacts(prev => [...prev, data.contact].sort((a, b) => a.name.localeCompare(b.name)));
-      setNewName(''); setNewEmail(''); setNewOrganization(''); setNewRole(''); setNewNotes('');
+      setNewName(''); setNewEmail(''); setNewOrganization(''); setNewRole(''); setNewNotes(''); setNewArea('');
       setShowCreate(false);
       toast.success('Contact added');
     } catch (err) {
@@ -97,6 +481,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     setEditOrganization(c.organization || '');
     setEditRole(c.role || '');
     setEditNotes(c.notes || '');
+    setEditArea(c.area || '');
     setSelectedContact(c.id);
   };
 
@@ -104,8 +489,8 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     if (!editName.trim()) { toast.error('Name is required'); return; }
     setSaving(true);
     try {
-      const res = await fetch('/api/contacts', {
-        method: 'POST',
+      const res = await fetch(`/api/contacts/${contactId}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: editName.trim(),
@@ -113,6 +498,7 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           organization: editOrganization.trim() || null,
           role: editRole.trim() || null,
           notes: editNotes.trim() || null,
+          area: editArea || null,
         }),
       });
       const data = await res.json();
@@ -139,49 +525,6 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     }
   };
 
-  // Calculate interaction score based on topic links
-  const getInteractionScore = (c: Contact) => {
-    const topicCount = c.contact_topic_links?.length || 0;
-    if (topicCount >= 5) return { label: 'Very Active', color: 'text-green-600 bg-green-50', score: 5 };
-    if (topicCount >= 3) return { label: 'Active', color: 'text-blue-600 bg-blue-50', score: 3 };
-    if (topicCount >= 1) return { label: 'Connected', color: 'text-amber-600 bg-amber-50', score: 1 };
-    return { label: 'New', color: 'text-gray-500 bg-gray-50', score: 0 };
-  };
-
-  const initials = (name: string) => {
-    const parts = name.trim().split(/\s+/);
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return name.slice(0, 2).toUpperCase();
-  };
-
-  // Filtered contacts
-  const filteredContacts = useMemo(() => {
-    if (!searchQuery.trim()) return contacts;
-    const q = searchQuery.toLowerCase();
-    return contacts.filter(c =>
-      c.name.toLowerCase().includes(q) ||
-      (c.email || '').toLowerCase().includes(q) ||
-      (c.organization || '').toLowerCase().includes(q) ||
-      (c.role || '').toLowerCase().includes(q)
-    );
-  }, [contacts, searchQuery]);
-
-  // Organization grouping for count
-  const orgCounts = useMemo(() => {
-    return contacts.reduce((acc, c) => {
-      if (c.organization) {
-        acc[c.organization] = (acc[c.organization] || 0) + 1;
-      }
-      return acc;
-    }, {} as Record<string, number>);
-  }, [contacts]);
-
-  const avatarColors = ['bg-blue-100 text-blue-700', 'bg-green-100 text-green-700', 'bg-purple-100 text-purple-700', 'bg-amber-100 text-amber-700', 'bg-pink-100 text-pink-700', 'bg-cyan-100 text-cyan-700'];
-  const getAvatarColor = (name: string) => {
-    const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return avatarColors[hash % avatarColors.length];
-  };
-
   // ========== AI AGENT FUNCTIONS ==========
 
   const runEnrichContact = async (contactId: string) => {
@@ -196,7 +539,6 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       if (!res.ok) throw new Error(data.error);
       setEnrichedProfile(data.result);
       setEnrichedContactId(contactId);
-      // Update the contact in the local state
       const enriched = data.result;
       setContacts(prev => prev.map(c => c.id === contactId ? {
         ...c,
@@ -213,7 +555,6 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
   const runExtractContacts = async () => {
     setAgentLoading('extract');
     try {
-      // First get topics
       const topicsRes = await fetch('/api/topics');
       const topicsData = await topicsRes.json();
       const topics = topicsData.topics || [];
@@ -222,28 +563,32 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
         setAgentLoading(null);
         return;
       }
-      // Extract from first topic that has items (could iterate more)
       const allExtracted: ExtractedContact[] = [];
-      for (const topic of topics.slice(0, 3)) {
-        try {
-          const res = await fetch('/api/ai/agents', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agent: 'find_contacts', context: { topic_id: topic.id } }),
-          });
-          const data = await res.json();
-          if (res.ok && data.result.contacts) {
-            allExtracted.push(...data.result.contacts);
-          }
-        } catch { /* skip failed topics */ }
+      const batchSize = 5;
+      for (let i = 0; i < topics.length; i += batchSize) {
+        const batch = topics.slice(i, i + batchSize);
+        toast.info(`Scanning topics... (${Math.min(i + batchSize, topics.length)}/${topics.length})`);
+        const batchResults = await Promise.all(batch.map(async (topic: Record<string, unknown>) => {
+          try {
+            const res = await fetch('/api/ai/agents', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ agent: 'find_contacts', context: { topic_id: topic.id } }),
+            });
+            const data = await res.json();
+            if (res.ok && data.result.contacts) {
+              return data.result.contacts;
+            }
+          } catch { /* skip failed topics */ }
+          return [];
+        }));
+        allExtracted.push(...batchResults.flat());
       }
-      // Deduplicate by email
       const seen = new Set<string>();
       const unique = allExtracted.filter(c => {
         const key = c.email?.toLowerCase() || c.name.toLowerCase();
         if (seen.has(key)) return false;
         seen.add(key);
-        // Also filter out contacts we already have
         const existingEmails = new Set(contacts.map(ec => ec.email?.toLowerCase()).filter(Boolean));
         return !existingEmails.has(c.email?.toLowerCase());
       });
@@ -302,38 +647,313 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     setAgentLoading(null);
   };
 
+  // ========== RENDER: Contact Card (Improvement 29) ==========
+
+  const renderContactCard = (c: Contact, index: number = -1) => {
+    const interaction = getInteractionScore(c);
+    const isSelected = selectedIds.has(c.id);
+    const isKeyboardSelected = index === selectedIndex && index >= 0;
+
+    return (
+      <div key={c.id} id={`contact-card-${index}`}>
+        <div
+          className={`w-full p-4 bg-white rounded-xl border transition-all shadow-sm text-left cursor-pointer group ${
+            isSelected ? 'border-blue-400 bg-blue-50/30' : isKeyboardSelected ? 'border-indigo-300 bg-indigo-50/20 shadow-md ring-1 ring-indigo-200' : 'border-gray-100 hover:border-blue-200 hover:shadow-md'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            {/* Checkbox for bulk select */}
+            {(selectMode || isSelected) && (
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleSelect(c.id); }}
+                className="flex-shrink-0 text-gray-400 hover:text-blue-600 transition-colors"
+              >
+                {isSelected
+                  ? <CheckSquare className="w-5 h-5 text-blue-600" />
+                  : <Square className="w-5 h-5" />
+                }
+              </button>
+            )}
+            {!selectMode && !isSelected && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setSelectMode(true); toggleSelect(c.id); }}
+                className="flex-shrink-0 text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-all"
+              >
+                <Square className="w-5 h-5" />
+              </button>
+            )}
+
+            {/* Avatar */}
+            <div className={`w-10 h-10 rounded-full font-medium text-sm flex items-center justify-center flex-shrink-0 ${getAvatarColor(c.name)}`}>
+              {initials(c.name)}
+            </div>
+
+            {/* Row 1: Name + Area badge + Engagement */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-medium text-gray-900" onClick={() => router.push(`/contacts/${c.id}`)}>{c.name}</p>
+                {c.area && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    c.area === 'work' ? 'bg-blue-100 text-blue-700' :
+                    c.area === 'personal' ? 'bg-green-100 text-green-700' :
+                    'bg-purple-100 text-purple-700'
+                  }`}>
+                    {c.area}
+                  </span>
+                )}
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-0.5 ${interaction.color}`}>
+                  {interaction.score >= 3 ? <TrendingUp className="w-3 h-3" /> : interaction.score >= 1 ? <ArrowRight className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                  {interaction.label}
+                </span>
+              </div>
+
+              {/* Row 2: Organization + Role + Topics count + Last interaction */}
+              <div className="flex gap-3 text-xs text-gray-500 mt-1 flex-wrap">
+                {c.organization && (
+                  <span className="flex items-center gap-1">
+                    <Building className="w-3 h-3" /> {c.organization}
+                  </span>
+                )}
+                {c.role && (
+                  <span className="text-gray-400">{c.role}</span>
+                )}
+                {c.contact_topic_links && c.contact_topic_links.length > 0 && (
+                  <span className="text-blue-600">
+                    {c.contact_topic_links.length} topic{c.contact_topic_links.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+                <span className="flex items-center gap-1 text-gray-400">
+                  <Clock className="w-3 h-3" /> {getRelativeTime(c.last_interaction_at)}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick action icons on hover */}
+            <div className="flex items-center gap-1">
+              {c.email && (
+                <a href={`mailto:${c.email}`} onClick={e => e.stopPropagation()}
+                  className="p-1.5 text-gray-300 hover:text-green-600 hover:bg-green-50 rounded transition-colors opacity-0 group-hover:opacity-100" title="Send email">
+                  <Mail className="w-3.5 h-3.5" />
+                </a>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); router.push(`/contacts/${c.id}`); }}
+                className="p-1.5 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors opacity-0 group-hover:opacity-100" title="View contact"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setSelectedContact(selectedContact === c.id ? null : c.id); }}
+                className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+              >
+                <ChevronRight className={`w-4 h-4 transition-transform ${selectedContact === c.id ? 'rotate-90' : ''}`} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Expanded detail */}
+        {selectedContact === c.id && (
+          <div className="mt-1 ml-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
+            {editingContact === c.id ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="Name *"
+                    className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Email"
+                    className="px-3 py-2 border rounded-lg text-sm" type="email" />
+                  <input value={editOrganization} onChange={e => setEditOrganization(e.target.value)} placeholder="Organization"
+                    className="px-3 py-2 border rounded-lg text-sm" />
+                  <input value={editRole} onChange={e => setEditRole(e.target.value)} placeholder="Role"
+                    className="px-3 py-2 border rounded-lg text-sm" />
+                  <select value={editArea} onChange={e => setEditArea(e.target.value)}
+                    className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                    <option value="">Area (optional)</option>
+                    <option value="work">Work</option>
+                    <option value="personal">Personal</option>
+                    <option value="career">Career</option>
+                  </select>
+                </div>
+                <textarea value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes"
+                  className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} />
+                <div className="flex gap-2">
+                  <button onClick={() => saveEdit(c.id)} disabled={saving}
+                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
+                    {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Save
+                  </button>
+                  <button onClick={() => setEditingContact(null)}
+                    className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-300 flex items-center gap-1">
+                    <X className="w-3 h-3" /> Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex gap-2">
+                    <button onClick={() => startEdit(c)}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                      <Edit3 className="w-3 h-3" /> Edit
+                    </button>
+                    <button onClick={() => runEnrichContact(c.id)}
+                      disabled={agentLoading === `enrich_${c.id}`}
+                      className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 disabled:opacity-50">
+                      {agentLoading === `enrich_${c.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
+                      AI Enrich
+                    </button>
+                    {c.email && (
+                      <a href={`mailto:${c.email}`}
+                        className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1">
+                        <Mail className="w-3 h-3" /> Quick Email
+                      </a>
+                    )}
+                    <button onClick={() => deleteContact(c.id)}
+                      className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1">
+                      <Trash2 className="w-3 h-3" /> Delete
+                    </button>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getInteractionScore(c).color}`}>
+                    <Activity className="w-3 h-3 inline mr-0.5" />
+                    {getInteractionScore(c).label}
+                  </span>
+                </div>
+
+                {/* Enriched profile banner */}
+                {enrichedContactId === c.id && enrichedProfile && (
+                  <div className="mb-3 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                    <h4 className="text-xs font-semibold text-purple-700 mb-2 flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" /> AI Enriched Profile
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-gray-500">Organization:</span>
+                        <span className="ml-1 text-gray-800">{enrichedProfile.organization}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Role:</span>
+                        <span className="ml-1 text-gray-800">{enrichedProfile.role}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Frequency:</span>
+                        <span className="ml-1 text-gray-800">{enrichedProfile.interaction_frequency}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Key Topics:</span>
+                        <span className="ml-1 text-gray-800">{enrichedProfile.key_topics?.join(', ') || 'None'}</span>
+                      </div>
+                    </div>
+                    {enrichedProfile.relationship_summary && (
+                      <p className="mt-2 text-xs text-gray-700 italic">{enrichedProfile.relationship_summary}</p>
+                    )}
+                  </div>
+                )}
+
+                {c.notes && (
+                  <div className="mb-3">
+                    <h4 className="text-xs font-semibold text-gray-500 mb-1 flex items-center gap-1">
+                      <StickyNote className="w-3 h-3" /> Notes
+                    </h4>
+                    <p className="text-sm text-gray-700">{c.notes}</p>
+                  </div>
+                )}
+                {c.contact_topic_links && c.contact_topic_links.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-500 mb-1">Related Topics</h4>
+                    <div className="flex gap-2 flex-wrap">
+                      {c.contact_topic_links.map((link) => (
+                        <a key={link.topic_id} href={`/topics/${link.topic_id}`}
+                          className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 transition-colors">
+                          {link.topics?.title || 'Unknown'}
+                          {link.role && ` (${link.role})`}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {!c.notes && (!c.contact_topic_links || c.contact_topic_links.length === 0) && (
+                  <div className="text-center py-2">
+                    <p className="text-xs text-gray-400">No additional details yet.</p>
+                    <button onClick={() => runEnrichContact(c.id)}
+                      disabled={agentLoading === `enrich_${c.id}`}
+                      className="mt-1 text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 mx-auto disabled:opacity-50">
+                      {agentLoading === `enrich_${c.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                      Use AI to enrich this profile
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ========== MAIN RENDER ==========
+
   return (
     <div>
-      {/* Search + Actions */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="flex-1 relative">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search contacts..."
-            className="w-full pl-10 pr-8 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-        <button onClick={() => setShowCreate(!showCreate)}
-          className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors flex-shrink-0">
-          {showCreate ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          {showCreate ? 'Cancel' : 'Add Contact'}
+      {/* ===== Improvement 38: Dashboard Summary Cards ===== */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <button
+          onClick={() => setDashboardFilter(dashboardFilter === 'total' ? '' : 'total')}
+          className={`p-4 rounded-xl border transition-all text-left ${
+            dashboardFilter === 'total' ? 'border-blue-400 bg-blue-50 shadow-md' : 'border-gray-100 bg-white hover:border-blue-200 hover:shadow-sm'
+          }`}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+              <Users className="w-4 h-4 text-blue-600" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{dashboardStats.total}</p>
+          <p className="text-xs text-gray-500">Total Contacts</p>
         </button>
-      </div>
 
-      {/* Stats */}
-      <div className="flex gap-4 mb-4 text-xs text-gray-500">
-        <span>{contacts.length} contact{contacts.length !== 1 ? 's' : ''}</span>
-        {Object.keys(orgCounts).length > 0 && (
-          <span>{Object.keys(orgCounts).length} organization{Object.keys(orgCounts).length !== 1 ? 's' : ''}</span>
-        )}
+        <button
+          onClick={() => setDashboardFilter(dashboardFilter === 'organizations' ? '' : 'organizations')}
+          className={`p-4 rounded-xl border transition-all text-left ${
+            dashboardFilter === 'organizations' ? 'border-purple-400 bg-purple-50 shadow-md' : 'border-gray-100 bg-white hover:border-purple-200 hover:shadow-sm'
+          }`}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+              <Building2 className="w-4 h-4 text-purple-600" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{dashboardStats.organizations}</p>
+          <p className="text-xs text-gray-500">Organizations</p>
+        </button>
+
+        <button
+          onClick={() => setDashboardFilter(dashboardFilter === 'active30' ? '' : 'active30')}
+          className={`p-4 rounded-xl border transition-all text-left ${
+            dashboardFilter === 'active30' ? 'border-green-400 bg-green-50 shadow-md' : 'border-gray-100 bg-white hover:border-green-200 hover:shadow-sm'
+          }`}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+              <Activity className="w-4 h-4 text-green-600" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{dashboardStats.active30}</p>
+          <p className="text-xs text-gray-500">Active in 30d</p>
+        </button>
+
+        <button
+          onClick={() => setDashboardFilter(dashboardFilter === 'followup' ? '' : 'followup')}
+          className={`p-4 rounded-xl border transition-all text-left ${
+            dashboardFilter === 'followup' ? 'border-amber-400 bg-amber-50 shadow-md' : 'border-gray-100 bg-white hover:border-amber-200 hover:shadow-sm'
+          }`}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
+              <Clock className="w-4 h-4 text-amber-600" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{dashboardStats.needsFollowup}</p>
+          <p className="text-xs text-gray-500">Needs Follow-up</p>
+        </button>
       </div>
 
       {/* AI Assistants Panel */}
@@ -357,6 +977,199 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
             <Wand2 className="w-3 h-3" /> Enrich individual contacts from their expanded view
           </span>
         </div>
+      </div>
+
+      {/* ===== Search + Sort + View Mode + Select Toggle ===== */}
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex-1 relative">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search contacts... (press / to focus)"
+            className="w-full pl-10 pr-8 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Sort dropdown (Improvement 28) */}
+        <div className="relative">
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+            className="appearance-none pl-8 pr-6 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+          >
+            <option value="name-asc">Name A-Z</option>
+            <option value="name-desc">Name Z-A</option>
+            <option value="most-active">Most Active</option>
+            <option value="least-active">Least Active</option>
+            <option value="recently-added">Recently Added</option>
+            <option value="most-topics">Most Topics</option>
+            <option value="organization">Organization</option>
+          </select>
+          <ArrowUpDown className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        </div>
+
+        {/* View mode toggle (Improvement 21) */}
+        <div className="flex border border-gray-200 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setViewMode('list')}
+            className={`px-3 py-2 text-xs font-medium flex items-center gap-1 transition-colors ${
+              viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <LayoutList className="w-3.5 h-3.5" /> List
+          </button>
+          <button
+            onClick={() => setViewMode('organizations')}
+            className={`px-3 py-2 text-xs font-medium flex items-center gap-1 transition-colors ${
+              viewMode === 'organizations' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <Building2 className="w-3.5 h-3.5" /> Organizations
+          </button>
+        </div>
+
+        {/* Select toggle (Improvement 26) */}
+        <button
+          onClick={() => { setSelectMode(!selectMode); if (selectMode) deselectAll(); }}
+          className={`px-3 py-2.5 border rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
+            selectMode ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          <CheckSquare className="w-3.5 h-3.5" /> Select
+        </button>
+
+        <button onClick={() => setShowCreate(!showCreate)}
+          className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors flex-shrink-0">
+          {showCreate ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+          {showCreate ? 'Cancel' : 'Add Contact'}
+        </button>
+      </div>
+
+      {/* ===== Improvement 27: Filter Chips ===== */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <Filter className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+
+        {/* Area filter */}
+        <select
+          value={filterArea}
+          onChange={e => setFilterArea(e.target.value)}
+          className={`px-2.5 py-1.5 border rounded-full text-xs bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+            filterArea ? 'border-blue-300 text-blue-700 bg-blue-50' : 'border-gray-200 text-gray-600'
+          }`}
+        >
+          <option value="">All Areas</option>
+          <option value="work">Work</option>
+          <option value="personal">Personal</option>
+          <option value="career">Career</option>
+        </select>
+
+        {/* Organization filter */}
+        <select
+          value={filterOrg}
+          onChange={e => setFilterOrg(e.target.value)}
+          className={`px-2.5 py-1.5 border rounded-full text-xs bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[180px] ${
+            filterOrg ? 'border-purple-300 text-purple-700 bg-purple-50' : 'border-gray-200 text-gray-600'
+          }`}
+        >
+          <option value="">All Organizations</option>
+          <option value="__none__">No Organization</option>
+          {uniqueOrganizations.map(org => (
+            <option key={org} value={org}>{org}</option>
+          ))}
+        </select>
+
+        {/* Activity filter */}
+        <select
+          value={filterActivity}
+          onChange={e => setFilterActivity(e.target.value)}
+          className={`px-2.5 py-1.5 border rounded-full text-xs bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+            filterActivity ? 'border-green-300 text-green-700 bg-green-50' : 'border-gray-200 text-gray-600'
+          }`}
+        >
+          <option value="">All Activity</option>
+          <option value="Active">Active</option>
+          <option value="Recent">Recent</option>
+          <option value="Idle">Idle</option>
+          <option value="Cold">Cold</option>
+          <option value="New">New</option>
+        </select>
+
+        {/* Has Email toggle */}
+        <button
+          onClick={() => setFilterHasEmail(!filterHasEmail)}
+          className={`px-2.5 py-1.5 border rounded-full text-xs font-medium flex items-center gap-1 transition-colors ${
+            filterHasEmail ? 'border-green-300 text-green-700 bg-green-50' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          <Mail className="w-3 h-3" /> Has Email
+        </button>
+
+        {/* Active filter pills + clear */}
+        {hasActiveFilters && (
+          <>
+            <span className="text-xs text-gray-400 mx-1">|</span>
+            {filterArea && (
+              <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs flex items-center gap-1">
+                Area: {filterArea}
+                <button onClick={() => setFilterArea('')} className="hover:text-blue-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+            {filterOrg && (
+              <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs flex items-center gap-1">
+                Org: {filterOrg === '__none__' ? 'None' : filterOrg}
+                <button onClick={() => setFilterOrg('')} className="hover:text-purple-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+            {filterActivity && (
+              <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs flex items-center gap-1">
+                {filterActivity}
+                <button onClick={() => setFilterActivity('')} className="hover:text-green-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+            {filterHasEmail && (
+              <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs flex items-center gap-1">
+                Has Email
+                <button onClick={() => setFilterHasEmail(false)} className="hover:text-green-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+            {dashboardFilter && (
+              <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-full text-xs flex items-center gap-1">
+                Dashboard: {dashboardFilter}
+                <button onClick={() => setDashboardFilter('')} className="hover:text-amber-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+            <button onClick={clearAllFilters}
+              className="text-xs text-red-500 hover:text-red-700 font-medium ml-1">
+              Clear all
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Showing X of Y + Select All/Deselect All */}
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-xs text-gray-500">
+          Showing {filteredContacts.length} of {contacts.length} contact{contacts.length !== 1 ? 's' : ''}
+        </span>
+        {selectMode && (
+          <div className="flex items-center gap-2">
+            <button onClick={selectAll} className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+              Select All ({filteredContacts.length})
+            </button>
+            <span className="text-gray-300">|</span>
+            <button onClick={deselectAll} className="text-xs text-gray-500 hover:text-gray-700 font-medium">
+              Deselect All
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Extracted Contacts Panel */}
@@ -433,6 +1246,13 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
               className="px-3 py-2 border rounded-lg text-sm" />
             <input value={newRole} onChange={e => setNewRole(e.target.value)} placeholder="Role"
               className="px-3 py-2 border rounded-lg text-sm" />
+            <select value={newArea} onChange={e => setNewArea(e.target.value)}
+              className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="">Area (optional)</option>
+              <option value="work">Work</option>
+              <option value="personal">Personal</option>
+              <option value="career">Career</option>
+            </select>
           </div>
           <textarea value={newNotes} onChange={e => setNewNotes(e.target.value)} placeholder="Notes (optional)"
             className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} />
@@ -444,206 +1264,243 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
         </div>
       )}
 
-      {/* Contact list */}
-      {filteredContacts.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-xl border border-gray-100 shadow-sm">
-          <Users className="w-8 h-8 text-gray-300 mx-auto mb-3" />
-          <p className="text-gray-500">{searchQuery ? `No contacts match "${searchQuery}"` : 'No contacts yet'}</p>
-          <p className="text-gray-400 text-xs mt-1">Contacts will be auto-extracted when you link items to topics, or add them manually.</p>
-          {!searchQuery && (
-            <div className="flex gap-3 justify-center mt-4">
-              <button onClick={() => setShowCreate(true)}
-                className="text-blue-600 hover:underline text-sm">Add your first contact &rarr;</button>
-              <button onClick={runExtractContacts} disabled={!!agentLoading}
-                className="text-purple-600 hover:underline text-sm flex items-center gap-1">
-                <Sparkles className="w-3 h-3" /> Auto-extract from topics
+      {/* Import Modal placeholder (Improvement 30) */}
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl p-6 shadow-xl max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Upload className="w-5 h-5 text-blue-600" /> Import Contacts
+              </h3>
+              <button onClick={() => setShowImport(false)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
               </button>
             </div>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filteredContacts.map((c) => (
-            <div key={c.id}>
-              <button
-                onClick={() => setSelectedContact(selectedContact === c.id ? null : c.id)}
-                className="w-full p-4 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all shadow-sm text-left"
-              >
-                <div className="flex items-center gap-3">
-                  {/* Avatar */}
-                  <div className={`w-10 h-10 rounded-full font-medium text-sm flex items-center justify-center flex-shrink-0 ${getAvatarColor(c.name)}`}>
-                    {initials(c.name)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900">{c.name}</p>
-                    <div className="flex gap-3 text-xs text-gray-500 mt-0.5">
-                      {c.email && (
-                        <span className="flex items-center gap-1">
-                          <Mail className="w-3 h-3" /> {c.email}
-                        </span>
-                      )}
-                      {c.organization && (
-                        <span className="flex items-center gap-1">
-                          <Building className="w-3 h-3" /> {c.organization}
-                        </span>
-                      )}
-                      {c.role && (
-                        <span className="text-gray-400">{c.role}</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {c.contact_topic_links && c.contact_topic_links.length > 0 && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">
-                        {c.contact_topic_links.length} topic{c.contact_topic_links.length !== 1 ? 's' : ''}
-                      </span>
-                    )}
-                    {c.email && (
-                      <a href={`mailto:${c.email}`} onClick={e => e.stopPropagation()}
-                        className="p-1 text-gray-300 hover:text-green-600 hover:bg-green-50 rounded transition-colors" title="Send email">
-                        <Mail className="w-3.5 h-3.5" />
-                      </a>
-                    )}
-                    <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${selectedContact === c.id ? 'rotate-90' : ''}`} />
-                  </div>
-                </div>
-              </button>
-
-              {/* Expanded detail */}
-              {selectedContact === c.id && (
-                <div className="mt-1 ml-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
-                  {editingContact === c.id ? (
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="Name *"
-                          className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                        <input value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Email"
-                          className="px-3 py-2 border rounded-lg text-sm" type="email" />
-                        <input value={editOrganization} onChange={e => setEditOrganization(e.target.value)} placeholder="Organization"
-                          className="px-3 py-2 border rounded-lg text-sm" />
-                        <input value={editRole} onChange={e => setEditRole(e.target.value)} placeholder="Role"
-                          className="px-3 py-2 border rounded-lg text-sm" />
-                      </div>
-                      <textarea value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes"
-                        className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} />
-                      <div className="flex gap-2">
-                        <button onClick={() => saveEdit(c.id)} disabled={saving}
-                          className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
-                          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Save
-                        </button>
-                        <button onClick={() => setEditingContact(null)}
-                          className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-300 flex items-center gap-1">
-                          <X className="w-3 h-3" /> Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex gap-2">
-                          <button onClick={() => startEdit(c)}
-                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
-                            <Edit3 className="w-3 h-3" /> Edit
-                          </button>
-                          <button onClick={() => runEnrichContact(c.id)}
-                            disabled={agentLoading === `enrich_${c.id}`}
-                            className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 disabled:opacity-50">
-                            {agentLoading === `enrich_${c.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
-                            AI Enrich
-                          </button>
-                          {c.email && (
-                            <a href={`mailto:${c.email}`}
-                              className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1">
-                              <Mail className="w-3 h-3" /> Quick Email
-                            </a>
-                          )}
-                          <button onClick={() => deleteContact(c.id)}
-                            className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1">
-                            <Trash2 className="w-3 h-3" /> Delete
-                          </button>
-                        </div>
-                        {(() => {
-                          const interaction = getInteractionScore(c);
-                          return (
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${interaction.color}`}>
-                              <Activity className="w-3 h-3 inline mr-0.5" />
-                              {interaction.label}
-                            </span>
-                          );
-                        })()}
-                      </div>
-
-                      {/* Enriched profile banner */}
-                      {enrichedContactId === c.id && enrichedProfile && (
-                        <div className="mb-3 p-3 bg-purple-50 rounded-lg border border-purple-200">
-                          <h4 className="text-xs font-semibold text-purple-700 mb-2 flex items-center gap-1">
-                            <Sparkles className="w-3 h-3" /> AI Enriched Profile
-                          </h4>
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div>
-                              <span className="text-gray-500">Organization:</span>
-                              <span className="ml-1 text-gray-800">{enrichedProfile.organization}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Role:</span>
-                              <span className="ml-1 text-gray-800">{enrichedProfile.role}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Frequency:</span>
-                              <span className="ml-1 text-gray-800">{enrichedProfile.interaction_frequency}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Key Topics:</span>
-                              <span className="ml-1 text-gray-800">{enrichedProfile.key_topics?.join(', ') || 'None'}</span>
-                            </div>
-                          </div>
-                          {enrichedProfile.relationship_summary && (
-                            <p className="mt-2 text-xs text-gray-700 italic">{enrichedProfile.relationship_summary}</p>
-                          )}
-                        </div>
-                      )}
-
-                      {c.notes && (
-                        <div className="mb-3">
-                          <h4 className="text-xs font-semibold text-gray-500 mb-1 flex items-center gap-1">
-                            <StickyNote className="w-3 h-3" /> Notes
-                          </h4>
-                          <p className="text-sm text-gray-700">{c.notes}</p>
-                        </div>
-                      )}
-                      {c.contact_topic_links && c.contact_topic_links.length > 0 && (
-                        <div>
-                          <h4 className="text-xs font-semibold text-gray-500 mb-1">Related Topics</h4>
-                          <div className="flex gap-2 flex-wrap">
-                            {c.contact_topic_links.map((link) => (
-                              <a key={link.topic_id} href={`/topics/${link.topic_id}`}
-                                className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 transition-colors">
-                                {link.topics?.title || 'Unknown'}
-                                {link.role && ` (${link.role})`}
-                              </a>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {!c.notes && (!c.contact_topic_links || c.contact_topic_links.length === 0) && (
-                        <div className="text-center py-2">
-                          <p className="text-xs text-gray-400">No additional details yet.</p>
-                          <button onClick={() => runEnrichContact(c.id)}
-                            disabled={agentLoading === `enrich_${c.id}`}
-                            className="mt-1 text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 mx-auto disabled:opacity-50">
-                            {agentLoading === `enrich_${c.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                            Use AI to enrich this profile
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
+            <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
+              <Upload className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+              <p className="text-sm text-gray-600 font-medium">Drag & drop a CSV or vCard file</p>
+              <p className="text-xs text-gray-400 mt-1">Or click to browse files</p>
+              <p className="text-xs text-gray-400 mt-3">Import functionality coming soon</p>
             </div>
-          ))}
+            <button onClick={() => setShowImport(false)}
+              className="mt-4 w-full py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">
+              Close
+            </button>
+          </div>
         </div>
       )}
+
+      {/* ===== Improvement 39: Needs Follow-up Section ===== */}
+      {followUpContacts.length > 0 && !dashboardFilter && (
+        <div className="mb-4 p-4 bg-amber-50 rounded-xl border border-amber-200">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+              <Clock className="w-4 h-4" /> Needs Follow-up ({followUpContacts.length})
+            </h3>
+            <button onClick={() => setDashboardFilter('followup')} className="text-xs text-amber-600 hover:text-amber-800 font-medium">
+              View all →
+            </button>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {followUpContacts.slice(0, 5).map(c => (
+              <button key={c.id} onClick={() => router.push(`/contacts/${c.id}`)}
+                className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-amber-100 hover:border-amber-300 transition-colors flex-shrink-0">
+                <div className={`w-7 h-7 rounded-full text-xs font-medium flex items-center justify-center ${getAvatarColor(c.name)}`}>
+                  {initials(c.name)}
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-medium text-gray-900">{c.name}</p>
+                  <p className="text-xs text-amber-600">{getRelativeTime(c.last_interaction_at)}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ===== MAIN CONTENT ===== */}
+      {contacts.length === 0 && !searchQuery ? (
+        /* ===== Improvement 30: Empty State with Onboarding ===== */
+        <div className="text-center py-12">
+          <Users className="w-12 h-12 text-gray-200 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-gray-700 mb-2">No contacts yet</h2>
+          <p className="text-sm text-gray-400 mb-8 max-w-md mx-auto">
+            Contacts help you track relationships across all your topics
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto">
+            {/* Card 1: Extract from Topics */}
+            <button
+              onClick={runExtractContacts}
+              disabled={!!agentLoading}
+              className="p-6 bg-white rounded-xl border-2 border-purple-100 hover:border-purple-300 hover:shadow-lg transition-all text-left group"
+            >
+              <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center mb-3 group-hover:bg-purple-200 transition-colors">
+                <UserPlus className="w-5 h-5 text-purple-600" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-1">Extract from Topics</h3>
+              <p className="text-xs text-gray-500">AI scans your linked items to discover contacts</p>
+            </button>
+
+            {/* Card 2: Import Contacts */}
+            <button
+              onClick={() => setShowImport(true)}
+              className="p-6 bg-white rounded-xl border-2 border-blue-100 hover:border-blue-300 hover:shadow-lg transition-all text-left group"
+            >
+              <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center mb-3 group-hover:bg-blue-200 transition-colors">
+                <Upload className="w-5 h-5 text-blue-600" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-1">Import Contacts</h3>
+              <p className="text-xs text-gray-500">Upload a CSV or vCard file</p>
+            </button>
+
+            {/* Card 3: Add Manually */}
+            <button
+              onClick={() => setShowCreate(true)}
+              className="p-6 bg-white rounded-xl border-2 border-green-100 hover:border-green-300 hover:shadow-lg transition-all text-left group"
+            >
+              <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center mb-3 group-hover:bg-green-200 transition-colors">
+                <Plus className="w-5 h-5 text-green-600" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-1">Add Manually</h3>
+              <p className="text-xs text-gray-500">Create a contact by hand</p>
+            </button>
+          </div>
+        </div>
+      ) : filteredContacts.length === 0 ? (
+        <div className="text-center py-16 bg-white rounded-xl border border-gray-100 shadow-sm">
+          <Search className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+          <p className="text-gray-500">No contacts match your current filters</p>
+          <button onClick={() => { clearAllFilters(); setSearchQuery(''); }}
+            className="mt-3 text-sm text-blue-600 hover:text-blue-800 font-medium">
+            Clear all filters
+          </button>
+        </div>
+      ) : viewMode === 'organizations' ? (
+        /* ===== Improvement 21 & 22: Organization Grouping View ===== */
+        <div className="space-y-3">
+          {organizationGroups.map(group => {
+            const isExpanded = expandedOrgs.has(group.key);
+            return (
+              <div key={group.key} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                {/* Org card header */}
+                <button
+                  onClick={() => toggleOrgExpanded(group.key)}
+                  className="w-full p-4 text-left hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      group.key === '__no_org__' ? 'bg-gray-100' : 'bg-purple-100'
+                    }`}>
+                      <Building2 className={`w-5 h-5 ${
+                        group.key === '__no_org__' ? 'text-gray-400' : 'text-purple-600'
+                      }`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-medium text-gray-900">{group.name}</h3>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                          {group.contacts.length} member{group.contacts.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      {/* Avatar row: first 5 members */}
+                      <div className="flex items-center gap-1 mt-1.5">
+                        {group.contacts.slice(0, 5).map(c => (
+                          <div key={c.id} className={`w-6 h-6 rounded-full text-xs font-medium flex items-center justify-center ${getAvatarColor(c.name)}`}>
+                            {initials(c.name)}
+                          </div>
+                        ))}
+                        {group.contacts.length > 5 && (
+                          <span className="text-xs text-gray-400 ml-1">+{group.contacts.length - 5} more</span>
+                        )}
+                      </div>
+                    </div>
+                    <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
+                  </div>
+                </button>
+
+                {/* Expanded: Improvement 22 - Organization Detail Panel */}
+                {isExpanded && (
+                  <div className="border-t border-gray-100">
+                    {/* Quick stats */}
+                    <div className="px-4 py-3 bg-gray-50 flex items-center gap-4 text-xs text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <Users className="w-3 h-3" /> {group.contacts.length} contact{group.contacts.length !== 1 ? 's' : ''}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <StickyNote className="w-3 h-3" /> {group.sharedTopics.length} topic{group.sharedTopics.length !== 1 ? 's' : ''}
+                      </span>
+                      {group.sharedTopics.length > 0 && (
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="text-gray-400">Topics:</span>
+                          {group.sharedTopics.slice(0, 5).map((t, i) => (
+                            <span key={i} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-xs">{t}</span>
+                          ))}
+                          {group.sharedTopics.length > 5 && (
+                            <span className="text-gray-400">+{group.sharedTopics.length - 5} more</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {/* Contact list within org */}
+                    <div className="p-3 space-y-2">
+                      {group.contacts.map((c, i) => renderContactCard(c, i))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* ===== List View (default) ===== */
+        <div className="space-y-2">
+          {filteredContacts.map((c, i) => renderContactCard(c, i))}
+        </div>
+      )}
+
+      {/* ===== Improvement 26: Floating Bulk Actions Bar ===== */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white rounded-2xl shadow-2xl border border-gray-200 px-6 py-3 flex items-center gap-4">
+          <span className="text-sm font-semibold text-gray-700">
+            {selectedIds.size} selected
+          </span>
+          <div className="w-px h-6 bg-gray-200" />
+
+          {/* Set Area dropdown */}
+          <div className="relative">
+            <select
+              onChange={e => { if (e.target.value) bulkSetArea(e.target.value); e.target.value = ''; }}
+              defaultValue=""
+              className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="" disabled>Set Area...</option>
+              <option value="work">Work</option>
+              <option value="personal">Personal</option>
+              <option value="career">Career</option>
+              <option value="">Clear Area</option>
+            </select>
+          </div>
+
+          <button onClick={bulkDelete}
+            className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 flex items-center gap-1 transition-colors">
+            <Trash2 className="w-3.5 h-3.5" /> Delete Selected
+          </button>
+
+          <button onClick={deselectAll}
+            className="px-3 py-1.5 text-gray-500 hover:text-gray-700 text-xs font-medium">
+            Deselect All
+          </button>
+        </div>
+      )}
+
+      {/* ===== Improvement 40: Mobile Floating Action Button ===== */}
+      <button
+        onClick={() => setShowCreate(true)}
+        className="fixed bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 flex items-center justify-center z-30 md:hidden transition-colors"
+        aria-label="Add contact"
+      >
+        <Plus className="w-6 h-6" />
+      </button>
     </div>
   );
 }

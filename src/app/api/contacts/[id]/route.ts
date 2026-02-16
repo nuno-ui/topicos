@@ -9,7 +9,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const { data, error } = await supabase
     .from('contacts')
-    .select('*, contact_topic_links(topic_id, role, topics(title))')
+    .select('*, contact_topic_links(id, topic_id, role, created_at, topics(title, status, due_date, priority, area, updated_at, tags))')
     .eq('id', id)
     .eq('user_id', user.id)
     .single();
@@ -34,6 +34,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (role !== undefined) updateData.role = role || null;
   if (notes !== undefined) updateData.notes = notes || null;
   if (area !== undefined) updateData.area = area || null;
+  if (body.metadata !== undefined) updateData.metadata = body.metadata;
+  if (body.last_interaction_at !== undefined) updateData.last_interaction_at = body.last_interaction_at;
+  if (body.interaction_count !== undefined) updateData.interaction_count = body.interaction_count;
 
   const { data, error } = await supabase
     .from('contacts')

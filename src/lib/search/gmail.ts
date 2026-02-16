@@ -59,3 +59,101 @@ export async function searchGmail(
   }
   return results;
 }
+
+/**
+ * Fetch full email body text for a specific message.
+ * Uses format=full to get the complete MIME payload, then extracts text/plain or text/html content.
+ */
+export async function getGmailMessageBody(
+  accessToken: string,
+  messageId: string
+): Promise<{ body: string; attachments: string[]; cc: string; bcc: string }> {
+  const url = GMAIL_API + '/' + messageId + '?format=full';
+  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+  const msg = await res.json();
+  if (!msg.payload) return { body: '', attachments: [], cc: '', bcc: '' };
+
+  // Extract CC/BCC headers
+  const headers = msg.payload.headers ?? [];
+  const getHeader = (name: string) => headers.find(
+    (h: { name: string; value: string }) => h.name.toLowerCase() === name.toLowerCase()
+  )?.value ?? '';
+
+  const cc = getHeader('Cc');
+  const bcc = getHeader('Bcc');
+
+  // Extract attachments
+  const attachments: string[] = [];
+  const extractAttachments = (part: Record<string, unknown>) => {
+    if (part.filename && (part.filename as string).length > 0) {
+      attachments.push(part.filename as string);
+    }
+    if (part.parts) {
+      for (const p of part.parts as Record<string, unknown>[]) {
+        extractAttachments(p);
+      }
+    }
+  };
+  extractAttachments(msg.payload);
+
+  // Extract body text
+  let bodyText = '';
+  const extractText = (part: Record<string, unknown>): string => {
+    const mimeType = part.mimeType as string;
+
+    // If this part has sub-parts, recurse
+    if (part.parts) {
+      const parts = part.parts as Record<string, unknown>[];
+      // Prefer text/plain over text/html
+      const plainPart = parts.find(p => (p.mimeType as string) === 'text/plain');
+      if (plainPart) return extractText(plainPart);
+      const htmlPart = parts.find(p => (p.mimeType as string) === 'text/html');
+      if (htmlPart) return extractText(htmlPart);
+      // Try first alternative/related/mixed part
+      for (const p of parts) {
+        const result = extractText(p);
+        if (result) return result;
+      }
+      return '';
+    }
+
+    // Leaf part — decode body data
+    const bodyData = (part.body as Record<string, unknown>)?.data as string;
+    if (!bodyData) return '';
+
+    // Base64url decode
+    const decoded = Buffer.from(bodyData.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
+
+    if (mimeType === 'text/plain') {
+      return decoded;
+    } else if (mimeType === 'text/html') {
+      // Strip HTML tags for clean text
+      return decoded
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n\n')
+        .replace(/<\/div>/gi, '\n')
+        .replace(/<\/li>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    }
+    return '';
+  };
+
+  bodyText = extractText(msg.payload);
+
+  // Truncate to 10,000 chars to stay within AI token limits
+  if (bodyText.length > 10000) {
+    bodyText = bodyText.substring(0, 10000) + '\n\n[... content truncated at 10,000 characters]';
+  }
+
+  return { body: bodyText, attachments, cc, bcc };
+}

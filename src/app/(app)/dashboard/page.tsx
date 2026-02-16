@@ -1,8 +1,34 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import Link from 'next/link';
-import { sourceIcon, sourceColor, formatRelativeDate } from '@/lib/utils';
-import { Zap, Clock, BarChart3, FolderKanban, Newspaper, PieChart } from 'lucide-react';
+import { sourceColor, sourceLabel, formatRelativeDate } from '@/lib/utils';
+import { Zap, Clock, BarChart3, FolderKanban, Newspaper, PieChart, Mail, Calendar, FileText, MessageSquare, BookOpen, StickyNote, Link2, File, Search, Users, Plus, Sparkles, Paperclip } from 'lucide-react';
 import { DashboardAgents } from '@/components/dashboard/dashboard-agents';
+
+const sourceIconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  gmail: Mail,
+  calendar: Calendar,
+  drive: FileText,
+  slack: MessageSquare,
+  notion: BookOpen,
+  manual: StickyNote,
+  link: Link2,
+};
+
+const sourceIconColorMap: Record<string, string> = {
+  gmail: 'text-red-500',
+  calendar: 'text-blue-500',
+  drive: 'text-amber-500',
+  slack: 'text-purple-500',
+  notion: 'text-gray-700',
+  manual: 'text-green-500',
+  link: 'text-cyan-500',
+};
+
+function DashSourceIcon({ source, className = 'w-4 h-4' }: { source: string; className?: string }) {
+  const Icon = sourceIconMap[source] || File;
+  const color = sourceIconColorMap[source] || 'text-gray-400';
+  return <Icon className={`${color} ${className}`} />;
+}
 
 export default async function DashboardPage() {
   const supabase = await createServerSupabaseClient();
@@ -152,7 +178,7 @@ export default async function DashboardPage() {
             <span key={s.label} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
               s.connected ? s.color : 'bg-gray-50 text-gray-400 border-gray-200'
             }`}>
-              {sourceIcon(s.icon)} {s.label}
+              <DashSourceIcon source={s.icon} className="w-3.5 h-3.5" /> {s.label}
               {s.connected ? (
                 <span className="ml-1 w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse-dot" />
               ) : (
@@ -166,13 +192,13 @@ export default async function DashboardPage() {
       {/* Quick Actions */}
       <div className="flex gap-3 mb-6">
         <Link href="/topics" className="px-4 py-2.5 brand-gradient text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-all shadow-sm flex items-center gap-2">
-          <span className="text-base">+</span> New Topic
+          <Plus className="w-4 h-4" /> New Topic
         </Link>
         <Link href="/search" className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm flex items-center gap-2">
-          <span className="text-base">&#128269;</span> Search Sources
+          <Search className="w-4 h-4 text-gray-500" /> Search Sources
         </Link>
         <Link href="/contacts" className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm flex items-center gap-2">
-          <span className="text-base">&#128101;</span> Contacts
+          <Users className="w-4 h-4 text-gray-500" /> Contacts
         </Link>
       </div>
 
@@ -192,7 +218,7 @@ export default async function DashboardPage() {
             {topics.length === 0 ? (
               <div className="text-center py-16 bg-white rounded-xl border border-gray-100 shadow-sm">
                 <div className="w-12 h-12 mx-auto bg-blue-50 rounded-xl flex items-center justify-center mb-3">
-                  <span className="text-xl">&#128203;</span>
+                  <FolderKanban className="w-6 h-6 text-blue-400" />
                 </div>
                 <p className="text-gray-500 font-medium">No topics yet</p>
                 <p className="text-sm text-gray-400 mt-1">Create your first topic to get started</p>
@@ -229,7 +255,7 @@ export default async function DashboardPage() {
                             }`}>{topic.area}</span>
                             {itemCount > 0 && (
                               <span className="text-xs text-gray-400 flex items-center gap-1">
-                                <span className="text-[10px]">&#128206;</span> {itemCount} item{itemCount !== 1 ? 's' : ''}
+                                <Paperclip className="w-3 h-3" /> {itemCount} item{itemCount !== 1 ? 's' : ''}
                               </span>
                             )}
                             {topic.due_date && (
@@ -241,7 +267,7 @@ export default async function DashboardPage() {
                             )}
                             {topic.summary && (
                               <span className="text-xs px-2 py-0.5 rounded-lg bg-purple-50 text-purple-600 font-medium flex items-center gap-1">
-                                <span className="text-[10px]">&#10024;</span> AI analyzed
+                                <Sparkles className="w-3 h-3" /> AI analyzed
                               </span>
                             )}
                           </div>
@@ -276,9 +302,7 @@ export default async function DashboardPage() {
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
                         run.kind === 'ai_find' ? 'bg-blue-50' : run.kind === 'analyze_topic' ? 'bg-purple-50' : 'bg-indigo-50'
                       }`}>
-                        <span className="text-sm">
-                          {run.kind === 'ai_find' ? '\uD83D\uDD0D' : run.kind === 'analyze_topic' ? '\uD83E\uDDE0' : '\uD83E\uDD16'}
-                        </span>
+                        {run.kind === 'ai_find' ? <Search className="w-4 h-4 text-blue-500" /> : run.kind === 'analyze_topic' ? <Sparkles className="w-4 h-4 text-purple-500" /> : <Zap className="w-4 h-4 text-indigo-500" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900">
@@ -286,7 +310,7 @@ export default async function DashboardPage() {
                         </p>
                         <p className="text-xs text-gray-500 mt-0.5 truncate">{run.input_summary}</p>
                         <div className="flex gap-3 mt-1.5 text-xs text-gray-400">
-                          {run.tokens_used ? <span className="flex items-center gap-1"><span className="text-[10px]">&#9889;</span> {run.tokens_used.toLocaleString()} tokens</span> : null}
+                          {run.tokens_used ? <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500" /> {run.tokens_used.toLocaleString()} tokens</span> : null}
                           <span>{formatRelativeDate(run.created_at)}</span>
                         </div>
                       </div>
@@ -306,7 +330,7 @@ export default async function DashboardPage() {
             {recentItems.length === 0 ? (
               <div className="text-center py-10 bg-white rounded-xl border border-gray-100 shadow-sm">
                 <div className="w-10 h-10 mx-auto bg-gray-50 rounded-lg flex items-center justify-center mb-2">
-                  <span className="text-base">&#128240;</span>
+                  <Newspaper className="w-5 h-5 text-gray-400" />
                 </div>
                 <p className="text-sm text-gray-400 font-medium">No recent activity</p>
                 <p className="text-xs text-gray-300 mt-1">Connect sources to see items here</p>
@@ -316,8 +340,8 @@ export default async function DashboardPage() {
                 {recentItems.map((item) => (
                   <div key={item.id} className="p-3 bg-white rounded-xl border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all shadow-sm">
                     <div className="flex items-start gap-2.5">
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs ${sourceColor(item.source)}`}>
-                        {sourceIcon(item.source)}
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${sourceColor(item.source)}`}>
+                        <DashSourceIcon source={item.source} className="w-3.5 h-3.5" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
@@ -342,12 +366,12 @@ export default async function DashboardPage() {
               <div className="space-y-3">
                 {Object.entries(sourceCounts).sort(([,a], [,b]) => b - a).map(([src, count]) => {
                   const pct = totalSourceCount > 0 ? (count / totalSourceCount * 100) : 0;
-                  const barColor = src === 'gmail' ? 'bg-red-400' : src === 'calendar' ? 'bg-blue-400' : src === 'drive' ? 'bg-amber-400' : src === 'slack' ? 'bg-purple-400' : src === 'notion' ? 'bg-gray-400' : 'bg-gray-300';
+                  const barColor = src === 'gmail' ? 'bg-red-400' : src === 'calendar' ? 'bg-blue-400' : src === 'drive' ? 'bg-amber-400' : src === 'slack' ? 'bg-purple-400' : src === 'notion' ? 'bg-gray-400' : src === 'manual' ? 'bg-green-400' : src === 'link' ? 'bg-cyan-400' : 'bg-gray-300';
                   return (
                     <div key={src}>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm text-gray-600 flex items-center gap-2">
-                          {sourceIcon(src)} {src === 'gmail' ? 'Email' : src === 'calendar' ? 'Calendar' : src === 'drive' ? 'Drive' : src === 'slack' ? 'Slack' : src === 'notion' ? 'Notion' : src}
+                          <DashSourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)}
                         </span>
                         <span className="text-sm font-semibold text-gray-900">{count}</span>
                       </div>

@@ -1,8 +1,9 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { sourceIcon, sourceLabel, formatRelativeDate } from '@/lib/utils';
-import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, ChevronUp, Clock, ArrowUpDown, Calendar, X, Sparkles, Brain, Tags, Wand2, Bookmark, BookmarkCheck, Eye } from 'lucide-react';
+import { sourceLabel, formatRelativeDate } from '@/lib/utils';
+import { SourceIcon } from '@/components/ui/source-icon';
+import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, ChevronUp, Clock, ArrowUpDown, Calendar, X, Sparkles, Brain, Tags, Wand2, Bookmark, BookmarkCheck, Eye, Mail, Filter } from 'lucide-react';
 
 interface SearchResult {
   external_id: string;
@@ -14,6 +15,13 @@ interface SearchResult {
   occurred_at: string;
   metadata: Record<string, unknown>;
   already_linked?: boolean;
+  account_email?: string;
+}
+
+interface ConnectedAccounts {
+  google: Array<{ id: string; email: string }>;
+  slack: Array<{ id: string; name: string }>;
+  notion: Array<{ id: string; name: string }>;
 }
 
 interface Topic {
@@ -35,7 +43,7 @@ interface CategorizedResult {
   confidence: number;
 }
 
-const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion', 'manual'] as const;
+const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion', 'manual', 'link'] as const;
 
 const SORT_OPTIONS = [
   { value: 'relevance', label: 'Relevance' },
@@ -75,8 +83,17 @@ export function SearchPanel() {
   const [searchSummary, setSearchSummary] = useState<string | null>(null);
   const [showSummary, setShowSummary] = useState(false);
 
+  // Concept search state
+  const [conceptResults, setConceptResults] = useState<SearchResult[]>([]);
+  const [conceptInfo, setConceptInfo] = useState<{ concepts: string[]; related_terms: Record<string, string[]> } | null>(null);
+  const [showConceptResults, setShowConceptResults] = useState(false);
+
   // Saved searches
   const [savedSearches, setSavedSearches] = useState<Array<{ query: string; sources: string[]; dateFrom?: string; dateTo?: string }>>([]);
+
+  // Account filtering
+  const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccounts>({ google: [], slack: [], notion: [] });
+  const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
 
   // Expanded result preview
   const [expandedResult, setExpandedResult] = useState<string | null>(null);
@@ -137,6 +154,7 @@ export function SearchPanel() {
     setLoading(true);
     saveRecentSearch(query.trim());
     try {
+      const accountIds = selectedAccounts.size > 0 ? Array.from(selectedAccounts) : undefined;
       const res = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -145,10 +163,17 @@ export function SearchPanel() {
           sources: Array.from(sources),
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
+          account_ids: accountIds,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+
+      // Store connected accounts info
+      if (data.accounts) {
+        setConnectedAccounts(data.accounts);
+      }
+
       const allItems: SearchResult[] = [];
       for (const src of data.results ?? []) {
         if (src.error) {
@@ -387,6 +412,34 @@ export function SearchPanel() {
     setAgentLoading(null);
   };
 
+  const runConceptSearch = async () => {
+    if (!query.trim()) { toast.error('Enter a concept to search for'); return; }
+    setAgentLoading('concept_search');
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: 'concept_search',
+          context: { query, sources: Array.from(sources) }
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      const conceptItems = (data.result.results || []) as SearchResult[];
+      setConceptResults(conceptItems);
+      setConceptInfo({
+        concepts: data.result.concepts || [],
+        related_terms: data.result.related_terms || {},
+      });
+      setShowConceptResults(true);
+      toast.success(`Found ${conceptItems.length} results across ${data.result.search_queries_used || 0} queries (EN/ES/PT)`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Concept search failed');
+    }
+    setAgentLoading(null);
+  };
+
   const applyEnhancedQuery = (eq: EnhancedQuery) => {
     setQuery(eq.query);
     const newSources = new Set(eq.sources.filter(s => SOURCES.includes(s as typeof SOURCES[number])));
@@ -449,7 +502,7 @@ export function SearchPanel() {
                   ? 'bg-blue-100 text-blue-700 font-medium'
                   : 'bg-gray-100 text-gray-400'
               }`}>
-              {sourceIcon(src)} {sourceLabel(src)}
+              <SourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)}
             </button>
           ))}
           <span className="text-gray-300 mx-1">|</span>
@@ -472,6 +525,55 @@ export function SearchPanel() {
             </select>
           </div>
         </div>
+
+        {/* Email account filters (show when multiple Google accounts connected) */}
+        {connectedAccounts.google.length > 1 && (sources.has('gmail') || sources.has('calendar') || sources.has('drive')) && (
+          <div className="flex gap-2 items-center flex-wrap text-xs">
+            <span className="text-gray-500 flex items-center gap-1 py-1.5">
+              <Filter className="w-3 h-3" />
+              Accounts:
+            </span>
+            <button
+              onClick={() => setSelectedAccounts(new Set())}
+              className={`px-2.5 py-1.5 rounded-full transition-colors ${
+                selectedAccounts.size === 0
+                  ? 'bg-blue-100 text-blue-700 font-medium'
+                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+              }`}
+            >
+              All accounts
+            </button>
+            {connectedAccounts.google.map(account => (
+              <button
+                key={account.id}
+                onClick={() => {
+                  setSelectedAccounts(prev => {
+                    const next = new Set(prev);
+                    if (next.has(account.id)) next.delete(account.id);
+                    else next.add(account.id);
+                    return next;
+                  });
+                }}
+                className={`px-2.5 py-1.5 rounded-full transition-colors flex items-center gap-1.5 ${
+                  selectedAccounts.has(account.id)
+                    ? 'bg-red-100 text-red-700 font-medium'
+                    : selectedAccounts.size === 0
+                      ? 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                }`}
+              >
+                <Mail className="w-3 h-3" />
+                {account.email}
+              </button>
+            ))}
+            {selectedAccounts.size > 0 && (
+              <button onClick={() => setSelectedAccounts(new Set())}
+                className="text-xs text-gray-400 hover:text-gray-600 ml-1">
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Date range filter */}
         {showDateFilters && (
@@ -547,6 +649,11 @@ export function SearchPanel() {
             {agentLoading === 'summarize' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
             Summarize Results
           </button>
+          <button onClick={runConceptSearch} disabled={!!agentLoading}
+            className="px-3 py-2 bg-gradient-to-r from-blue-50 to-purple-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:from-blue-100 hover:to-purple-100 disabled:opacity-50 flex items-center gap-1.5">
+            {agentLoading === 'concept_search' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+            Concept Search (EN/ES/PT)
+          </button>
         </div>
         <p className="text-xs text-gray-400 mt-2">
           {results.length > 0
@@ -574,7 +681,7 @@ export function SearchPanel() {
                   <div className="flex gap-1 mt-1 flex-wrap">
                     {eq.sources.map(s => (
                       <span key={s} className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">
-                        {sourceIcon(s)} {s}
+                        <SourceIcon source={s} className="w-3 h-3" /> {s}
                       </span>
                     ))}
                   </div>
@@ -612,6 +719,74 @@ export function SearchPanel() {
         </div>
       )}
 
+      {/* Concept Search Results Panel */}
+      {showConceptResults && conceptResults.length > 0 && (
+        <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+              <Search className="w-4 h-4" /> Concept Search Results ({conceptResults.length})
+            </h3>
+            <button onClick={() => setShowConceptResults(false)} className="p-1 text-blue-400 hover:text-blue-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          {conceptInfo && (
+            <div className="mb-3 space-y-2">
+              <div className="flex gap-1 flex-wrap">
+                <span className="text-xs text-blue-600 font-medium">Core concepts:</span>
+                {conceptInfo.concepts.map((c, i) => (
+                  <span key={i} className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">{c}</span>
+                ))}
+              </div>
+              <div className="flex gap-3 text-xs text-gray-500">
+                {Object.entries(conceptInfo.related_terms).map(([lang, terms]) => (
+                  <span key={lang}>
+                    <span className="font-medium uppercase">{lang}:</span> {(terms as string[]).slice(0, 4).join(', ')}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {conceptResults.map((item) => {
+              const key = item.source + ':' + item.external_id;
+              return (
+                <div key={key} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-blue-100">
+                  <span className="mt-0.5"><SourceIcon source={item.source} className="w-4 h-4" /></span>
+                  <div className="flex-1 min-w-0">
+                    <a href={item.url} target="_blank" rel="noopener noreferrer"
+                      className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate block">
+                      {item.title}
+                    </a>
+                    <p className="text-xs text-gray-500 line-clamp-2 mt-0.5">{item.snippet}</p>
+                    <div className="flex gap-2 mt-1 text-xs text-gray-400">
+                      <span>{sourceLabel(item.source)}</span>
+                      <span>{formatRelativeDate(item.occurred_at)}</span>
+                      {(item as SearchResult & { ai_confidence?: number }).ai_confidence != null && (
+                        <span className="text-blue-600 font-medium">
+                          {Math.round(((item as SearchResult & { ai_confidence?: number }).ai_confidence || 0) * 100)}% match
+                        </span>
+                      )}
+                    </div>
+                    {(item as SearchResult & { ai_reason?: string }).ai_reason && (
+                      <p className="text-xs text-blue-600 mt-0.5 italic">{(item as SearchResult & { ai_reason?: string }).ai_reason}</p>
+                    )}
+                  </div>
+                  {!item.already_linked && (
+                    <button
+                      onClick={() => setShowTopicDropdown(showTopicDropdown === key ? null : key)}
+                      className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded flex items-center gap-0.5"
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Results header */}
       {sortedResults.length > 0 && (
         <div className="mb-4 flex items-center justify-between">
@@ -619,7 +794,7 @@ export function SearchPanel() {
           <div className="flex gap-2 text-xs text-gray-400">
             {[...new Set(sortedResults.map(r => r.source))].map(src => (
               <span key={src} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
-                {sourceIcon(src)} {sortedResults.filter(r => r.source === src).length}
+                <SourceIcon source={src} className="w-3.5 h-3.5" /> {sortedResults.filter(r => r.source === src).length}
               </span>
             ))}
           </div>
@@ -672,7 +847,7 @@ export function SearchPanel() {
                   onChange={() => toggleResultSelection(key)}
                   className="mt-1.5 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
                 />
-                <span className="mt-0.5 text-base">{sourceIcon(item.source)}</span>
+                <span className="mt-0.5"><SourceIcon source={item.source} className="w-4 h-4" /></span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     {item.source === 'manual' ? (
@@ -700,6 +875,11 @@ export function SearchPanel() {
                   <div className="flex gap-2 mt-1.5 text-xs text-gray-400">
                     <span>{sourceLabel(item.source)}</span>
                     <span>{formatRelativeDate(item.occurred_at)}</span>
+                    {item.account_email && connectedAccounts.google.length > 1 && (
+                      <span className="flex items-center gap-0.5 text-gray-400">
+                        <Mail className="w-2.5 h-2.5" /> {item.account_email}
+                      </span>
+                    )}
                     {item.metadata?.from ? (
                       <span>from: {String(item.metadata.from).split('<')[0].trim()}</span>
                     ) : null}

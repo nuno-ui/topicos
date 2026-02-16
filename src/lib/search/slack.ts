@@ -47,7 +47,7 @@ export async function searchSlack(
       source: 'slack',
       source_account_id: accountId,
       title,
-      snippet: ((match.text as string) ?? '').slice(0, 200),
+      snippet: ((match.text as string) ?? '').slice(0, 500),
       url: (match.permalink as string) ?? '',
       occurred_at: ts ? new Date(parseFloat(ts) * 1000).toISOString() : new Date().toISOString(),
       metadata: {
@@ -57,7 +57,68 @@ export async function searchSlack(
         username: match.username ?? '',
         is_dm: isDm,
         is_mpim: isMpim,
+        thread_ts: (match.ts as string) ?? '',
+        reply_count: ((match as Record<string, unknown>).reply_count as number) ?? 0,
       },
     };
   });
+}
+
+/**
+ * Fetch a complete Slack thread (all replies) for richer context.
+ * Uses conversations.replies API to get the full threaded conversation.
+ */
+export async function getSlackThread(
+  accessToken: string,
+  channelId: string,
+  threadTs: string
+): Promise<{ messages: Array<{ user: string; text: string; ts: string }>; replyCount: number }> {
+  try {
+    const res = await fetch('https://slack.com/api/conversations.replies', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + accessToken,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        channel: channelId,
+        ts: threadTs,
+        limit: '50',
+      }),
+    });
+
+    const data = await res.json();
+    if (!data.ok) {
+      console.error('Slack thread fetch error:', data.error);
+      return { messages: [], replyCount: 0 };
+    }
+
+    const messages = (data.messages ?? []).map((msg: Record<string, unknown>) => ({
+      user: (msg.user as string) ?? (msg.username as string) ?? 'unknown',
+      text: (msg.text as string) ?? '',
+      ts: (msg.ts as string) ?? '',
+    }));
+
+    return {
+      messages,
+      replyCount: Math.max(0, messages.length - 1), // Subtract parent message
+    };
+  } catch (err) {
+    console.error('Slack thread fetch error:', err);
+    return { messages: [], replyCount: 0 };
+  }
+}
+
+/**
+ * Format a Slack thread into readable text for AI analysis.
+ */
+export function formatSlackThread(
+  messages: Array<{ user: string; text: string; ts: string }>
+): string {
+  if (messages.length === 0) return '';
+
+  return messages.map(msg => {
+    const time = new Date(parseFloat(msg.ts) * 1000).toLocaleString();
+    return `[${time}] ${msg.user}: ${msg.text}`;
+  }).join('\n');
 }

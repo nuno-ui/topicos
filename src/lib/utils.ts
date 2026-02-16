@@ -43,12 +43,13 @@ export function formatTimeAgo(date: string | Date) {
 
 export function sourceIcon(source: string) {
   switch (source) {
-    case 'gmail': return '📧';
+    case 'gmail': return '✉';
     case 'calendar': return '📅';
     case 'drive': return '📁';
     case 'slack': return '💬';
     case 'notion': return '📓';
     case 'manual': return '📝';
+    case 'link': return '🔗';
     default: return '📄';
   }
 }
@@ -61,6 +62,7 @@ export function sourceLabel(source: string) {
     case 'slack': return 'Message';
     case 'notion': return 'Page';
     case 'manual': return 'Note';
+    case 'link': return 'Link';
     default: return source;
   }
 }
@@ -73,6 +75,7 @@ export function sourceColor(source: string) {
     case 'slack': return 'text-purple-600 bg-purple-50';
     case 'notion': return 'text-gray-800 bg-gray-100';
     case 'manual': return 'text-green-600 bg-green-50';
+    case 'link': return 'text-cyan-600 bg-cyan-50';
     default: return 'text-gray-600 bg-gray-50';
   }
 }

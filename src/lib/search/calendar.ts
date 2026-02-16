@@ -39,7 +39,7 @@ export async function searchCalendar(
       source: 'calendar',
       source_account_id: accountId,
       title: (event.summary as string) ?? '(No title)',
-      snippet: ((event.description as string) ?? '').slice(0, 200),
+      snippet: (event.description as string) ?? '',
       url: (event.htmlLink as string) ?? '',
       occurred_at: start ? new Date(start).toISOString() : new Date().toISOString(),
       metadata: {
@@ -47,8 +47,19 @@ export async function searchCalendar(
         end,
         location: event.location ?? '',
         attendees,
+        attendee_details: ((event.attendees as Array<Record<string, string>>) ?? []).map(a => ({
+          email: a.email,
+          name: a.displayName || '',
+          response: a.responseStatus || 'needsAction',
+        })),
         status: event.status ?? '',
         organizer: (event.organizer as Record<string, string>)?.email ?? '',
+        conference_link: (event.conferenceData as Record<string, unknown>)?.entryPoints
+          ? ((event.conferenceData as Record<string, unknown>).entryPoints as Array<Record<string, string>>)
+              .find(ep => ep.entryPointType === 'video')?.uri ?? ''
+          : (event.hangoutLink as string) ?? '',
+        recurring: !!(event.recurringEventId),
+        creator: (event.creator as Record<string, string>)?.email ?? '',
       },
     };
   });

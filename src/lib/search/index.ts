@@ -15,6 +15,7 @@ export interface SearchRequest {
   date_from?: string;
   date_to?: string;
   max_results?: number;
+  account_ids?: string[];
 }
 
 export interface SourceSearchResult {
@@ -29,9 +30,9 @@ export async function searchAllSources(userId: string, request: SearchRequest): 
   const results: SourceSearchResult[] = [];
 
   const [googleRes, slackRes, notionRes] = await Promise.all([
-    supabase.from('google_accounts').select('id').eq('user_id', userId),
-    supabase.from('slack_accounts').select('id, access_token').eq('user_id', userId),
-    supabase.from('notion_accounts').select('id, access_token').eq('user_id', userId),
+    supabase.from('google_accounts').select('id, email').eq('user_id', userId),
+    supabase.from('slack_accounts').select('id, access_token, team_name').eq('user_id', userId),
+    supabase.from('notion_accounts').select('id, access_token, workspace_name').eq('user_id', userId),
   ]);
   const googleAccounts = googleRes.data ?? [];
   const slackAccounts = slackRes.data ?? [];
@@ -48,10 +49,15 @@ export async function searchAllSources(userId: string, request: SearchRequest): 
     }
   }
 
-  // Search Google sources in parallel
+  // Filter Google accounts if specific account IDs were requested
+  const requestedAccountIds = request.account_ids;
   const googleSources = request.sources.filter(s => ['gmail', 'calendar', 'drive'].includes(s));
   if (googleSources.length > 0 && googleAccounts.length > 0) {
-    for (const account of googleAccounts) {
+    const filteredGoogleAccounts = requestedAccountIds && requestedAccountIds.length > 0
+      ? googleAccounts.filter(a => requestedAccountIds.includes(a.id))
+      : googleAccounts;
+
+    for (const account of filteredGoogleAccounts) {
       try {
         const { accessToken, accountId } = await getValidGoogleToken(account.id);
         const searches = googleSources.map(async (source) => {
@@ -67,6 +73,10 @@ export async function searchAllSources(userId: string, request: SearchRequest): 
               case 'drive':
                 items = await searchDrive(accessToken, accountId, request.query, maxResults);
                 break;
+            }
+            // Tag each item with the account email for filtering in the UI
+            for (const item of items) {
+              (item as SearchResult & { account_email?: string }).account_email = account.email;
             }
             return { source, items, error: undefined };
           } catch (err) {
@@ -88,6 +98,9 @@ export async function searchAllSources(userId: string, request: SearchRequest): 
     for (const account of slackAccounts) {
       try {
         const items = await searchSlack(account.access_token, account.id, request.query, maxResults);
+        for (const item of items) {
+          (item as SearchResult & { account_email?: string }).account_email = account.team_name || account.id;
+        }
         results.push({ source: 'slack', items });
       } catch (err) {
         results.push({ source: 'slack', items: [], error: err instanceof Error ? err.message : 'Slack search failed' });
@@ -100,6 +113,9 @@ export async function searchAllSources(userId: string, request: SearchRequest): 
     for (const account of notionAccounts) {
       try {
         const items = await searchNotion(account.access_token, account.id, request.query, maxResults);
+        for (const item of items) {
+          (item as SearchResult & { account_email?: string }).account_email = account.workspace_name || account.id;
+        }
         results.push({ source: 'notion', items });
       } catch (err) {
         results.push({ source: 'notion', items: [], error: err instanceof Error ? err.message : 'Notion search failed' });

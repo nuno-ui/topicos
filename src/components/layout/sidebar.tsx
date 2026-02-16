@@ -37,6 +37,28 @@ export function Sidebar({ user }: { user: User }) {
   const pathname = usePathname();
   const router = useRouter();
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [followUpCount, setFollowUpCount] = useState(0);
+
+  // Fetch follow-up count for contacts badge (Improvement 39)
+  useEffect(() => {
+    const fetchFollowUpCount = async () => {
+      try {
+        const supabase = createClient();
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const { count } = await supabase
+          .from('contacts')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .gt('interaction_count', 0)
+          .lt('last_interaction_at', thirtyDaysAgo);
+        setFollowUpCount(count || 0);
+      } catch { /* ignore */ }
+    };
+    fetchFollowUpCount();
+    // Refresh every 5 minutes
+    const interval = setInterval(fetchFollowUpCount, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [user.id]);
 
   const handleLogout = async () => {
     const supabase = createClient();
@@ -108,6 +130,11 @@ export function Sidebar({ user }: { user: User }) {
                   )}
                   <item.icon className={cn('w-[18px] h-[18px]', isActive ? 'text-blue-600' : 'text-gray-400 group-hover:text-gray-600')} />
                   {item.label}
+                  {item.href === '/contacts' && followUpCount > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 bg-red-500 text-white text-[10px] rounded-full font-bold min-w-[18px] text-center leading-tight">
+                      {followUpCount > 9 ? '9+' : followUpCount}
+                    </span>
+                  )}
                 </div>
                 <kbd className={cn(
                   'hidden group-hover:inline-block text-[10px] px-1.5 py-0.5 rounded-md border font-mono',

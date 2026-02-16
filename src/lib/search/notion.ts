@@ -114,34 +114,134 @@ export async function searchNotion(
   return results;
 }
 
-// Fetch page content (blocks) for richer snippets
+// Fetch full page content (blocks) for deep content analysis
 export async function getNotionPageContent(
   accessToken: string,
   pageId: string,
-  maxBlocks: number = 20
+  maxBlocks: number = 100
 ): Promise<string> {
   try {
-    const res = await fetch(NOTION_API + '/blocks/' + pageId + '/children?page_size=' + maxBlocks, {
-      headers: {
-        Authorization: 'Bearer ' + accessToken,
-        'Notion-Version': '2022-06-28',
-      },
-    });
+    const headers = {
+      Authorization: 'Bearer ' + accessToken,
+      'Notion-Version': '2022-06-28',
+    };
 
-    const data = await res.json();
-    if (!data.results) return '';
+    // Fetch blocks with pagination support
+    let allBlocks: Record<string, unknown>[] = [];
+    let cursor: string | undefined;
+
+    while (allBlocks.length < maxBlocks) {
+      const pageSize = Math.min(100, maxBlocks - allBlocks.length);
+      let url = NOTION_API + '/blocks/' + pageId + '/children?page_size=' + pageSize;
+      if (cursor) url += '&start_cursor=' + cursor;
+
+      const res = await fetch(url, { headers });
+      const data = await res.json();
+      if (!data.results) break;
+
+      allBlocks = allBlocks.concat(data.results);
+
+      if (!data.has_more || !data.next_cursor) break;
+      cursor = data.next_cursor;
+    }
 
     const textParts: string[] = [];
-    for (const block of data.results) {
-      const richTexts = block[block.type]?.rich_text as Array<{ plain_text: string }> | undefined;
-      if (richTexts) {
-        const text = richTexts.map(rt => rt.plain_text).join('');
-        if (text) textParts.push(text);
+
+    for (const block of allBlocks) {
+      const type = block.type as string;
+      const blockData = block[type] as Record<string, unknown> | undefined;
+      if (!blockData) continue;
+
+      // Extract rich text content
+      const richTexts = blockData.rich_text as Array<{ plain_text: string }> | undefined;
+      const text = richTexts ? richTexts.map(rt => rt.plain_text).join('') : '';
+
+      switch (type) {
+        case 'paragraph':
+          if (text) textParts.push(text);
+          break;
+        case 'heading_1':
+          if (text) textParts.push('\n# ' + text);
+          break;
+        case 'heading_2':
+          if (text) textParts.push('\n## ' + text);
+          break;
+        case 'heading_3':
+          if (text) textParts.push('\n### ' + text);
+          break;
+        case 'bulleted_list_item':
+          if (text) textParts.push('• ' + text);
+          break;
+        case 'numbered_list_item':
+          if (text) textParts.push('- ' + text);
+          break;
+        case 'to_do': {
+          const checked = (blockData.checked as boolean) ? '☑' : '☐';
+          if (text) textParts.push(checked + ' ' + text);
+          break;
+        }
+        case 'toggle':
+          if (text) textParts.push('▸ ' + text);
+          break;
+        case 'code': {
+          const lang = (blockData.language as string) || '';
+          if (text) textParts.push('```' + lang + '\n' + text + '\n```');
+          break;
+        }
+        case 'quote':
+          if (text) textParts.push('> ' + text);
+          break;
+        case 'callout': {
+          const icon = (blockData.icon as Record<string, string>)?.emoji || '💡';
+          if (text) textParts.push(icon + ' ' + text);
+          break;
+        }
+        case 'divider':
+          textParts.push('---');
+          break;
+        case 'table_row': {
+          const cells = blockData.cells as Array<Array<{ plain_text: string }>> | undefined;
+          if (cells) {
+            const row = cells.map(cell => cell.map(c => c.plain_text).join('')).join(' | ');
+            textParts.push('| ' + row + ' |');
+          }
+          break;
+        }
+        case 'bookmark': {
+          const bookmarkUrl = (blockData.url as string) || '';
+          textParts.push('[Bookmark: ' + bookmarkUrl + ']' + (text ? ' ' + text : ''));
+          break;
+        }
+        case 'embed': {
+          const embedUrl = (blockData.url as string) || '';
+          textParts.push('[Embed: ' + embedUrl + ']');
+          break;
+        }
+        case 'image':
+        case 'video':
+        case 'file':
+        case 'pdf': {
+          const fileData = (blockData.file as Record<string, string>) || (blockData.external as Record<string, string>) || {};
+          textParts.push('[' + type + ': ' + (fileData.url || 'attached') + ']' + (text ? ' ' + text : ''));
+          break;
+        }
+        default:
+          // For any other block type with text
+          if (text) textParts.push(text);
+          break;
       }
     }
 
-    return textParts.join('\n').slice(0, 500);
-  } catch {
+    const fullContent = textParts.join('\n');
+
+    // Truncate to 15,000 chars for AI token limits
+    if (fullContent.length > 15000) {
+      return fullContent.substring(0, 15000) + '\n\n[... content truncated at 15,000 characters]';
+    }
+
+    return fullContent;
+  } catch (err) {
+    console.error('Notion content fetch error:', err);
     return '';
   }
 }

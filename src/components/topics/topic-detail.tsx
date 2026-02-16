@@ -1,12 +1,13 @@
 'use client';
 import { useState, useCallback, useEffect } from 'react';
-import { sourceIcon, sourceLabel, formatRelativeDate } from '@/lib/utils';
+import { sourceLabel, formatRelativeDate } from '@/lib/utils';
+import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { NoteEditor } from './note-editor';
 import { NoteCard } from './note-card';
-import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp } from 'lucide-react';
+import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp, Eye, EyeOff, Pin, ArrowUp, ArrowDown, ArrowRight, Layers, GitBranch, Compass, Award, Target } from 'lucide-react';
 
 interface TopicItem {
   id: string;
@@ -64,7 +65,7 @@ interface Topic {
   updated_at: string;
 }
 
-const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion', 'manual'] as const;
+const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion', 'manual', 'link'] as const;
 
 export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topic; initialItems: TopicItem[] }) {
   const router = useRouter();
@@ -126,6 +127,22 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   const [showNoteEditor, setShowNoteEditor] = useState(false);
   const [editingNote, setEditingNote] = useState<Record<string, unknown> | null>(null);
 
+  // Content expand state
+  const [expandedContent, setExpandedContent] = useState<Record<string, string>>({});
+  const [loadingContent, setLoadingContent] = useState<Set<string>>(new Set());
+
+  // Deep dive and recommend agent state
+  const [deepDiveReport, setDeepDiveReport] = useState<string | null>(null);
+  const [showDeepDive, setShowDeepDive] = useState(false);
+  const [recommendations, setRecommendations] = useState<Array<{ source: string; query: string; reason: string; expected_type: string }>>([]);
+  const [showRecommendations, setShowRecommendations] = useState(false);
+  const [entities, setEntities] = useState<Record<string, unknown> | null>(null);
+  const [showEntities, setShowEntities] = useState(false);
+  const [relatedTopics, setRelatedTopics] = useState<Array<{ topic_id: string; title: string; reason: string; confidence: number; relationship: string }>>([]);
+  const [showRelatedTopics, setShowRelatedTopics] = useState(false);
+  const [completenessScore, setCompletenessScore] = useState<Record<string, unknown> | null>(null);
+  const [showCompleteness, setShowCompleteness] = useState(false);
+
   // Listen for command palette "add note" event
   useEffect(() => {
     const handler = () => setShowNoteEditor(true);
@@ -178,6 +195,31 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
           setExtractedContacts(data.result.contacts || []);
           setShowExtractedContacts(true);
           toast.success(`Found ${data.result.contacts?.length || 0} contacts`);
+          break;
+        case 'deep_dive':
+          setDeepDiveReport(data.result.report);
+          setShowDeepDive(true);
+          toast.success(`Deep Dive complete! ${data.result.enriched_count} items enriched`);
+          break;
+        case 'recommend_content':
+          setRecommendations(data.result.recommendations || []);
+          setShowRecommendations(true);
+          toast.success(`${data.result.recommendations?.length || 0} content recommendations found`);
+          break;
+        case 'extract_entities':
+          setEntities(data.result);
+          setShowEntities(true);
+          toast.success('Entities extracted from content');
+          break;
+        case 'cross_topic_links':
+          setRelatedTopics(data.result.related_topics || []);
+          setShowRelatedTopics(true);
+          toast.success(`Found ${data.result.related_topics?.length || 0} related topics`);
+          break;
+        case 'completeness_check':
+          setCompletenessScore(data.result);
+          setShowCompleteness(true);
+          toast.success(`Completeness score: ${data.result.score}%`);
           break;
       }
     } catch (err) {
@@ -409,6 +451,59 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     setNotesSaving(false);
   };
 
+  // --- FETCH ITEM CONTENT ---
+  const fetchItemContent = async (itemId: string) => {
+    setLoadingContent(prev => new Set(prev).add(itemId));
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/items/${itemId}/content`);
+      const data = await res.json();
+      if (res.ok && data.body) {
+        setExpandedContent(prev => ({ ...prev, [itemId]: data.body }));
+      } else {
+        setExpandedContent(prev => ({ ...prev, [itemId]: '[No content available]' }));
+      }
+    } catch {
+      setExpandedContent(prev => ({ ...prev, [itemId]: '[Error fetching content]' }));
+    }
+    setLoadingContent(prev => {
+      const next = new Set(prev);
+      next.delete(itemId);
+      return next;
+    });
+  };
+
+  const toggleContent = (itemId: string) => {
+    if (expandedContent[itemId] !== undefined) {
+      setExpandedContent(prev => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+    } else {
+      fetchItemContent(itemId);
+    }
+  };
+
+  // --- PIN ITEM ---
+  const togglePinItem = async (itemId: string) => {
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+    const isPinned = !!(item.metadata?.pinned);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/items/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ metadata: { ...item.metadata, pinned: !isPinned } }),
+      });
+      if (res.ok) {
+        setItems(prev => prev.map(i => i.id === itemId ? { ...i, metadata: { ...i.metadata, pinned: !isPinned } } : i));
+        toast.success(isPinned ? 'Item unpinned' : 'Item pinned to top');
+      }
+    } catch {
+      toast.error('Failed to update pin');
+    }
+  };
+
   // --- AI ANALYSIS ---
   const runAnalysis = async (question?: string) => {
     if (items.length === 0) {
@@ -454,7 +549,14 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   };
 
   // Filtered items by tab
-  const filteredItems = activeTab === 'all' ? items : items.filter(i => i.source === activeTab);
+  const filteredItems = (activeTab === 'all' ? items : items.filter(i => i.source === activeTab))
+    .sort((a, b) => {
+      // Pinned items first
+      const aPinned = a.metadata?.pinned ? 1 : 0;
+      const bPinned = b.metadata?.pinned ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+      return 0; // preserve original order otherwise
+    });
   const sourceCounts = items.reduce((acc, item) => {
     acc[item.source] = (acc[item.source] || 0) + 1;
     return acc;
@@ -556,8 +658,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                 })()}
                 {/* Source counts */}
                 {Object.entries(sourceCounts).map(([src, count]) => (
-                  <span key={src} className="text-xs px-2 py-1 rounded-full bg-gray-50 text-gray-500">
-                    {sourceIcon(src)} {count}
+                  <span key={src} className="text-xs px-2 py-1 rounded-full bg-gray-50 text-gray-500 inline-flex items-center gap-1">
+                    <SourceIcon source={src} className="w-3.5 h-3.5" /> {count}
                   </span>
                 ))}
               </div>
@@ -674,8 +776,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                   </div>
                   <div className="flex-1 min-w-0 pb-1">
                     <p className="text-xs font-medium text-gray-800 truncate">{item.title}</p>
-                    <div className="flex gap-1 text-xs text-gray-400">
-                      <span>{sourceIcon(item.source)}</span>
+                    <div className="flex gap-1 text-xs text-gray-400 items-center">
+                      <SourceIcon source={item.source} className="w-3 h-3" />
                       <span>{formatRelativeDate(item.occurred_at)}</span>
                     </div>
                   </div>
@@ -813,7 +915,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                       ? 'bg-blue-100 text-blue-700'
                       : 'bg-gray-100 text-gray-400'
                   }`}>
-                  {sourceIcon(src)} {sourceLabel(src)}
+                  <SourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)}
                 </button>
               ))}
             </div>
@@ -859,7 +961,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                   {item.already_linked && (
                     <span className="mt-1 text-green-500 text-xs font-medium">Linked</span>
                   )}
-                  <span className="mt-0.5">{sourceIcon(item.source)}</span>
+                  <span className="mt-0.5"><SourceIcon source={item.source} className="w-4 h-4" /></span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
                     <p className="text-xs text-gray-500 truncate">{item.snippet}</p>
@@ -922,7 +1024,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                     {item.already_linked && (
                       <span className="mt-1 text-green-500 text-xs font-medium">Linked</span>
                     )}
-                    <span className="mt-0.5">{sourceIcon(item.source)}</span>
+                    <span className="mt-0.5"><SourceIcon source={item.source} className="w-4 h-4" /></span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
                       <p className="text-xs text-gray-500 truncate">{item.snippet}</p>
@@ -973,7 +1075,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                 activeTab === src ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}>
-              {sourceIcon(src)} {sourceLabel(src)} ({count})
+              <SourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)} ({count})
             </button>
           ))}
         </div>
@@ -998,35 +1100,89 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                   onDelete={(itemId) => unlinkItem(itemId)}
                 />
               ) : (
-                <div key={item.id} className="flex items-start gap-3 p-3 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-sm shadow-sm transition-colors group">
-                  <span className="mt-0.5 text-base">{sourceIcon(item.source)}</span>
-                  <div className="flex-1 min-w-0">
-                    <a href={item.url} target="_blank" rel="noopener noreferrer"
-                      className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate block">
-                      {item.title}
-                    </a>
-                    {item.snippet && (
-                      <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.snippet}</p>
-                    )}
-                    <div className="flex gap-2 mt-1 text-xs text-gray-400">
-                      <span>{sourceLabel(item.source)}</span>
-                      <span>{formatRelativeDate(item.occurred_at)}</span>
-                      {item.linked_by === 'ai' && (
-                        <span className="text-purple-500 flex items-center gap-0.5">
-                          <Sparkles className="w-3 h-3" /> AI linked
-                        </span>
+                <div key={item.id} className={`p-3 bg-white rounded-xl border shadow-sm transition-all group ${
+                  item.metadata?.pinned ? 'border-amber-300 bg-amber-50/30' : 'border-gray-100 hover:border-blue-200 hover:shadow-sm'
+                }`}>
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5"><SourceIcon source={item.source} className="w-4 h-4" /></span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        {!!item.metadata?.pinned && <Pin className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+                        <a href={item.url} target="_blank" rel="noopener noreferrer"
+                          className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate block">
+                          {item.title}
+                        </a>
+                        {/* Sent/Received indicator for emails */}
+                        {item.source === 'gmail' && (
+                          item.metadata?.is_sent
+                            ? <span className="flex items-center gap-0.5 text-xs text-blue-500 flex-shrink-0"><ArrowUp className="w-3 h-3" />Sent</span>
+                            : <span className="flex items-center gap-0.5 text-xs text-green-500 flex-shrink-0"><ArrowDown className="w-3 h-3" />Received</span>
+                        )}
+                      </div>
+                      {/* Source-specific details */}
+                      {item.source === 'gmail' && (
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
+                          {!!item.metadata?.from && <span className="truncate max-w-[200px]">{String(item.metadata.from).split('<')[0].trim()}</span>}
+                          {!!item.metadata?.has_attachments && <span className="text-gray-500">📎 {String(item.metadata.attachment_count || '')}</span>}
+                        </div>
                       )}
+                      {item.source === 'calendar' && (
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
+                          {!!item.metadata?.start && <span>{new Date(String(item.metadata.start)).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
+                          {!!item.metadata?.location && <span className="truncate max-w-[150px]">📍 {String(item.metadata.location)}</span>}
+                          {!!item.metadata?.conference_link && <a href={String(item.metadata.conference_link)} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">🎥 Join</a>}
+                        </div>
+                      )}
+                      {item.source === 'drive' && (
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
+                          <span>{String(item.metadata?.mimeType || '').split('.').pop() || 'File'}</span>
+                          {!!item.metadata?.size && <span>{(Number(item.metadata.size) / 1024).toFixed(0)} KB</span>}
+                        </div>
+                      )}
+                      {item.source === 'slack' && (
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
+                          {!!item.metadata?.channel_name && <span>#{String(item.metadata.channel_name)}</span>}
+                          {!!item.metadata?.username && <span>@{String(item.metadata.username)}</span>}
+                          {Number(item.metadata?.reply_count || 0) > 0 && <span>💬 {String(item.metadata.reply_count)} replies</span>}
+                        </div>
+                      )}
+                      {item.snippet && !expandedContent[item.id] && (
+                        <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.snippet}</p>
+                      )}
+                      {/* Expanded content */}
+                      {expandedContent[item.id] && (
+                        <div className="mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-700 max-h-80 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed">
+                          {expandedContent[item.id]}
+                        </div>
+                      )}
+                      <div className="flex gap-2 mt-1 text-xs text-gray-400">
+                        <span>{sourceLabel(item.source)}</span>
+                        <span>{formatRelativeDate(item.occurred_at)}</span>
+                        {item.linked_by === 'ai' && (
+                          <span className="text-purple-500 flex items-center gap-0.5">
+                            <Sparkles className="w-3 h-3" /> AI linked
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <a href={item.url} target="_blank" rel="noopener noreferrer"
-                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Open in source">
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                    <button onClick={() => unlinkItem(item.id)}
-                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Unlink from topic">
-                      <Unlink className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                      <button onClick={() => toggleContent(item.id)}
+                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={expandedContent[item.id] ? 'Hide content' : 'View full content'}>
+                        {loadingContent.has(item.id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : expandedContent[item.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                      <button onClick={() => togglePinItem(item.id)}
+                        className={`p-1.5 rounded transition-colors ${item.metadata?.pinned ? 'text-amber-500 bg-amber-50' : 'text-gray-400 hover:text-amber-500 hover:bg-amber-50'}`} title={item.metadata?.pinned ? 'Unpin' : 'Pin to top'}>
+                        <Pin className="w-3.5 h-3.5" />
+                      </button>
+                      <a href={item.url} target="_blank" rel="noopener noreferrer"
+                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Open in source">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                      <button onClick={() => unlinkItem(item.id)}
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Unlink from topic">
+                        <Unlink className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )
@@ -1150,6 +1306,31 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
               {agentLoading === 'find_contacts' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Users className="w-3 h-3" />}
               Find Contacts
             </button>
+            <button onClick={() => runAgent('deep_dive')} disabled={!!agentLoading || items.length === 0}
+              className="px-3 py-1.5 bg-gradient-to-r from-purple-50 to-pink-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:from-purple-100 hover:to-pink-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'deep_dive' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
+              Deep Dive
+            </button>
+            <button onClick={() => runAgent('recommend_content')} disabled={!!agentLoading || items.length === 0}
+              className="px-3 py-1.5 bg-gradient-to-r from-blue-50 to-cyan-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:from-blue-100 hover:to-cyan-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'recommend_content' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Compass className="w-3 h-3" />}
+              Find More Content
+            </button>
+            <button onClick={() => runAgent('extract_entities')} disabled={!!agentLoading || items.length === 0}
+              className="px-3 py-1.5 bg-gradient-to-r from-emerald-50 to-green-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:from-emerald-100 hover:to-green-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'extract_entities' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Target className="w-3 h-3" />}
+              Extract Entities
+            </button>
+            <button onClick={() => runAgent('cross_topic_links')} disabled={!!agentLoading}
+              className="px-3 py-1.5 bg-gradient-to-r from-orange-50 to-amber-50 text-orange-700 border border-orange-200 rounded-lg text-xs font-medium hover:from-orange-100 hover:to-amber-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'cross_topic_links' ? <Loader2 className="w-3 h-3 animate-spin" /> : <GitBranch className="w-3 h-3" />}
+              Related Topics
+            </button>
+            <button onClick={() => runAgent('completeness_check')} disabled={!!agentLoading}
+              className="px-3 py-1.5 bg-gradient-to-r from-rose-50 to-pink-50 text-rose-700 border border-rose-200 rounded-lg text-xs font-medium hover:from-rose-100 hover:to-pink-100 disabled:opacity-50 flex items-center gap-1.5">
+              {agentLoading === 'completeness_check' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Award className="w-3 h-3" />}
+              Completeness Check
+            </button>
           </div>
         </div>
 
@@ -1226,6 +1407,168 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
               ))}
             </div>
             <button onClick={() => setShowExtractedContacts(false)} className="text-xs text-teal-600 hover:underline mt-2">Dismiss</button>
+          </div>
+        )}
+
+        {/* Deep Dive Report */}
+        {showDeepDive && deepDiveReport && (
+          <div className="px-4 py-3 border-t border-gray-100 bg-gradient-to-r from-purple-50/50 to-pink-50/50">
+            <p className="text-xs text-purple-700 font-medium mb-2 flex items-center gap-1">
+              <Eye className="w-3 h-3" /> Deep Dive Report
+            </p>
+            <div className="prose prose-sm max-w-none text-gray-700 text-sm max-h-96 overflow-y-auto">
+              {deepDiveReport.split('\n').map((line, i) => {
+                if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-gray-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
+                if (line.startsWith('# ')) return <h2 key={i} className="font-bold text-gray-900 mt-2 mb-1 text-base">{line.replace('# ', '')}</h2>;
+                if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-sm mt-0.5">{line.slice(2)}</li>;
+                if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-semibold text-gray-800 mt-2">{line.replace(/\*\*/g, '')}</p>;
+                if (line.trim() === '') return <br key={i} />;
+                return <p key={i} className="text-sm mt-1">{line}</p>;
+              })}
+            </div>
+            <button onClick={() => setShowDeepDive(false)} className="text-xs text-purple-600 hover:underline mt-2">Dismiss</button>
+          </div>
+        )}
+
+        {/* Content Recommendations */}
+        {showRecommendations && recommendations.length > 0 && (
+          <div className="px-4 py-3 border-t border-gray-100 bg-gradient-to-r from-blue-50/50 to-cyan-50/50">
+            <p className="text-xs text-blue-700 font-medium mb-2 flex items-center gap-1">
+              <Compass className="w-3 h-3" /> Content Recommendations
+            </p>
+            <div className="space-y-2">
+              {recommendations.map((rec, i) => (
+                <div key={i} className="flex items-start gap-2 p-2 bg-white rounded-lg border border-blue-100">
+                  <span className="mt-0.5"><SourceIcon source={rec.source} className="w-4 h-4" /></span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-800 font-medium">{rec.reason}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Search: <code className="bg-gray-100 px-1 rounded">{rec.query}</code></p>
+                    <p className="text-xs text-blue-500 mt-0.5">{rec.expected_type}</p>
+                  </div>
+                  <button onClick={() => { setSearchQuery(rec.query); setShowSearch(true); }}
+                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex-shrink-0">
+                    Search
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setShowRecommendations(false)} className="text-xs text-blue-600 hover:underline mt-2">Dismiss</button>
+          </div>
+        )}
+
+        {/* Extracted Entities */}
+        {showEntities && entities && (
+          <div className="px-4 py-3 border-t border-gray-100 bg-gradient-to-r from-emerald-50/50 to-green-50/50">
+            <p className="text-xs text-emerald-700 font-medium mb-2 flex items-center gap-1">
+              <Target className="w-3 h-3" /> Extracted Entities
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              {(entities.people as Array<{name: string; email: string; role: string; mention_count: number}>)?.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-1">People</p>
+                  {(entities.people as Array<{name: string; email: string; role: string; mention_count: number}>).slice(0, 8).map((p, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-xs p-1">
+                      <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[10px] font-bold">{p.name.charAt(0)}</span>
+                      <span className="font-medium">{p.name}</span>
+                      {p.role && <span className="text-gray-400">({p.role})</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(entities.action_items as Array<{task: string; assignee: string; due: string; status: string}>)?.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-1">Action Items</p>
+                  {(entities.action_items as Array<{task: string; assignee: string; due: string; status: string}>).slice(0, 6).map((a, i) => (
+                    <div key={i} className="text-xs p-1 flex items-start gap-1">
+                      <ListChecks className="w-3 h-3 text-emerald-500 mt-0.5 flex-shrink-0" />
+                      <span>{a.task} {a.assignee !== 'unknown' && <span className="text-gray-400">→ {a.assignee}</span>}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(entities.dates as Array<{date: string; description: string; type: string}>)?.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-1">Key Dates</p>
+                  {(entities.dates as Array<{date: string; description: string; type: string}>).slice(0, 5).map((d, i) => (
+                    <div key={i} className="text-xs p-1 flex items-start gap-1">
+                      <Clock className="w-3 h-3 text-emerald-500 mt-0.5 flex-shrink-0" />
+                      <span>{d.date}: {d.description}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(entities.amounts as Array<{value: string; currency: string; context: string}>)?.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-1">Amounts</p>
+                  {(entities.amounts as Array<{value: string; currency: string; context: string}>).slice(0, 5).map((a, i) => (
+                    <div key={i} className="text-xs p-1">💰 {a.value} {a.currency} — {a.context}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={() => setShowEntities(false)} className="text-xs text-emerald-600 hover:underline mt-2">Dismiss</button>
+          </div>
+        )}
+
+        {/* Related Topics */}
+        {showRelatedTopics && relatedTopics.length > 0 && (
+          <div className="px-4 py-3 border-t border-gray-100 bg-gradient-to-r from-orange-50/50 to-amber-50/50">
+            <p className="text-xs text-orange-700 font-medium mb-2 flex items-center gap-1">
+              <GitBranch className="w-3 h-3" /> Related Topics
+            </p>
+            <div className="space-y-1.5">
+              {relatedTopics.map((rt, i) => (
+                <Link key={i} href={`/topics/${rt.topic_id}`}
+                  className="flex items-center gap-2 p-2 bg-white rounded-lg border border-orange-100 hover:border-orange-300 transition-colors">
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                    rt.relationship === 'parent' ? 'bg-blue-100 text-blue-700' :
+                    rt.relationship === 'child' ? 'bg-green-100 text-green-700' :
+                    rt.relationship === 'dependent' ? 'bg-amber-100 text-amber-700' :
+                    'bg-gray-100 text-gray-600'
+                  }`}>{rt.relationship}</span>
+                  <span className="text-sm font-medium text-gray-800 flex-1">{rt.title}</span>
+                  <span className="text-xs text-orange-500">{Math.round(rt.confidence * 100)}%</span>
+                </Link>
+              ))}
+            </div>
+            <button onClick={() => setShowRelatedTopics(false)} className="text-xs text-orange-600 hover:underline mt-2">Dismiss</button>
+          </div>
+        )}
+
+        {/* Completeness Check */}
+        {showCompleteness && completenessScore && (
+          <div className="px-4 py-3 border-t border-gray-100 bg-gradient-to-r from-rose-50/50 to-pink-50/50">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="relative w-14 h-14">
+                <svg className="w-14 h-14 transform -rotate-90">
+                  <circle cx="28" cy="28" r="24" stroke="#e5e7eb" strokeWidth="4" fill="none" />
+                  <circle cx="28" cy="28" r="24" stroke={(completenessScore.score as number) >= 80 ? '#22c55e' : (completenessScore.score as number) >= 50 ? '#f59e0b' : '#ef4444'} strokeWidth="4" fill="none"
+                    strokeDasharray={`${(completenessScore.score as number) * 1.508} 150.8`} strokeLinecap="round" />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-sm font-bold">{completenessScore.score as number}%</span>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-800">Topic Completeness</p>
+                <p className="text-xs text-gray-500">{String((completenessScore.stats as Record<string, unknown>)?.item_count || 0)} items, {String((completenessScore.stats as Record<string, unknown>)?.source_count || 0)} sources</p>
+              </div>
+            </div>
+            {(completenessScore.suggestions as string[])?.length > 0 && (
+              <div className="mb-2">
+                <p className="text-xs font-medium text-rose-600 mb-1">Suggestions</p>
+                {(completenessScore.suggestions as string[]).map((s, i) => (
+                  <p key={i} className="text-xs text-gray-600 flex items-start gap-1 mt-0.5"><ArrowRight className="w-3 h-3 text-rose-400 mt-0.5 flex-shrink-0" />{s}</p>
+                ))}
+              </div>
+            )}
+            {(completenessScore.strengths as string[])?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-green-600 mb-1">Strengths</p>
+                {(completenessScore.strengths as string[]).map((s, i) => (
+                  <p key={i} className="text-xs text-gray-600 flex items-start gap-1 mt-0.5"><span className="text-green-500">✓</span> {s}</p>
+                ))}
+              </div>
+            )}
+            <button onClick={() => setShowCompleteness(false)} className="text-xs text-rose-600 hover:underline mt-2">Dismiss</button>
           </div>
         )}
       </div>

@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       .select('contact_id, role, contacts(name, email, organization)')
       .eq('topic_id', topic_id);
 
-    const system = `You are a brilliant executive assistant analyzing a topic/project and its linked communications, events, and files. Provide actionable intelligence. The topic may include user-written notes that provide direct context, decisions, and observations. Give these notes high importance as they represent the user's own knowledge and perspective.
+    const system = `You are a brilliant executive assistant analyzing a topic/project and its linked communications, events, and files. Provide actionable intelligence. You may have access to FULL CONTENT of emails, documents, and messages (not just snippets) — use this rich context for deeper analysis. The topic may include user-written notes that provide direct context, decisions, and observations. Give these notes high importance as they represent the user's own knowledge and perspective.
 
 Your analysis MUST include these sections:
 
@@ -49,15 +49,35 @@ Key dates/events in chronological order.
 
 Be specific and reference actual items. Use bullet points. Keep it concise but thorough.`;
 
+    // Track total content size to stay within AI token limits
+    let totalContentSize = 0;
+    const MAX_TOTAL_CONTENT = 30000;
+    const MAX_PER_ITEM = 2000;
+
     const itemsList = (items || []).map((item: Record<string, unknown>, i: number) => {
       const meta = item.metadata as Record<string, unknown> || {};
       let details = `${i + 1}. [${item.source}] ${item.title}`;
-      if (item.snippet) details += `\n   Snippet: ${item.snippet}`;
+
+      // Prefer body (full content) over snippet when available
+      const bodyContent = item.body as string;
+      const snippetContent = item.snippet as string;
+      if (bodyContent && totalContentSize < MAX_TOTAL_CONTENT) {
+        const truncatedBody = bodyContent.length > MAX_PER_ITEM ? bodyContent.substring(0, MAX_PER_ITEM) + '...' : bodyContent;
+        details += `\n   Content: ${truncatedBody}`;
+        totalContentSize += truncatedBody.length;
+      } else if (snippetContent) {
+        details += `\n   Snippet: ${snippetContent}`;
+        totalContentSize += snippetContent.length;
+      }
+
       if (meta.from) details += `\n   From: ${meta.from}`;
       if (meta.to) details += `\n   To: ${meta.to}`;
+      if (meta.cc) details += `\n   CC: ${meta.cc}`;
       if (meta.attendees) details += `\n   Attendees: ${(meta.attendees as string[]).join(', ')}`;
       if (meta.channel_name) details += `\n   Channel: #${meta.channel_name}`;
       if (meta.username) details += `\n   User: ${meta.username}`;
+      if (meta.conference_link) details += `\n   Conference: ${meta.conference_link}`;
+      if (meta.has_attachments) details += `\n   Attachments: ${(meta.attachment_names as string[] || []).join(', ') || 'yes'}`;
       details += `\n   Date: ${item.occurred_at}`;
       return details;
     }).join('\n\n');

@@ -1,9 +1,10 @@
 'use client';
 import { useState, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { formatRelativeDate, sourceIcon } from '@/lib/utils';
+import { formatRelativeDate } from '@/lib/utils';
+import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye } from 'lucide-react';
 import Link from 'next/link';
 
 interface Topic {
@@ -24,6 +25,8 @@ interface Topic {
   progress_percent: number | null;
   notes: string | null;
   topic_items: { count: number }[];
+  recent_items?: Array<{ title: string; source: string; occurred_at: string }>;
+  source_counts?: Record<string, number>;
 }
 
 interface FolderType {
@@ -33,6 +36,7 @@ interface FolderType {
   color: string | null;
   icon: string | null;
   position: number;
+  area?: string | null;
 }
 
 export function TopicsList({ initialTopics, initialFolders }: { initialTopics: Topic[]; initialFolders: FolderType[] }) {
@@ -50,6 +54,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
+  const [newFolderArea, setNewFolderArea] = useState<string>('');
   const [editingFolder, setEditingFolder] = useState<string | null>(null);
   const [editFolderName, setEditFolderName] = useState('');
   const [movingTopic, setMovingTopic] = useState<string | null>(null);
@@ -69,6 +74,11 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
   // AI state
   const [aiLoading, setAiLoading] = useState<string | null>(null);
+
+  // Reorganization state
+  const [reorgSuggestions, setReorgSuggestions] = useState<string | null>(null);
+  const [showReorg, setShowReorg] = useState(false);
+  const [reorgLoading, setReorgLoading] = useState(false);
 
   const supabase = createClient();
 
@@ -96,13 +106,13 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     const res = await fetch('/api/folders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newFolderName.trim(), parent_id: newFolderParent }),
+      body: JSON.stringify({ name: newFolderName.trim(), parent_id: newFolderParent, area: newFolderArea || null }),
     });
     const data = await res.json();
     if (!res.ok) { toast.error(data.error); return; }
     setFolders([...folders, data.folder]);
     setExpandedFolders(prev => new Set([...prev, data.folder.id]));
-    setNewFolderName(''); setShowCreateFolder(false); setNewFolderParent(null);
+    setNewFolderName(''); setShowCreateFolder(false); setNewFolderParent(null); setNewFolderArea('');
     toast.success('Folder created');
   };
 
@@ -226,6 +236,25 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     setTopics([data, ...topics]);
     setAiSuggestions(prev => prev.filter(s => s.title !== suggestion.title));
     toast.success(`Created "${suggestion.title}"`);
+  };
+
+  const runReorganize = async () => {
+    setReorgLoading(true);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'reorganize_folders', context: {} }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setReorgSuggestions(data.result.suggestions);
+      setShowReorg(true);
+      toast.success('Organization analysis complete');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Analysis failed');
+    }
+    setReorgLoading(false);
   };
 
   // Build folder tree
@@ -371,6 +400,35 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                   <span className="text-xs text-gray-400">+{t.tags.length - 3}</span>
                 )}
               </div>
+              {/* Source diversity badges */}
+              {t.source_counts && Object.keys(t.source_counts).length > 0 && (
+                <div className="flex gap-1.5 flex-wrap mb-2">
+                  {Object.entries(t.source_counts).map(([src, count]) => {
+                    const icons: Record<string, typeof Mail> = { gmail: Mail, calendar: Calendar, drive: FileText, slack: MessageSquare, notion: BookOpen, manual: StickyNote };
+                    const colors: Record<string, string> = { gmail: 'text-red-500 bg-red-50', calendar: 'text-blue-500 bg-blue-50', drive: 'text-yellow-600 bg-yellow-50', slack: 'text-purple-500 bg-purple-50', notion: 'text-gray-700 bg-gray-100', manual: 'text-green-600 bg-green-50' };
+                    const Icon = icons[src] || Paperclip;
+                    return (
+                      <span key={src} className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full ${colors[src] || 'text-gray-500 bg-gray-50'}`}>
+                        <Icon className="w-3 h-3" /> {count as number}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {/* Recent items preview */}
+              {t.recent_items && t.recent_items.length > 0 && (
+                <div className="mb-2 space-y-0.5">
+                  {t.recent_items.slice(0, 2).map((item, idx) => (
+                    <p key={idx} className="text-xs text-gray-400 truncate flex items-center gap-1">
+                      <SourceIcon source={item.source} className="w-3 h-3" />
+                      <span className="truncate">{item.title}</span>
+                    </p>
+                  ))}
+                  {t.recent_items.length > 2 && (
+                    <p className="text-xs text-gray-300">+{t.recent_items.length - 2} more</p>
+                  )}
+                </div>
+              )}
               {/* Stats row */}
               <div className="flex gap-3 items-center text-xs text-gray-400">
                 {t.due_date && (
@@ -417,9 +475,27 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               }`} title={`Priority ${t.priority}`} />
             )}
           </div>
-          {/* Topic health indicator */}
+          {/* Topic health indicator + stale warning */}
           {(() => {
             const health = getTopicHealth(t);
+            const daysSinceUpdate = Math.floor((Date.now() - new Date(t.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+            const isStale = daysSinceUpdate > 14 && t.status === 'active';
+
+            if (isStale) {
+              return (
+                <div className="mt-2 pt-2 border-t border-amber-200 bg-amber-50/50 -mx-4 -mb-4 px-4 pb-3 pt-2 rounded-b-xl">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs text-amber-700">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span className="font-medium">Needs attention — {daysSinceUpdate} days since last update</span>
+                    </div>
+                    <span className="text-xs text-amber-500 flex items-center gap-1">
+                      <Zap className="w-3 h-3" /> Try AI Find
+                    </span>
+                  </div>
+                </div>
+              );
+            }
             if (health.score < 80) {
               return (
                 <div className={`mt-2 pt-2 border-t border-gray-100 flex items-center gap-2 text-xs ${health.color}`}>
@@ -432,6 +508,13 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             return null;
           })()}
         </Link>
+        {/* Quick action buttons on hover */}
+        <div className="absolute top-3 right-12 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+          <Link href={`/topics/${t.id}`} onClick={(e) => e.stopPropagation()}
+            className="p-1.5 bg-white/90 border border-gray-200 text-gray-500 hover:text-purple-600 hover:bg-purple-50 hover:border-purple-200 rounded-lg shadow-sm transition-colors" title="View details">
+            <Eye className="w-3.5 h-3.5" />
+          </Link>
+        </div>
         {/* Move to folder button */}
         {movingTopic === t.id ? (
           <div className="absolute top-2 right-2 z-10 bg-white border rounded-lg shadow-lg p-2 text-xs space-y-1 min-w-[160px]">
@@ -481,9 +564,14 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               <button onClick={() => renameFolder(node.folder.id)} className="text-blue-600 text-xs">Save</button>
             </div>
           ) : (
-            <span className="text-sm font-medium text-gray-700 flex-1 cursor-pointer" onClick={() => toggleFolder(node.folder.id)}>
+            <span className="text-sm font-medium text-gray-700 flex-1 cursor-pointer flex items-center gap-1.5" onClick={() => toggleFolder(node.folder.id)}>
               {node.folder.name}
-              {totalCount > 0 && <span className="text-gray-400 ml-1 text-xs">({totalCount})</span>}
+              {node.folder.area && (
+                <span className={`text-xs px-1.5 py-0 rounded-full ${areaColors[node.folder.area] || 'bg-gray-100 text-gray-600'}`}>
+                  {node.folder.area}
+                </span>
+              )}
+              {totalCount > 0 && <span className="text-gray-400 text-xs">({totalCount})</span>}
             </span>
           )}
           <div className="flex gap-0.5 opacity-0 group-hover/folder:opacity-100 transition-opacity">
@@ -567,6 +655,11 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
           );
           return null;
         })()}
+        <button onClick={runReorganize} disabled={reorgLoading || !!aiLoading}
+          className="px-3 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-medium hover:bg-indigo-100 flex items-center gap-1.5 disabled:opacity-50">
+          {reorgLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+          AI Reorganize
+        </button>
         <button onClick={() => setViewMode(viewMode === 'folders' ? 'flat' : 'folders')}
           className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 border ${
             viewMode === 'folders' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-gray-600 border-gray-200'
@@ -597,6 +690,30 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             ))}
             <button onClick={() => setAiSuggestions([])} className="text-xs text-purple-600 hover:underline">Dismiss</button>
           </div>
+        </div>
+      )}
+
+      {/* AI Reorganization Suggestions */}
+      {showReorg && reorgSuggestions && (
+        <div className="mb-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-indigo-800 flex items-center gap-2">
+              <Wand2 className="w-4 h-4" /> Folder Reorganization Suggestions
+            </h3>
+            <button onClick={() => setShowReorg(false)} className="p-1 text-indigo-400 hover:text-indigo-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="prose prose-sm max-w-none text-sm text-gray-700 bg-white rounded-lg p-4 border border-indigo-100 max-h-[500px] overflow-y-auto">
+            {reorgSuggestions.split('\n').map((line, i) => {
+              if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-indigo-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
+              if (line.startsWith('### ')) return <h4 key={i} className="font-semibold text-indigo-800 mt-2 mb-1 text-sm">{line.replace('### ', '')}</h4>;
+              if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-sm text-gray-700 mt-0.5">{line.slice(2)}</li>;
+              if (line.trim() === '') return <br key={i} />;
+              return <p key={i} className="text-sm text-gray-700 mt-1">{line}</p>;
+            })}
+          </div>
+          <p className="text-xs text-indigo-500 mt-2">These are AI suggestions. Review and apply them manually as needed.</p>
         </div>
       )}
 
@@ -640,11 +757,18 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
       {/* Create folder form */}
       {showCreateFolder && (
-        <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex gap-2 items-center">
+        <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex gap-2 items-center flex-wrap">
           <Folder className="w-4 h-4 text-amber-600" />
           <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') createFolder(); if (e.key === 'Escape') setShowCreateFolder(false); }}
-            placeholder="Folder name" className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" autoFocus />
+            placeholder="Folder name" className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 min-w-[150px]" autoFocus />
+          <select value={newFolderArea} onChange={e => setNewFolderArea(e.target.value)}
+            className="px-2 py-1.5 border rounded-lg text-xs text-gray-600">
+            <option value="">No area</option>
+            <option value="work">Work</option>
+            <option value="personal">Personal</option>
+            <option value="career">Career</option>
+          </select>
           {folders.length > 0 && (
             <select value={newFolderParent || ''} onChange={e => setNewFolderParent(e.target.value || null)}
               className="px-2 py-1.5 border rounded-lg text-xs text-gray-600">

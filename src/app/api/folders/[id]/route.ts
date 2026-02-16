@@ -8,9 +8,26 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json();
+
+  // Validate area if provided
+  // NOTE: The 'area' column requires a database migration:
+  // ALTER TABLE folders ADD COLUMN IF NOT EXISTS area text CHECK (area IN ('work', 'personal', 'career'));
+  if (body.area !== undefined && body.area !== null && !['work', 'personal', 'career'].includes(body.area)) {
+    return NextResponse.json({ error: 'Area must be work, personal, or career' }, { status: 400 });
+  }
+
+  // Build safe update data — only allow known fields
+  const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (body.name !== undefined) updateData.name = body.name;
+  if (body.parent_id !== undefined) updateData.parent_id = body.parent_id || null;
+  if (body.color !== undefined) updateData.color = body.color || null;
+  if (body.icon !== undefined) updateData.icon = body.icon || null;
+  if (body.position !== undefined) updateData.position = body.position;
+  if (body.area !== undefined) updateData.area = body.area || null;
+
   const { data, error } = await supabase
     .from('folders')
-    .update({ ...body, updated_at: new Date().toISOString() })
+    .update(updateData)
     .eq('id', id)
     .eq('user_id', user.id)
     .select()

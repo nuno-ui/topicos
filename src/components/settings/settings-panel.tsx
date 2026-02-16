@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Loader2, Trash2, Plus, Shield, Sparkles, BarChart3, Brain, Zap, X } from 'lucide-react';
-import { sourceIcon } from '@/lib/utils';
+import { SourceIcon } from '@/components/ui/source-icon';
 
 interface Props {
   googleAccounts: { id: string; email: string }[];
@@ -247,8 +247,10 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
       <div>
         <div className="flex items-center gap-2 mb-1">
           <h2 className="text-lg font-semibold text-gray-900">Google Accounts</h2>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600">
-            {sourceIcon('gmail')} {sourceIcon('calendar')} {sourceIcon('drive')}
+          <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 inline-flex items-center gap-1">
+            <SourceIcon source="gmail" className="w-3.5 h-3.5" />
+            <SourceIcon source="calendar" className="w-3.5 h-3.5" />
+            <SourceIcon source="drive" className="w-3.5 h-3.5" />
           </span>
         </div>
         <p className="text-sm text-gray-500 mb-4">Connect Google to search Gmail, Calendar, and Drive</p>
@@ -266,9 +268,9 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
                   <div>
                     <p className="text-sm font-medium text-gray-900">{a.email}</p>
                     <div className="flex gap-2 mt-0.5">
-                      <span className="text-xs text-gray-400 flex items-center gap-1">{sourceIcon('gmail')} Email</span>
-                      <span className="text-xs text-gray-400 flex items-center gap-1">{sourceIcon('calendar')} Calendar</span>
-                      <span className="text-xs text-gray-400 flex items-center gap-1">{sourceIcon('drive')} Drive</span>
+                      <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="gmail" className="w-3 h-3" /> Email</span>
+                      <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="calendar" className="w-3 h-3" /> Calendar</span>
+                      <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="drive" className="w-3 h-3" /> Drive</span>
                     </div>
                   </div>
                 </div>
@@ -312,8 +314,8 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
       <div>
         <div className="flex items-center gap-2 mb-1">
           <h2 className="text-lg font-semibold text-gray-900">Slack Workspaces</h2>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600">
-            {sourceIcon('slack')}
+          <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 inline-flex items-center">
+            <SourceIcon source="slack" className="w-3.5 h-3.5" />
           </span>
         </div>
         <p className="text-sm text-gray-500 mb-4">Connect Slack to search messages across channels and DMs</p>
@@ -330,7 +332,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
                   <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-medium">S</div>
                   <div>
                     <p className="text-sm font-medium text-gray-900">{a.team_name}</p>
-                    <span className="text-xs text-gray-400 flex items-center gap-1">{sourceIcon('slack')} Messages, channels, DMs</span>
+                    <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="slack" className="w-3 h-3" /> Messages, channels, DMs</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -372,8 +374,8 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
       <div>
         <div className="flex items-center gap-2 mb-1">
           <h2 className="text-lg font-semibold text-gray-900">Notion Workspaces</h2>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
-            {sourceIcon('notion')}
+          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 inline-flex items-center">
+            <SourceIcon source="notion" className="w-3.5 h-3.5" />
           </span>
         </div>
         <p className="text-sm text-gray-500 mb-4">Connect Notion to search pages and databases linked to your topics</p>
@@ -392,7 +394,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-900">{a.workspace_name || 'Notion Workspace'}</p>
-                    <span className="text-xs text-gray-400 flex items-center gap-1">{sourceIcon('notion')} Pages, databases, wikis</span>
+                    <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="notion" className="w-3 h-3" /> Pages, databases, wikis</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -448,7 +450,12 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
               <Shield className="w-3 h-3" /> Your data stays private
             </span>
             <span className="flex items-center gap-1">
-              {sourceIcon('gmail')} {sourceIcon('calendar')} {sourceIcon('drive')} {sourceIcon('slack')} {sourceIcon('notion')} Multi-source search
+              <SourceIcon source="gmail" className="w-3 h-3" />
+              <SourceIcon source="calendar" className="w-3 h-3" />
+              <SourceIcon source="drive" className="w-3 h-3" />
+              <SourceIcon source="slack" className="w-3 h-3" />
+              <SourceIcon source="notion" className="w-3 h-3" />
+              Multi-source search
             </span>
           </div>
         </div>

@@ -22,8 +22,13 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json();
-  const { name, parent_id, color, icon } = body;
+  const { name, parent_id, color, icon, area } = body;
   if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+
+  // Validate area if provided
+  if (area && !['work', 'personal', 'career'].includes(area)) {
+    return NextResponse.json({ error: 'Area must be work, personal, or career' }, { status: 400 });
+  }
 
   // Validate nesting depth (max 5 levels)
   if (parent_id) {
@@ -44,13 +49,18 @@ export async function POST(request: Request) {
     }
   }
 
-  const { data, error } = await supabase.from('folders').insert({
+  // NOTE: The 'area' column requires a database migration:
+  // ALTER TABLE folders ADD COLUMN IF NOT EXISTS area text CHECK (area IN ('work', 'personal', 'career'));
+  const insertData: Record<string, unknown> = {
     name,
     parent_id: parent_id || null,
     color: color || null,
     icon: icon || null,
     user_id: user.id,
-  }).select().single();
+  };
+  if (area) insertData.area = area;
+
+  const { data, error } = await supabase.from('folders').insert(insertData).select().single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ folder: data }, { status: 201 });

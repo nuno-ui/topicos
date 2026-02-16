@@ -9,13 +9,20 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await request.json();
-    const { query, sources = ['gmail', 'calendar', 'drive', 'slack'], topic_id, date_from, date_to, max_results } = body;
+    const { query, sources = ['gmail', 'calendar', 'drive', 'slack'], topic_id, date_from, date_to, max_results, account_ids } = body;
     if (!query) return NextResponse.json({ error: 'Query is required' }, { status: 400 });
 
-    // Filter out 'manual' from external sources search
-    const externalSources = (sources as string[]).filter((s: string) => s !== 'manual');
+    // Fetch connected accounts info for the UI
+    const [googleAccountsRes, slackAccountsRes, notionAccountsRes] = await Promise.all([
+      supabase.from('google_accounts').select('id, email').eq('user_id', user.id),
+      supabase.from('slack_accounts').select('id, team_name').eq('user_id', user.id),
+      supabase.from('notion_accounts').select('id, workspace_name').eq('user_id', user.id),
+    ]);
+
+    // Filter out 'manual' and 'link' from external sources search (they are searched separately below)
+    const externalSources = (sources as string[]).filter((s: string) => s !== 'manual' && s !== 'link');
     const results = externalSources.length > 0
-      ? await searchAllSources(user.id, { query, sources: externalSources, topic_id, date_from, date_to, max_results })
+      ? await searchAllSources(user.id, { query, sources: externalSources, topic_id, date_from, date_to, max_results, account_ids })
       : [];
 
     // Search notes if 'manual' source is selected
@@ -80,7 +87,43 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ results });
+    // Search linked URLs if 'link' source is selected
+    if ((sources as string[]).includes('link')) {
+      const { data: linkItems } = await supabase
+        .from('topic_items')
+        .select('id, title, snippet, url, metadata, occurred_at, topic_id, topics(title)')
+        .eq('user_id', user.id)
+        .eq('source', 'link')
+        .or(`title.ilike.%${query}%,snippet.ilike.%${query}%,url.ilike.%${query}%`)
+        .order('occurred_at', { ascending: false })
+        .limit(max_results || 20);
+
+      if (linkItems && linkItems.length > 0) {
+        const linkResults = linkItems.map(item => ({
+          external_id: item.url || item.id,
+          source: 'link' as const,
+          source_account_id: '',
+          title: item.title,
+          snippet: item.snippet || '',
+          url: item.url || '',
+          occurred_at: item.occurred_at,
+          metadata: { ...(item.metadata as Record<string, unknown> || {}), topic_title: (item.topics as unknown as { title: string } | null)?.title || '' },
+        }));
+
+        (results as Array<{ source: string; items: typeof linkResults; error?: string }>).push({
+          source: 'link',
+          items: linkResults,
+        });
+      }
+    }
+
+    const accounts = {
+      google: (googleAccountsRes.data ?? []).map(a => ({ id: a.id, email: a.email })),
+      slack: (slackAccountsRes.data ?? []).map(a => ({ id: a.id, name: a.team_name })),
+      notion: (notionAccountsRes.data ?? []).map(a => ({ id: a.id, name: a.workspace_name })),
+    };
+
+    return NextResponse.json({ results, accounts });
   } catch (err) {
     console.error('Search error:', err);
     return NextResponse.json({ error: 'Search failed' }, { status: 500 });

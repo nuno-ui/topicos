@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { callClaude, callClaudeJSON } from '@/lib/ai/provider';
 import { getTopicNoteContext } from '@/lib/ai/note-context';
+import { enrichTopicItems } from '@/lib/search/content';
 
 export async function POST(request: Request) {
   try {
@@ -14,6 +15,7 @@ export async function POST(request: Request) {
     if (!agent) return NextResponse.json({ error: 'Agent type required' }, { status: 400 });
 
     let result: Record<string, unknown> = {};
+    let inputSummary = '';
 
     switch (agent) {
       // ============ TOPIC PAGE AGENTS ============
@@ -22,13 +24,17 @@ export async function POST(request: Request) {
         // AI generates tags for a topic based on its content
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
-        const { data: items } = await supabase.from('topic_items').select('title, source, snippet').eq('topic_id', topic_id).limit(20);
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(20);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
         const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ tags: string[]; area: string; priority: number }>(
           'Generate relevant tags, suggest the best area (work/personal/career), and priority (1-5) for this topic. Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "priority": 1-5 }',
-          `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string }) => `[${i.source}] ${i.title}`).join('\n')}\n${noteContext}`
+          `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
+            const content = i.body || i.snippet || '';
+            const preview = content.length > 500 ? content.substring(0, 500) + '...' : content;
+            return `[${i.source}] ${i.title}${preview ? '\n' + preview : ''}`;
+          }).join('\n')}\n${noteContext}`
         );
 
         await supabase.from('topics').update({
@@ -63,13 +69,17 @@ export async function POST(request: Request) {
         // AI generates a rich description for a topic
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
-        const { data: items } = await supabase.from('topic_items').select('title, source, snippet').eq('topic_id', topic_id).limit(15);
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(15);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
         const noteContext = await getTopicNoteContext(topic_id);
 
         const { text } = await callClaude(
           'Write a concise but comprehensive description (2-4 sentences) for this topic/project that captures its essence, key participants, and objectives.',
-          `Topic: ${topic.title}\nCurrent description: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string }) => `[${i.source}] ${i.title}: ${i.snippet || ''}`).join('\n')}\n${noteContext}`
+          `Topic: ${topic.title}\nCurrent description: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
+            const content = i.body || i.snippet || '';
+            const preview = content.length > 500 ? content.substring(0, 500) + '...' : content;
+            return `[${i.source}] ${i.title}: ${preview}`;
+          }).join('\n')}\n${noteContext}`
         );
 
         result = { description: text };
@@ -80,15 +90,17 @@ export async function POST(request: Request) {
         // AI extracts action items from topic communications
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
-        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, metadata').eq('topic_id', topic_id).limit(20);
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata').eq('topic_id', topic_id).limit(20);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
         const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ action_items: Array<{ task: string; assignee: string; due: string; priority: string }> }>(
           'Extract all action items, tasks, and commitments from these communications. Return JSON: { "action_items": [{ "task": "...", "assignee": "person or unknown", "due": "date or TBD", "priority": "high|medium|low" }] }',
-          `Topic: ${topic.title}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; metadata: Record<string, unknown> }) => {
+          `Topic: ${topic.title}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null; metadata: Record<string, unknown> }) => {
             const meta = i.metadata || {};
-            return `[${i.source}] ${i.title}\n${i.snippet || ''}\nFrom: ${meta.from || 'unknown'}\nTo: ${meta.to || 'unknown'}`;
+            const content = i.body || i.snippet || '';
+            const contentPreview = content.length > 1500 ? content.substring(0, 1500) + '...' : content;
+            return `[${i.source}] ${i.title}\n${contentPreview}\nFrom: ${meta.from || 'unknown'}\nTo: ${meta.to || 'unknown'}`;
           }).join('\n---\n')}\n${noteContext}`
         );
 
@@ -108,7 +120,9 @@ export async function POST(request: Request) {
           'Create a chronological executive summary of this topic\'s communications and notes. Highlight key decisions, commitments, and open questions. Be concise but thorough.',
           `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\n\nCommunications (chronological):\n${(items || []).map((i: Record<string, unknown>) => {
             const meta = i.metadata as Record<string, unknown> || {};
-            return `[${i.occurred_at}] [${i.source}] ${i.title}\n${i.snippet || ''}\nFrom: ${meta.from || ''} To: ${meta.to || ''}`;
+            const content = (i.body as string) || (i.snippet as string) || '';
+            const contentPreview = content.length > 1500 ? content.substring(0, 1500) + '...' : content;
+            return `[${i.occurred_at}] [${i.source}] ${i.title}\n${contentPreview}\nFrom: ${meta.from || ''} To: ${meta.to || ''}`;
           }).join('\n---\n')}\n${noteContext}`
         );
 
@@ -232,7 +246,7 @@ export async function POST(request: Request) {
       case 'find_contacts': {
         // AI extracts contacts from topic items
         const { topic_id } = context;
-        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, metadata')
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata')
           .eq('topic_id', topic_id).limit(20);
         const noteContext = await getTopicNoteContext(topic_id);
 
@@ -240,7 +254,9 @@ export async function POST(request: Request) {
           'Extract all people mentioned in these communications. Return JSON: { "contacts": [{ "name": "Full Name", "email": "email@example.com", "role": "their apparent role" }] }',
           `Items:\n${(items || []).map((i: Record<string, unknown>) => {
             const meta = i.metadata as Record<string, unknown> || {};
-            return `[${i.source}] ${i.title}\nFrom: ${meta.from || ''}\nTo: ${meta.to || ''}\nAttendees: ${(meta.attendees as string[] || []).join(', ')}`;
+            const content = (i.body as string) || (i.snippet as string) || '';
+            const contentPreview = content.length > 1000 ? content.substring(0, 1000) + '...' : content;
+            return `[${i.source}] ${i.title}\n${contentPreview}\nFrom: ${meta.from || ''}\nTo: ${meta.to || ''}\nAttendees: ${(meta.attendees as string[] || []).join(', ')}`;
           }).join('\n---\n')}\n${noteContext}`
         );
 
@@ -273,6 +289,262 @@ export async function POST(request: Request) {
         );
 
         result = { analysis: text };
+        break;
+      }
+
+      case 'propose_next_email': {
+        // AI suggests the next email to send to a contact
+        const { contact_id: proposeContactId } = context;
+        const { data: proposeContact } = await supabase.from('contacts').select('*').eq('id', proposeContactId).eq('user_id', user.id).single();
+        if (!proposeContact) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
+        // Get linked topics
+        const { data: contactLinks } = await supabase
+          .from('contact_topic_links')
+          .select('topic_id, role, topics(title, status, due_date, priority)')
+          .eq('contact_id', proposeContactId);
+
+        // Get items mentioning this contact
+        const { data: proposeItems } = await supabase.from('topic_items')
+          .select('title, source, snippet, occurred_at, metadata')
+          .eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(100);
+
+        const contactEmail = (proposeContact.email || '').toLowerCase();
+        const contactName = (proposeContact.name || '').toLowerCase();
+        const relevantItems = (proposeItems || []).filter((i: Record<string, unknown>) => {
+          const metaStr = JSON.stringify(i.metadata || {}).toLowerCase();
+          return (contactEmail && metaStr.includes(contactEmail)) || (contactName.length > 2 && metaStr.includes(contactName));
+        }).slice(0, 30);
+
+        const pendingTopics = (contactLinks || []).filter((l: Record<string, unknown>) => {
+          const topic = l.topics as Record<string, unknown> | null;
+          return topic?.status === 'active';
+        });
+
+        const { data: emailData } = await callClaudeJSON<{
+          should_email: boolean;
+          urgency: string;
+          reason: string;
+          suggested_subject: string;
+          key_points: string[];
+          tone: string;
+          draft_body: string;
+        }>(
+          `Analyze the communication history with this contact and determine if/what email should be sent next. Consider:
+- How long since last interaction
+- Any pending commitments or action items
+- Open topics that need follow-up
+- Relationship maintenance needs
+
+Return JSON: { "should_email": true/false, "urgency": "high|medium|low", "reason": "why this email is needed", "suggested_subject": "email subject line", "key_points": ["point1", "point2"], "tone": "professional|friendly|urgent|follow-up", "draft_body": "full draft email body text" }`,
+          `Contact: ${proposeContact.name} <${proposeContact.email || 'no email'}>
+Organization: ${proposeContact.organization || 'unknown'}
+Role: ${proposeContact.role || 'unknown'}
+Last interaction: ${proposeContact.last_interaction_at || 'unknown'}
+Interaction count: ${proposeContact.interaction_count || 0}
+
+Pending/Active Topics (${pendingTopics.length}):
+${pendingTopics.map((l: Record<string, unknown>) => {
+  const t = l.topics as Record<string, unknown> | null;
+  return `- ${t?.title || 'Unknown'} (priority: ${t?.priority || 'none'}, due: ${t?.due_date || 'none'})`;
+}).join('\n')}
+
+Recent Communications (${relevantItems.length}):
+${relevantItems.map((i: Record<string, unknown>, idx: number) => {
+  const meta = i.metadata as Record<string, unknown> || {};
+  return `${idx + 1}. [${i.source}] ${i.title}\n   From: ${meta.from || ''}\n   Date: ${i.occurred_at}`;
+}).join('\n')}`
+        );
+
+        // Store suggestion in contact metadata
+        await supabase.from('contacts').update({
+          metadata: {
+            ...(proposeContact.metadata || {}),
+            last_email_suggestion: { ...emailData, generated_at: new Date().toISOString() },
+          },
+        }).eq('id', proposeContactId);
+
+        result = emailData;
+        inputSummary = `Proposed next email for "${proposeContact.name}"`;
+        break;
+      }
+
+      case 'contact_intelligence': {
+        // AI generates comprehensive contact intelligence report
+        const { contact_id: intelContactId } = context;
+        const { data: intelContact } = await supabase.from('contacts').select('*').eq('id', intelContactId).eq('user_id', user.id).single();
+        if (!intelContact) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
+        // Get linked topics with details
+        const { data: intelLinks } = await supabase
+          .from('contact_topic_links')
+          .select('topic_id, role, topics(title, status, area, due_date)')
+          .eq('contact_id', intelContactId);
+
+        // Get all items mentioning this contact
+        const { data: intelItems } = await supabase.from('topic_items')
+          .select('title, source, snippet, occurred_at, metadata')
+          .eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(200);
+
+        const intelEmail = (intelContact.email || '').toLowerCase();
+        const intelName = (intelContact.name || '').toLowerCase();
+        const intelRelevant = (intelItems || []).filter((i: Record<string, unknown>) => {
+          const metaStr = JSON.stringify(i.metadata || {}).toLowerCase();
+          return (intelEmail && metaStr.includes(intelEmail)) || (intelName.length > 2 && metaStr.includes(intelName));
+        }).slice(0, 40);
+
+        const { data: intelData } = await callClaudeJSON<{
+          relationship_health: number;
+          communication_pattern: string;
+          sentiment: string;
+          key_discussion_themes: string[];
+          shared_interests: string[];
+          best_contact_times: string;
+          relationship_trajectory: string;
+          action_recommendations: string[];
+          summary: string;
+        }>(
+          `Analyze this contact's communication history and generate a comprehensive intelligence report. Return JSON:
+{
+  "relationship_health": 0-100 (100=strong, 0=nonexistent),
+  "communication_pattern": "description of how often and how they communicate (e.g. Regular bi-weekly, Sporadic, Project-based)",
+  "sentiment": "Very Positive|Positive|Neutral|Needs Attention|Negative",
+  "key_discussion_themes": ["theme1", "theme2"],
+  "shared_interests": ["interest1", "interest2"],
+  "best_contact_times": "description of optimal contact timing",
+  "relationship_trajectory": "Growing|Stable|Declining|New",
+  "action_recommendations": ["specific action 1", "specific action 2"],
+  "summary": "2-3 sentence executive summary of the relationship"
+}`,
+          `Contact: ${intelContact.name} <${intelContact.email || 'no email'}>
+Organization: ${intelContact.organization || 'unknown'}
+Role: ${intelContact.role || 'unknown'}
+Last interaction: ${intelContact.last_interaction_at || 'unknown'}
+Total interactions: ${intelContact.interaction_count || 0}
+Current notes: ${intelContact.notes || 'none'}
+
+Linked Topics (${(intelLinks || []).length}):
+${(intelLinks || []).map((l: Record<string, unknown>) => {
+  const t = l.topics as Record<string, unknown> | null;
+  return `- ${t?.title || 'Unknown'} (${t?.status || 'unknown'}, ${l.role || 'no role'})`;
+}).join('\n')}
+
+Communication History (${intelRelevant.length} items):
+${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
+  const meta = i.metadata as Record<string, unknown> || {};
+  return `${idx + 1}. [${i.source}] ${i.title} — ${i.occurred_at}\n   From: ${meta.from || ''} To: ${meta.to || ''}`;
+}).join('\n')}`
+        );
+
+        // Store intelligence in contact metadata
+        await supabase.from('contacts').update({
+          metadata: {
+            ...(intelContact.metadata || {}),
+            intelligence: { ...intelData, updated_at: new Date().toISOString() },
+          },
+        }).eq('id', intelContactId);
+
+        result = intelData;
+        inputSummary = `Intelligence report for "${intelContact.name}"`;
+        break;
+      }
+
+      case 'contact_auto_link': {
+        // Auto-link contacts to topics based on topic_items metadata matching
+        const allContacts = await supabase.from('contacts').select('id, name, email').eq('user_id', user.id);
+        const allItems = await supabase.from('topic_items').select('topic_id, metadata').eq('user_id', user.id);
+        const existingLinks = await supabase.from('contact_topic_links').select('contact_id, topic_id').eq('user_id', user.id);
+
+        const existingSet = new Set((existingLinks.data || []).map((l: Record<string, unknown>) => `${l.contact_id}:${l.topic_id}`));
+        const newLinks: Array<{ user_id: string; contact_id: string; topic_id: string }> = [];
+
+        for (const contact of (allContacts.data || [])) {
+          const cEmail = (contact.email || '').toLowerCase();
+          const cName = (contact.name || '').toLowerCase();
+          if (!cEmail && cName.length <= 2) continue;
+
+          const topicIds = new Set<string>();
+          for (const item of (allItems.data || [])) {
+            const metaStr = JSON.stringify(item.metadata || {}).toLowerCase();
+            if ((cEmail && metaStr.includes(cEmail)) || (cName.length > 2 && metaStr.includes(cName))) {
+              topicIds.add(item.topic_id);
+            }
+          }
+
+          for (const topicId of topicIds) {
+            const key = `${contact.id}:${topicId}`;
+            if (!existingSet.has(key)) {
+              newLinks.push({ user_id: user.id, contact_id: contact.id, topic_id: topicId });
+              existingSet.add(key);
+            }
+          }
+        }
+
+        if (newLinks.length > 0) {
+          // Insert in batches
+          for (let i = 0; i < newLinks.length; i += 50) {
+            await supabase.from('contact_topic_links').upsert(
+              newLinks.slice(i, i + 50),
+              { onConflict: 'contact_id, topic_id' }
+            );
+          }
+        }
+
+        result = { links_created: newLinks.length, contacts_processed: (allContacts.data || []).length };
+        inputSummary = `Auto-linked contacts: ${newLinks.length} new links created`;
+        break;
+      }
+
+      case 'contact_action_items': {
+        // Extract action items across all topics linked to a contact
+        const { contact_id: actionContactId } = context;
+        const { data: actionContact } = await supabase.from('contacts').select('*').eq('id', actionContactId).eq('user_id', user.id).single();
+        if (!actionContact) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
+        const { data: actionLinks } = await supabase
+          .from('contact_topic_links')
+          .select('topic_id, topics(title)')
+          .eq('contact_id', actionContactId);
+
+        const topicIds = (actionLinks || []).map((l: Record<string, unknown>) => l.topic_id as string);
+        if (topicIds.length === 0) {
+          result = { action_items: [], message: 'No topics linked to this contact' };
+          break;
+        }
+
+        const { data: actionItems } = await supabase.from('topic_items')
+          .select('title, source, snippet, occurred_at, topic_id, metadata')
+          .in('topic_id', topicIds)
+          .order('occurred_at', { ascending: false })
+          .limit(50);
+
+        const topicTitles: Record<string, string> = {};
+        for (const link of (actionLinks || [])) {
+          const t = (link as Record<string, unknown>).topics as Record<string, unknown> | null;
+          topicTitles[link.topic_id as string] = (t?.title as string) || 'Unknown';
+        }
+
+        const { data: actionData } = await callClaudeJSON<{
+          action_items: Array<{
+            task: string;
+            topic: string;
+            priority: string;
+            due_hint: string;
+            status: string;
+          }>;
+        }>(
+          `Extract all action items, commitments, and follow-ups related to this person from the communications. Return JSON:
+{ "action_items": [{ "task": "description", "topic": "topic name", "priority": "high|medium|low", "due_hint": "any mentioned deadline or ASAP", "status": "pending|done|unclear" }] }`,
+          `Contact: ${actionContact.name} <${actionContact.email || ''}>
+
+Items from their linked topics:
+${(actionItems || []).map((i: Record<string, unknown>, idx: number) => {
+  return `${idx + 1}. [${i.source}] ${i.title} (Topic: ${topicTitles[i.topic_id as string] || 'Unknown'})\n   ${i.snippet || ''}`;
+}).join('\n')}`
+        );
+
+        result = actionData;
+        inputSummary = `Action items for "${actionContact.name}": ${actionData.action_items.length} found`;
         break;
       }
 
@@ -342,6 +614,536 @@ export async function POST(request: Request) {
         break;
       }
 
+      // ============ DEEP CONTENT AGENTS ============
+
+      case 'deep_dive': {
+        // AI Deep Dive — fetches full content from ALL linked items and generates comprehensive report
+        const { topic_id } = context;
+        const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
+        if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const noteContext = await getTopicNoteContext(topic_id);
+
+        // Enrich all items (fetch full content from sources)
+        const { enriched, failed, items: enrichedItems } = await enrichTopicItems(user.id, topic_id);
+
+        // Get full items with metadata for the prompt
+        const { data: fullItems } = await supabase.from('topic_items')
+          .select('title, source, snippet, body, metadata, occurred_at')
+          .eq('topic_id', topic_id)
+          .order('occurred_at', { ascending: true })
+          .limit(30);
+
+        // Build rich content prompt using body when available
+        const itemsContent = (fullItems || []).map((item: Record<string, unknown>, i: number) => {
+          const meta = item.metadata as Record<string, unknown> || {};
+          const body = (item.body as string) || (item.snippet as string) || '';
+          const contentPreview = body.length > 2000 ? body.substring(0, 2000) + '...' : body;
+          let details = `\n--- Item ${i + 1} [${item.source}] ---\nTitle: ${item.title}\nDate: ${item.occurred_at}`;
+          if (meta.from) details += `\nFrom: ${meta.from}`;
+          if (meta.to) details += `\nTo: ${meta.to}`;
+          if (meta.attendees) details += `\nAttendees: ${(meta.attendees as string[]).join(', ')}`;
+          if (meta.channel_name) details += `\nChannel: #${meta.channel_name}`;
+          details += `\nContent:\n${contentPreview}`;
+          return details;
+        }).join('\n');
+
+        const { text } = await callClaude(
+          `You are performing a DEEP DIVE analysis of a topic/project. You have access to FULL CONTENT of linked items (emails, documents, messages, events), not just snippets.
+
+Provide an extremely comprehensive analysis:
+
+## Executive Summary
+3-5 sentences capturing the full picture of this topic.
+
+## Detailed Timeline
+Chronological breakdown of all events, decisions, and communications with specific dates and participants.
+
+## Key Decisions Made
+List every decision identified from the full content, who made it, and when.
+
+## Action Items & Commitments
+Every task, commitment, or promise found in the content, with assignees and deadlines.
+
+## People & Roles
+Detailed profile of each person involved, their role, contribution frequency, and relationship to the topic.
+
+## Risks & Blockers
+Potential risks, unresolved questions, and blockers identified from deep content analysis.
+
+## Content Gaps
+What information is missing? What follow-ups are needed? What sources haven't been checked?
+
+## Strategic Recommendations
+3-5 strategic recommendations based on the comprehensive analysis.
+
+Be extremely specific. Reference actual content, dates, and people. This is a deep analysis, not a surface summary.`,
+          `Topic: ${topic.title}
+Description: ${topic.description || 'None'}
+Area: ${topic.area}
+Status: ${topic.status}
+Tags: ${(topic.tags || []).join(', ') || 'None'}
+Due date: ${topic.due_date || 'Not set'}
+${noteContext}
+
+Content enrichment: ${enriched} items enriched, ${failed} failed
+
+Full Content of ${(fullItems || []).length} Linked Items:
+${itemsContent}`,
+          { maxTokens: 8192 }
+        );
+
+        // Store deep dive report
+        await supabase.from('topics').update({
+          summary: text,
+          updated_at: new Date().toISOString(),
+        }).eq('id', topic_id);
+
+        result = { report: text, enriched_count: enriched, failed_count: failed };
+        break;
+      }
+
+      case 'recommend_content': {
+        // AI Content Recommender — analyzes linked items and suggests searches to find MORE related content
+        const { topic_id } = context;
+        const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
+        if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+
+        const { data: items } = await supabase.from('topic_items')
+          .select('title, source, snippet, body, metadata')
+          .eq('topic_id', topic_id).limit(20);
+        const noteContext = await getTopicNoteContext(topic_id);
+
+        const itemsSummary = (items || []).map((i: Record<string, unknown>) => {
+          const meta = i.metadata as Record<string, unknown> || {};
+          return `[${i.source}] ${i.title} — ${((i.body as string) || (i.snippet as string) || '').substring(0, 300)}${meta.from ? ` (from: ${meta.from})` : ''}`;
+        }).join('\n');
+
+        const { data } = await callClaudeJSON<{
+          recommendations: Array<{
+            source: string;
+            query: string;
+            reason: string;
+            expected_type: string;
+          }>;
+          missing_sources: string[];
+          suggested_people: string[];
+        }>(
+          `You are a content discovery assistant. Analyze the linked items and suggest SPECIFIC search queries to find MORE related content the user might have missed.
+
+For each recommendation, provide:
+- source: which source to search (gmail, calendar, drive, slack, notion)
+- query: the exact search query to use (use source-specific syntax)
+- reason: why this content might be relevant
+- expected_type: what kind of content you expect to find
+
+Also identify:
+- missing_sources: which sources are underrepresented (e.g., "No Drive files linked — there might be relevant documents")
+- suggested_people: people mentioned in items who might have more related communications
+
+Return JSON: { "recommendations": [...], "missing_sources": [...], "suggested_people": [...] }`,
+          `Topic: ${topic.title}
+Description: ${topic.description || 'None'}
+Tags: ${(topic.tags || []).join(', ') || 'None'}
+${noteContext}
+
+Currently linked items (${(items || []).length}):
+${itemsSummary}`
+        );
+
+        result = { recommendations: data.recommendations, missing_sources: data.missing_sources, suggested_people: data.suggested_people };
+        break;
+      }
+
+      case 'extract_entities': {
+        // Entity Extraction — extracts people, companies, dates, amounts, and action items from full content
+        const { topic_id } = context;
+        const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
+        if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+
+        // Enrich items to get full content
+        await enrichTopicItems(user.id, topic_id);
+
+        const { data: items } = await supabase.from('topic_items')
+          .select('title, source, snippet, body, metadata')
+          .eq('topic_id', topic_id).limit(20);
+        const noteContext = await getTopicNoteContext(topic_id);
+
+        const itemsContent = (items || []).map((i: Record<string, unknown>) => {
+          const body = (i.body as string) || (i.snippet as string) || '';
+          return `[${i.source}] ${i.title}:\n${body.substring(0, 1500)}`;
+        }).join('\n---\n');
+
+        const { data } = await callClaudeJSON<{
+          people: Array<{ name: string; email: string; role: string; mention_count: number }>;
+          organizations: Array<{ name: string; type: string; context: string }>;
+          dates: Array<{ date: string; description: string; type: string }>;
+          amounts: Array<{ value: string; currency: string; context: string }>;
+          action_items: Array<{ task: string; assignee: string; due: string; status: string }>;
+        }>(
+          `Extract all entities from the full content of these items. Be thorough and extract:
+
+1. People: name, email (if found), apparent role, and how many times they're mentioned
+2. Organizations: company/org name, type (client/vendor/partner/internal), context of mention
+3. Key Dates: date/deadline, what it relates to, type (deadline/meeting/milestone)
+4. Monetary Amounts: value, currency, what it relates to
+5. Action Items: task description, who's responsible, due date if mentioned, current status (pending/done/blocked)
+
+Return JSON: { "people": [...], "organizations": [...], "dates": [...], "amounts": [...], "action_items": [...] }`,
+          `Topic: ${topic.title}\n${noteContext}\n\nFull Content:\n${itemsContent}`
+        );
+
+        result = data;
+        break;
+      }
+
+      case 'cross_topic_links': {
+        // Cross-Topic Linking — finds related topics based on content analysis
+        const { topic_id } = context;
+        const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
+        if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+
+        const { data: items } = await supabase.from('topic_items')
+          .select('title, source, snippet, metadata')
+          .eq('topic_id', topic_id).limit(15);
+
+        // Get all other topics for comparison
+        const { data: allTopics } = await supabase.from('topics')
+          .select('id, title, description, tags, summary')
+          .eq('user_id', user.id)
+          .neq('id', topic_id)
+          .eq('status', 'active');
+
+        if (!allTopics || allTopics.length === 0) {
+          result = { related_topics: [], message: 'No other active topics to compare against.' };
+          break;
+        }
+
+        const currentItems = (items || []).map((i: Record<string, unknown>) => `[${i.source}] ${i.title}: ${(i.snippet as string || '').substring(0, 200)}`).join('\n');
+        const otherTopics = allTopics.map((t: Record<string, unknown>) =>
+          `ID: ${t.id}\nTitle: ${t.title}\nDescription: ${t.description || 'None'}\nTags: ${(t.tags as string[] || []).join(', ')}\nSummary: ${((t.summary as string) || '').substring(0, 300)}`
+        ).join('\n---\n');
+
+        const { data } = await callClaudeJSON<{
+          related_topics: Array<{ topic_id: string; title: string; reason: string; confidence: number; relationship: string }>;
+        }>(
+          `Analyze the current topic and find related topics from the user's collection. For each related topic, explain:
+- How they're connected
+- The type of relationship (parent, child, related, dependent, conflicting)
+- Confidence score (0-1)
+
+Return JSON: { "related_topics": [{ "topic_id": "uuid", "title": "topic name", "reason": "explanation of connection", "confidence": 0.0-1.0, "relationship": "related|parent|child|dependent|conflicting" }] }
+Only include topics with confidence >= 0.3.`,
+          `Current Topic: ${topic.title}
+Description: ${topic.description || 'None'}
+Tags: ${(topic.tags || []).join(', ') || 'None'}
+Items:\n${currentItems}
+
+Other Topics:\n${otherTopics}`
+        );
+
+        result = { related_topics: data.related_topics };
+        break;
+      }
+
+      case 'completeness_check': {
+        // Topic Completeness Score — evaluates topic for missing information and gaps
+        const { topic_id } = context;
+        const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
+        if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+
+        const { data: items } = await supabase.from('topic_items')
+          .select('source, occurred_at, metadata')
+          .eq('topic_id', topic_id);
+
+        const { data: contacts } = await supabase.from('contact_topic_links')
+          .select('contact_id')
+          .eq('topic_id', topic_id);
+
+        const noteContext = await getTopicNoteContext(topic_id);
+        const itemCount = (items || []).length;
+        const sources = [...new Set((items || []).map((i: { source: string }) => i.source))];
+        const allSources = ['gmail', 'calendar', 'drive', 'slack', 'notion'];
+        const missingSources = allSources.filter(s => !sources.includes(s));
+        const contactCount = (contacts || []).length;
+
+        // Check temporal coverage
+        const dates = (items || []).map((i: { occurred_at: string }) => new Date(i.occurred_at).getTime()).sort();
+        const oldestItem = dates.length > 0 ? new Date(dates[0]) : null;
+        const newestItem = dates.length > 0 ? new Date(dates[dates.length - 1]) : null;
+        const daysSinceLastItem = newestItem ? Math.round((Date.now() - newestItem.getTime()) / (1000 * 60 * 60 * 24)) : null;
+
+        // Calculate base score
+        let score = 0;
+        if (topic.description) score += 10;
+        if (topic.tags && (topic.tags as string[]).length > 0) score += 10;
+        if (topic.due_date) score += 5;
+        if (contactCount > 0) score += 10;
+        if (itemCount >= 5) score += 15;
+        else if (itemCount >= 1) score += 5;
+        if (sources.length >= 3) score += 15;
+        else if (sources.length >= 2) score += 10;
+        else if (sources.length >= 1) score += 5;
+        if (noteContext) score += 10;
+        if (topic.summary) score += 10;
+        if (daysSinceLastItem !== null && daysSinceLastItem <= 7) score += 10;
+        else if (daysSinceLastItem !== null && daysSinceLastItem <= 30) score += 5;
+
+        const { data } = await callClaudeJSON<{
+          suggestions: string[];
+          missing: string[];
+          strengths: string[];
+        }>(
+          `Evaluate this topic's completeness and provide actionable suggestions.
+
+Return JSON: {
+  "suggestions": ["specific actionable suggestion 1", ...],
+  "missing": ["what information or content is missing", ...],
+  "strengths": ["what's good about this topic's current state", ...]
+}`,
+          `Topic: ${topic.title}
+Description: ${topic.description || 'MISSING'}
+Tags: ${(topic.tags as string[] || []).join(', ') || 'NONE'}
+Due date: ${topic.due_date || 'NOT SET'}
+Status: ${topic.status}
+Priority: ${topic.priority || 0}
+Has AI summary: ${!!topic.summary}
+Has notes: ${!!noteContext}
+
+Items: ${itemCount} total
+Sources used: ${sources.join(', ') || 'none'}
+Missing sources: ${missingSources.join(', ') || 'none'}
+Contacts linked: ${contactCount}
+Date range: ${oldestItem?.toLocaleDateString() || 'N/A'} to ${newestItem?.toLocaleDateString() || 'N/A'}
+Days since last activity: ${daysSinceLastItem ?? 'N/A'}`
+        );
+
+        result = {
+          score: Math.min(100, score),
+          suggestions: data.suggestions,
+          missing: data.missing,
+          strengths: data.strengths,
+          stats: {
+            item_count: itemCount,
+            source_count: sources.length,
+            sources_used: sources,
+            missing_sources: missingSources,
+            contact_count: contactCount,
+            days_since_activity: daysSinceLastItem,
+            has_description: !!topic.description,
+            has_tags: !!(topic.tags && (topic.tags as string[]).length > 0),
+            has_due_date: !!topic.due_date,
+            has_notes: !!noteContext,
+            has_summary: !!topic.summary,
+          },
+        };
+        break;
+      }
+
+      case 'concept_search': {
+        // AI-powered multilingual concept search across all sources
+        const { query: conceptQuery, sources: conceptSources } = context;
+        if (!conceptQuery) return NextResponse.json({ error: 'Query required' }, { status: 400 });
+
+        // Step 1: AI generates search strategy with multilingual queries
+        const { data: strategy } = await callClaudeJSON<{
+          concepts: string[];
+          search_queries: Array<{
+            query: string;
+            language: string;
+            source: string;
+            reasoning: string;
+          }>;
+          related_terms: Record<string, string[]>;
+        }>(
+          `You are a multilingual search strategist. Given a user's search concept, generate comprehensive search queries to find ALL related content across communication sources.
+
+Rules:
+1. Decompose the concept into its core ideas, synonyms, and related terms
+2. Generate queries in English, Spanish (es), and Portuguese (pt)
+3. For each source (gmail, calendar, drive, slack, notion), generate source-specific queries using that source's search syntax
+4. Think about related concepts, not just literal translations
+5. Consider different phrasings people would use in emails, documents, calendar events, and messages
+6. Include queries for abbreviations, acronyms, and informal terms
+7. Gmail queries can use operators: from:, subject:, after:, has:attachment
+8. Slack queries can use: from:, in:, during:
+
+Return JSON:
+{
+  "concepts": ["core concept 1", "core concept 2"],
+  "search_queries": [
+    { "query": "search text", "language": "en", "source": "gmail", "reasoning": "why this query" },
+    { "query": "texto de búsqueda", "language": "es", "source": "gmail", "reasoning": "por qué" },
+    { "query": "texto de pesquisa", "language": "pt", "source": "gmail", "reasoning": "por quê" }
+  ],
+  "related_terms": {
+    "en": ["term1", "term2"],
+    "es": ["término1", "término2"],
+    "pt": ["termo1", "termo2"]
+  }
+}`,
+          `User's search concept: "${conceptQuery}"
+Available sources: ${JSON.stringify(conceptSources || ['gmail', 'calendar', 'drive', 'slack', 'notion', 'link'])}`
+        );
+
+        // Step 2: Execute searches using the generated queries
+        const searchPromises: Promise<Record<string, unknown>>[] = [];
+        const activeSources = conceptSources || ['gmail', 'calendar', 'drive', 'slack', 'notion'];
+
+        // Group queries by source to batch them
+        const queriesBySource: Record<string, string[]> = {};
+        for (const sq of strategy.search_queries) {
+          if (activeSources.includes(sq.source)) {
+            if (!queriesBySource[sq.source]) queriesBySource[sq.source] = [];
+            queriesBySource[sq.source].push(sq.query);
+          }
+        }
+
+        // Execute searches for each unique query
+        const uniqueQueries = [...new Set(strategy.search_queries.map(q => q.query))].slice(0, 12);
+
+        for (const searchQuery of uniqueQueries) {
+          searchPromises.push(
+            fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/search`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Cookie': request.headers.get('cookie') || '',
+              },
+              body: JSON.stringify({
+                query: searchQuery,
+                sources: activeSources.filter((s: string) => s !== 'link'),
+                max_results: 10,
+              }),
+            }).then(r => r.json()).catch(() => ({ results: [] }))
+          );
+        }
+
+        const searchResponses = await Promise.all(searchPromises);
+
+        // Aggregate and deduplicate results
+        const allResults: Record<string, unknown>[] = [];
+        const seenIds = new Set<string>();
+
+        for (const response of searchResponses) {
+          const responseResults = (response as Record<string, unknown>).results as Array<{ source: string; items: Array<Record<string, unknown>> }> || [];
+          for (const sourceResult of responseResults) {
+            for (const item of (sourceResult.items || [])) {
+              const key = `${item.source}:${item.external_id}`;
+              if (!seenIds.has(key)) {
+                seenIds.add(key);
+                allResults.push(item);
+              }
+            }
+          }
+        }
+
+        // Step 3: AI ranks results by relevance to the original concept
+        let rankedResults = allResults;
+        if (allResults.length > 0) {
+          const { data: ranking } = await callClaudeJSON<{
+            ranked: Array<{ index: number; score: number; reason: string }>;
+          }>(
+            `You are ranking search results by relevance to a CONCEPT (not just keywords). The user searched for: "${conceptQuery}"
+
+Score each result 0.0-1.0 based on conceptual relevance, not just keyword matches. A result about "IVA trimestral" is relevant to "taxes as contractor in Q4" even though the words don't match.
+
+Return JSON: { "ranked": [{ "index": 0, "score": 0.95, "reason": "brief reason" }] }
+Only include results with score >= 0.2. Sort by score descending.`,
+            `Results:\n${allResults.slice(0, 30).map((r, i) => `${i}. [${r.source}] ${r.title}\n   ${(r.snippet as string || '').substring(0, 150)}`).join('\n')}`
+          );
+
+          const rankedMap = new Map(ranking.ranked.map(r => [r.index, r]));
+          rankedResults = allResults
+            .map((r, i) => ({
+              ...r,
+              ai_confidence: rankedMap.get(i)?.score || 0,
+              ai_reason: rankedMap.get(i)?.reason || '',
+            }))
+            .filter(r => (r.ai_confidence as number) >= 0.2)
+            .sort((a, b) => (b.ai_confidence as number) - (a.ai_confidence as number));
+        }
+
+        result = {
+          concepts: strategy.concepts,
+          related_terms: strategy.related_terms,
+          search_queries_used: strategy.search_queries.length,
+          total_results: rankedResults.length,
+          results: rankedResults.slice(0, 30),
+        };
+        inputSummary = `Concept search: "${conceptQuery}" \u2192 ${rankedResults.length} results from ${uniqueQueries.length} queries`;
+        break;
+      }
+
+      case 'reorganize_folders': {
+        // AI analyzes current folder structure and suggests improvements
+        const { data: allTopics } = await supabase
+          .from('topics')
+          .select('id, title, description, area, status, folder_id, tags, updated_at, topic_items(count)')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false });
+
+        const { data: allFolders } = await supabase
+          .from('folders')
+          .select('id, name, parent_id, color, icon, position')
+          .eq('user_id', user.id)
+          .order('position', { ascending: true });
+
+        const { text } = await callClaude(
+          `You are an organizational productivity expert. Analyze this user's folder structure and topic organization, then suggest concrete improvements.
+
+Consider:
+1. Are there duplicated or overlapping topics that should be merged?
+2. Are topics in the right folders? Should any be moved?
+3. Are there logical folder groupings that don't exist yet?
+4. Is the folder hierarchy too flat or too deep?
+5. Are folders named clearly and consistently?
+6. Would new sub-folders improve organization?
+7. Are there orphan topics (no folder) that should be organized?
+8. Suggest an ideal folder structure based on the actual content
+
+Format your response as:
+## Current Assessment
+Brief overview of the current state
+
+## Issues Found
+- List specific problems
+
+## Suggested Reorganization
+### Folder Structure
+Show the proposed folder tree with emoji icons
+
+### Move Actions
+- Move "Topic Name" → "Folder Name" (reason)
+
+### New Folders to Create
+- "Folder Name" (purpose, which topics go here)
+
+### Topics to Merge
+- Merge "Topic A" + "Topic B" → "Combined Topic" (reason)
+
+### Topics to Archive
+- Archive "Topic Name" (reason)
+
+Be specific and actionable. Reference actual topic and folder names.`,
+          `Current Folders (${(allFolders || []).length}):
+${(allFolders || []).map((f: Record<string, unknown>) => {
+  const parent = (allFolders || []).find((p: Record<string, unknown>) => p.id === f.parent_id);
+  return `- ${f.name} ${parent ? `(inside "${(parent as Record<string, unknown>).name}")` : '(root)'} [id: ${f.id}]`;
+}).join('\n')}
+
+Current Topics (${(allTopics || []).length}):
+${(allTopics || []).map((t: Record<string, unknown>) => {
+  const folder = (allFolders || []).find((f: Record<string, unknown>) => f.id === t.folder_id);
+  const itemCount = ((t.topic_items as Array<{ count: number }>)?.[0]?.count) || 0;
+  return `- "${t.title}" [${t.area}/${t.status}] → ${folder ? `"${(folder as Record<string, unknown>).name}"` : 'No folder'} (${itemCount} items, tags: ${JSON.stringify(t.tags || [])})`;
+}).join('\n')}`
+        );
+
+        result = { suggestions: text };
+        inputSummary = `Folder reorganization analysis for ${(allTopics || []).length} topics in ${(allFolders || []).length} folders`;
+        break;
+      }
+
       default:
         return NextResponse.json({ error: `Unknown agent: ${agent}` }, { status: 400 });
     }
@@ -352,7 +1154,7 @@ export async function POST(request: Request) {
       topic_id: context?.topic_id || null,
       kind: `agent_${agent}`,
       model: 'claude-sonnet-4-5-20250929',
-      input_summary: `Agent ${agent} run`,
+      input_summary: inputSummary || `Agent ${agent} run`,
       output_json: result,
     });
 

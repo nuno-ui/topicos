@@ -30,6 +30,7 @@ Generate search queries that would find emails, calendar events, Drive files, an
 - Calendar: Simple keyword queries
 - Drive: Simple keyword queries
 - Slack: Use Slack search modifiers (from:, in:, during:, etc.)
+- Notion: Simple keyword queries for page titles and content
 
 Return 2-3 queries per source, from most specific to broader.
 
@@ -38,7 +39,8 @@ Return JSON format:
   "gmail_queries": ["query1", "query2"],
   "calendar_queries": ["query1", "query2"],
   "drive_queries": ["query1", "query2"],
-  "slack_queries": ["query1", "query2"]
+  "slack_queries": ["query1", "query2"],
+  "notion_queries": ["query1", "query2"]
 }`;
 
     const context = `Topic: ${topic.title}
@@ -53,6 +55,7 @@ ${noteContext}`;
       calendar_queries: string[];
       drive_queries: string[];
       slack_queries: string[];
+      notion_queries: string[];
     }>(system, context);
 
     // 3. Execute searches in parallel for each query
@@ -111,6 +114,19 @@ ${noteContext}`;
       }
     }
 
+    // Search Notion
+    if (queries.notion_queries?.length) {
+      queriesUsed.push({ source: 'notion', queries: queries.notion_queries });
+      for (const q of queries.notion_queries) {
+        try {
+          const results = await searchAllSources(user.id, { query: q, sources: ['notion'], topic_id, max_results: 10 });
+          for (const r of results) {
+            allResults.push(...r.items);
+          }
+        } catch { /* continue */ }
+      }
+    }
+
     // 4. Deduplicate
     const seen = new Set<string>();
     const existingIds = new Set((existingItems || []).map((i: { source: string; external_id: string }) => i.source + ':' + i.external_id));
@@ -139,7 +155,7 @@ Only include results with score >= 0.3. Sort by score descending.`;
 Description: ${topic.description || 'None'}
 
 Search Results:
-${dedupedResults.slice(0, 30).map((r, i) => `${i}. [${r.source}] ${r.title} — ${r.snippet}`).join('\n')}`;
+${dedupedResults.slice(0, 30).map((r, i) => `${i}. [${r.source}] ${r.title} — ${r.snippet}${(r as Record<string, unknown>).body ? '\n   Full content preview: ' + ((r as Record<string, unknown>).body as string).substring(0, 300) : ''}`).join('\n')}`;
 
       try {
         const { data: ranking } = await callClaudeJSON<{
