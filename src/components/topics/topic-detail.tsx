@@ -148,6 +148,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   const [linkUrl, setLinkUrl] = useState('');
   const [linkTitle, setLinkTitle] = useState('');
   const [linkSaving, setLinkSaving] = useState(false);
+  const [itemsRefreshing, setItemsRefreshing] = useState(false);
 
   // Content expand state
   const [expandedContent, setExpandedContent] = useState<Record<string, string>>({});
@@ -389,6 +390,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   const linkItems = useCallback(async (resultsToLink: SearchResult[], linkedBy: string = 'user') => {
     setLinkingItems(true);
     let linked = 0;
+    let alreadyLinked = 0;
     for (const result of resultsToLink) {
       try {
         const res = await fetch(`/api/topics/${topic.id}/items`, {
@@ -412,6 +414,59 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
           const data = await res.json();
           setItems(prev => [data.item, ...prev]);
           linked++;
+        } else if (res.status === 409) {
+          // Item already linked to this topic — make sure it's in local state
+          const dupeData = await res.json();
+          if (dupeData.same_topic) {
+            alreadyLinked++;
+            // Check if it's already in local items state
+            const alreadyInState = items.some(i => i.source === result.source && i.external_id === result.external_id);
+            if (!alreadyInState) {
+              // Item is in DB but not in local state — add a synthetic entry
+              // so the user can see it in the linked items list
+              setItems(prev => [{
+                id: `existing-${result.source}-${result.external_id}`,
+                topic_id: topic.id,
+                source: result.source,
+                external_id: result.external_id,
+                source_account_id: result.source_account_id || null,
+                title: result.title,
+                snippet: result.snippet || '',
+                url: result.url || '',
+                occurred_at: result.occurred_at || new Date().toISOString(),
+                metadata: result.metadata || {},
+                linked_by: linkedBy,
+              }, ...prev]);
+            }
+          } else {
+            // Different topic — still link it (the API allows this)
+            const forceRes = await fetch(`/api/topics/${topic.id}/items`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                external_id: result.external_id,
+                source: result.source,
+                source_account_id: result.source_account_id,
+                title: result.title,
+                snippet: result.snippet,
+                url: result.url,
+                occurred_at: result.occurred_at,
+                metadata: result.metadata,
+                linked_by: linkedBy,
+                confidence: result.ai_confidence,
+                link_reason: result.ai_reason,
+                force: true,
+              }),
+            });
+            if (forceRes.ok) {
+              const data = await forceRes.json();
+              setItems(prev => [data.item, ...prev]);
+              linked++;
+            }
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          console.error('Link item failed:', res.status, errData);
         }
       } catch (err) {
         console.error('Link failed:', err);
@@ -429,7 +484,23 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     setSelectedResults(new Set());
     setSelectedAiResults(new Set());
     setLinkingItems(false);
-    toast.success(`Linked ${linked} item${linked !== 1 ? 's' : ''} to topic`);
+    // Refresh items from server to ensure state consistency
+    try {
+      const refreshRes = await fetch(`/api/topics/${topic.id}/items`);
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json();
+        setItems(refreshData.items || []);
+      }
+    } catch { /* silent */ }
+    if (linked > 0 && alreadyLinked > 0) {
+      toast.success(`Linked ${linked} new item${linked !== 1 ? 's' : ''}, ${alreadyLinked} already linked`);
+    } else if (linked > 0) {
+      toast.success(`Linked ${linked} item${linked !== 1 ? 's' : ''} to topic`);
+    } else if (alreadyLinked > 0) {
+      toast.info(`${alreadyLinked} item${alreadyLinked !== 1 ? 's were' : ' was'} already linked to this topic`);
+    } else {
+      toast.error('Failed to link items');
+    }
   }, [topic.id, items]);
 
   const linkSelectedSearch = () => {
@@ -647,6 +718,21 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     }
     setLinkSaving(false);
   };
+
+  // --- REFRESH ITEMS FROM SERVER ---
+  const refreshItems = useCallback(async () => {
+    setItemsRefreshing(true);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/items`);
+      if (res.ok) {
+        const data = await res.json();
+        setItems(data.items || []);
+      }
+    } catch (err) {
+      console.error('Failed to refresh items:', err);
+    }
+    setItemsRefreshing(false);
+  }, [topic.id]);
 
   // --- PIN ITEM ---
   const togglePinItem = async (itemId: string) => {
@@ -1526,6 +1612,10 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{items.length}</span>
           </h2>
           <div className="flex items-center gap-1.5">
+            <button onClick={refreshItems} disabled={itemsRefreshing}
+              className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Refresh items">
+              <RefreshCw className={`w-3.5 h-3.5 ${itemsRefreshing ? 'animate-spin' : ''}`} />
+            </button>
             <button onClick={() => { setShowLinkForm(v => !v); setShowNoteEditor(false); }}
               className="px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border border-transparent hover:border-blue-200">
               <Link2 className="w-3.5 h-3.5" /> Add Link

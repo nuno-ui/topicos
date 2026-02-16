@@ -43,13 +43,30 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     // Duplicate detection: check if same external_id + source exists in ANY topic for this user
     if (external_id && source) {
-      const { data: existing } = await supabase
+      // Try with topic join first, fall back to simple query if join fails
+      let existing: Array<{ id: string; topic_id: string; topics?: unknown }> | null = null;
+      const { data: existingWithJoin, error: joinError } = await supabase
         .from('topic_items')
         .select('id, topic_id, topics!inner(title)')
         .eq('external_id', external_id)
         .eq('source', source)
         .eq('user_id', user.id)
         .limit(1);
+
+      if (joinError) {
+        // Fall back to simple query without join
+        console.warn('Duplicate check join failed, falling back:', joinError.message);
+        const { data: simple } = await supabase
+          .from('topic_items')
+          .select('id, topic_id')
+          .eq('external_id', external_id)
+          .eq('source', source)
+          .eq('user_id', user.id)
+          .limit(1);
+        existing = simple;
+      } else {
+        existing = existingWithJoin;
+      }
 
       if (existing && existing.length > 0) {
         const existingItem = existing[0];
@@ -95,7 +112,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (confidence != null) insertData.confidence = confidence;
     if (link_reason) insertData.link_reason = link_reason;
 
-    const { data, error } = await supabase.from('topic_items').insert(insertData).select().single();
+    let { data, error } = await supabase.from('topic_items').insert(insertData).select().single();
+
+    // If schema cache error, retry without optional columns (linked_by, confidence, link_reason may not exist)
+    if (error && (error.message.includes('schema cache') || error.message.includes('Could not find'))) {
+      console.warn('POST /api/topics/[id]/items: optional columns not in schema, retrying without them');
+      const safeData: Record<string, unknown> = {
+        user_id: insertData.user_id,
+        topic_id: insertData.topic_id,
+        external_id: insertData.external_id,
+        source: insertData.source,
+        source_account_id: insertData.source_account_id,
+        title: insertData.title,
+        snippet: insertData.snippet,
+        url: insertData.url,
+        occurred_at: insertData.occurred_at,
+        metadata: insertData.metadata,
+      };
+      const retry = await supabase.from('topic_items').insert(safeData).select().single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       console.error('Topic item insert error:', error);
