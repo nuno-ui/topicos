@@ -3,8 +3,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { cn } from '@/lib/utils';
-import { formatRelativeDate } from '@/lib/utils';
+import { cn, formatRelativeDate, formatSmartDate } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import {
   ArrowLeft,
@@ -195,6 +194,8 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
   const [editLinkedin, setEditLinkedin] = useState((contact.metadata?.linkedin as string) || '');
   const [editTwitter, setEditTwitter] = useState((contact.metadata?.twitter as string) || '');
   const [editTimezone, setEditTimezone] = useState((contact.metadata?.timezone as string) || '');
+  const [editTags, setEditTags] = useState('');
+  const [editContactMethod, setEditContactMethod] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveFlash, setSaveFlash] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
@@ -307,7 +308,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
     if (!contact.email) return;
     try {
       await navigator.clipboard.writeText(contact.email);
-      toast.success('Email copied to clipboard');
+      toast.success('Email copied');
     } catch {
       toast.error('Failed to copy email');
     }
@@ -325,6 +326,9 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
     setEditLinkedin((meta.linkedin as string) || '');
     setEditTwitter((meta.twitter as string) || '');
     setEditTimezone((meta.timezone as string) || '');
+    const metaTags = meta.tags;
+    setEditTags(Array.isArray(metaTags) ? (metaTags as string[]).join(', ') : '');
+    setEditContactMethod((meta.preferred_contact_method as string) || '');
     setEditing(true);
   };
 
@@ -348,6 +352,11 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       else delete metadata.twitter;
       if (editTimezone.trim()) metadata.timezone = editTimezone.trim();
       else delete metadata.timezone;
+      const parsedTags = editTags.split(',').map(t => t.trim()).filter(Boolean);
+      if (parsedTags.length > 0) metadata.tags = parsedTags;
+      else delete metadata.tags;
+      if (editContactMethod.trim()) metadata.preferred_contact_method = editContactMethod.trim();
+      else delete metadata.preferred_contact_method;
 
       const res = await fetch(`/api/contacts/${contact.id}`, {
         method: 'PATCH',
@@ -399,7 +408,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       if (changes.length > 0) {
         toast.success(`Updated ${changes.join(', ')}`);
       } else {
-        toast.success('Contact saved (no changes)');
+        toast.success('Contact saved');
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Update failed');
@@ -495,12 +504,12 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               role: data.result.role || prev.role,
             }));
           }
-          toast.success('Contact enriched with AI insights');
+          toast.success('Contact enriched');
           break;
         case 'contact_intelligence':
           setIntelligence(data.result);
           setShowIntelligence(true);
-          toast.success('Intelligence report generated');
+          toast.success('Intelligence report ready');
           break;
         case 'propose_next_email':
           setEmailSuggestion(data.result);
@@ -794,6 +803,38 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                       <Clock className="w-3 h-3" /> Timezone
                     </label>
                   </div>
+                  <div className="relative">
+                    <input
+                      value={editTags}
+                      onChange={e => setEditTags(e.target.value)}
+                      className="peer w-full px-3.5 pt-5 pb-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow placeholder-transparent"
+                      placeholder="e.g. vip, vendor, mentor"
+                      id="edit-tags"
+                    />
+                    <label
+                      htmlFor="edit-tags"
+                      className="absolute left-3.5 top-1.5 text-[10px] font-semibold text-blue-600 flex items-center gap-1 pointer-events-none transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-xs peer-placeholder-shown:text-gray-400 peer-placeholder-shown:font-medium peer-focus:top-1.5 peer-focus:text-[10px] peer-focus:font-semibold peer-focus:text-blue-600"
+                    >
+                      <Tag className="w-3 h-3" /> Tags (comma-separated)
+                    </label>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-blue-600 mb-1 flex items-center gap-1">
+                      <MessageSquare className="w-3 h-3" /> Preferred Contact
+                    </label>
+                    <select
+                      value={editContactMethod}
+                      onChange={e => setEditContactMethod(e.target.value)}
+                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow bg-white"
+                    >
+                      <option value="">Not set</option>
+                      <option value="Email">Email</option>
+                      <option value="Phone">Phone</option>
+                      <option value="Slack">Slack</option>
+                      <option value="LinkedIn">LinkedIn</option>
+                      <option value="In Person">In Person</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -926,6 +967,37 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* ============================
+          1b. Quick Stats Bar
+          ============================ */}
+      <div className="grid grid-cols-4 gap-3 animate-fade-in">
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 text-center">
+          <p className="text-lg font-bold text-blue-600">{contact.interaction_count}</p>
+          <p className="text-[11px] text-gray-500 font-medium mt-0.5">Interactions</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 text-center">
+          <p className="text-lg font-bold text-purple-600">{topicLinks.length}</p>
+          <p className="text-[11px] text-gray-500 font-medium mt-0.5">Topics linked</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 text-center">
+          <p className="text-lg font-bold text-amber-600">{daysAgo !== null ? daysAgo : '--'}</p>
+          <p className="text-[11px] text-gray-500 font-medium mt-0.5">Days since last</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 text-center">
+          <div className="flex items-center justify-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${engagement.dotColor}`} />
+            <p className={`text-sm font-bold ${
+              engagement.label === 'Active' ? 'text-green-600' :
+              engagement.label === 'Recent' ? 'text-blue-600' :
+              engagement.label === 'Idle' ? 'text-amber-600' :
+              engagement.label === 'Cold' ? 'text-red-600' :
+              'text-gray-500'
+            }`}>{engagement.label}</p>
+          </div>
+          <p className="text-[11px] text-gray-500 font-medium mt-0.5">Activity level</p>
         </div>
       </div>
 

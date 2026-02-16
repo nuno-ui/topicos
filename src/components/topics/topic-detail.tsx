@@ -1,6 +1,6 @@
 'use client';
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { sourceLabel, formatRelativeDate, sourceBorderClass, sourceIconBgClass } from '@/lib/utils';
+import { sourceLabel, formatRelativeDate, sourceBorderClass, sourceIconBgClass, formatSmartDate, AREA_COLORS } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -105,6 +105,15 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   const [editTags, setEditTags] = useState(topic.tags?.join(', ') || '');
   const [editStartDate, setEditStartDate] = useState(topic.start_date || '');
   const [editProgress, setEditProgress] = useState(topic.progress_percent ?? 0);
+  const [editFolderId, setEditFolderId] = useState(topic.folder_id || '');
+  const [editOwner, setEditOwner] = useState(topic.owner || '');
+  const [editGoal, setEditGoal] = useState(topic.goal || '');
+
+  // Folders for folder picker
+  const [folders, setFolders] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    fetch('/api/folders').then(r => r.json()).then(d => setFolders(d.folders || [])).catch(() => {});
+  }, []);
 
   // Notes state
   const [notes, setNotes] = useState(topic.notes || '');
@@ -180,6 +189,21 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     return () => window.removeEventListener('topicos:add-note', handler);
   }, []);
 
+  // Refresh topic data from server
+  const refreshTopic = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/topics/${topic.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.topic) {
+          setTopic(data.topic);
+        }
+      }
+    } catch {
+      // silent fail - data is still updated locally
+    }
+  }, [topic.id]);
+
   // Run an AI agent
   const runAgent = async (agent: string) => {
     setAgentLoading(agent);
@@ -196,6 +220,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         case 'auto_tag':
           setTopic(prev => ({ ...prev, tags: data.result.tags, area: data.result.area, priority: data.result.priority }));
           toast.success(`Added ${data.result.tags.length} tags, area: ${data.result.area}, priority: ${data.result.priority}`);
+          // Refresh from server to get latest persisted state
+          await refreshTopic();
           break;
         case 'suggest_title':
           setTitleSuggestions(data.result.suggestions);
@@ -210,6 +236,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ description: data.result.description }),
           });
+          // Refresh from server to get latest persisted state
+          await refreshTopic();
           break;
         case 'extract_action_items':
           setActionItems(data.result.action_items || []);
@@ -229,17 +257,17 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         case 'deep_dive':
           setDeepDiveReport(data.result.report);
           setShowDeepDive(true);
-          toast.success(`Deep Dive complete! ${data.result.enriched_count} items enriched`);
+          toast.success(`Deep Dive done, ${data.result.enriched_count} items enriched`);
           break;
         case 'recommend_content':
           setRecommendations(data.result.recommendations || []);
           setShowRecommendations(true);
-          toast.success(`${data.result.recommendations?.length || 0} content recommendations found`);
+          toast.success(`${data.result.recommendations?.length || 0} recommendations found`);
           break;
         case 'extract_entities':
           setEntities(data.result);
           setShowEntities(true);
-          toast.success('Entities extracted from content');
+          toast.success('Entities extracted');
           break;
         case 'cross_topic_links':
           setRelatedTopics(data.result.related_topics || []);
@@ -350,7 +378,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       }));
       setAiFindResults(results);
       setSelectedAiResults(new Set());
-      toast.success(`AI Find found ${results.length} relevant items`);
+      toast.success(`Found ${results.length} relevant item${results.length !== 1 ? 's' : ''}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'AI Find failed');
     }
@@ -422,6 +450,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
   // --- UNLINK ---
   const unlinkItem = async (itemId: string) => {
+    if (!confirm('Unlink this item from the topic?')) return;
     try {
       const res = await fetch(`/api/topics/${topic.id}/items/${itemId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to unlink');
@@ -448,6 +477,9 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
           priority: editPriority,
           tags: editTags.split(',').map(t => t.trim()).filter(Boolean),
           progress_percent: editProgress,
+          folder_id: editFolderId || null,
+          owner: editOwner.trim() || null,
+          goal: editGoal.trim() || null,
         }),
       });
       const data = await res.json();
@@ -475,6 +507,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
   // --- ARCHIVE TOPIC ---
   const archiveTopic = async () => {
+    const action = topic.status === 'archived' ? 'reactivate' : 'archive';
+    if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} this topic?`)) return;
     try {
       const newStatus = topic.status === 'archived' ? 'active' : 'archived';
       const res = await fetch(`/api/topics/${topic.id}`, {
@@ -735,12 +769,22 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         <div className="absolute inset-0 dot-pattern opacity-30 pointer-events-none" />
         <div className="relative">
           {/* Breadcrumb */}
-          <Link href="/topics" className="text-xs text-gray-400 hover:text-blue-600 mb-4 inline-flex items-center gap-1.5 transition-all duration-200 group">
-            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
-            <span className="group-hover:underline underline-offset-2">Topics</span>
+          <nav className="mb-4 inline-flex items-center gap-1.5 text-xs">
+            <Link href="/topics" className="text-gray-400 hover:text-blue-600 inline-flex items-center gap-1 transition-all duration-200 group">
+              <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+              <span className="group-hover:underline underline-offset-2">Topics</span>
+            </Link>
+            <ChevronRight className="w-3 h-3 text-gray-300" />
+            <Link href="/topics" className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+              AREA_COLORS[topic.area]
+                ? `${AREA_COLORS[topic.area].bg} ${AREA_COLORS[topic.area].text}`
+                : 'bg-gray-100 text-gray-600'
+            } hover:opacity-80 transition-opacity`}>
+              {topic.area.charAt(0).toUpperCase() + topic.area.slice(1)}
+            </Link>
             <ChevronRight className="w-3 h-3 text-gray-300" />
             <span className="text-gray-500 font-medium truncate max-w-[200px]">{topic.title}</span>
-          </Link>
+          </nav>
 
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
@@ -805,6 +849,31 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                     <input value={editTags} onChange={e => setEditTags(e.target.value)}
                       placeholder="e.g. urgent, frontend, review"
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80" />
+                  </div>
+                  {/* Folder, Owner, Goal row */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Folder</label>
+                      <select value={editFolderId} onChange={e => setEditFolderId(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                        <option value="">No folder</option>
+                        {folders.map(f => (
+                          <option key={f.id} value={f.id}>{f.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Owner</label>
+                      <input value={editOwner} onChange={e => setEditOwner(e.target.value)}
+                        placeholder="e.g. John Doe"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Goal</label>
+                      <input value={editGoal} onChange={e => setEditGoal(e.target.value)}
+                        placeholder="e.g. Launch by Q2"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80" />
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <button onClick={saveTopic} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors shadow-sm">
@@ -899,15 +968,52 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                     })()}
                   </div>
 
-                  {/* Progress bar (if progress_percent is set) */}
+                  {/* Progress visualization (if progress_percent is set) */}
                   {topic.progress_percent != null && topic.progress_percent > 0 && (
-                    <div className="mt-4 max-w-md">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-medium text-gray-500">Progress</span>
-                        <span className="text-xs font-bold text-gray-700">{topic.progress_percent}%</span>
+                    <div className="mt-4 flex items-center gap-4 max-w-lg">
+                      {/* Progress ring */}
+                      <div className="relative flex-shrink-0">
+                        <svg width="56" height="56" viewBox="0 0 56 56" className="-rotate-90">
+                          <circle cx="28" cy="28" r="24" fill="none" stroke="#e5e7eb" strokeWidth="5" />
+                          <circle
+                            cx="28" cy="28" r="24" fill="none"
+                            strokeWidth="5"
+                            strokeLinecap="round"
+                            strokeDasharray={`${2 * Math.PI * 24}`}
+                            strokeDashoffset={`${2 * Math.PI * 24 * (1 - topic.progress_percent / 100)}`}
+                            stroke={`url(#progress-gradient-${topic.id})`}
+                            className="transition-all duration-500"
+                          />
+                          <defs>
+                            <linearGradient id={`progress-gradient-${topic.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                              <stop offset="0%" stopColor="#3b82f6" />
+                              <stop offset="100%" stopColor={topic.progress_percent >= 80 ? '#22c55e' : topic.progress_percent >= 50 ? '#06b6d4' : '#3b82f6'} />
+                            </linearGradient>
+                          </defs>
+                        </svg>
+                        <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-gray-700">
+                          {topic.progress_percent}%
+                        </span>
                       </div>
-                      <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden shadow-inner">
-                        <div className="progress-bar-gradient h-full" style={{ width: `${topic.progress_percent}%` }} />
+                      {/* Progress bar alongside */}
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-medium text-gray-500">Progress</span>
+                          <span className={`text-xs font-semibold ${
+                            topic.progress_percent >= 100 ? 'text-green-600' : topic.progress_percent >= 60 ? 'text-blue-600' : 'text-amber-600'
+                          }`}>
+                            {topic.progress_percent >= 100 ? 'Complete' : topic.progress_percent >= 75 ? 'Almost there' : topic.progress_percent >= 50 ? 'Halfway' : 'In progress'}
+                          </span>
+                        </div>
+                        <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden shadow-inner">
+                          <div
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{
+                              width: `${Math.min(topic.progress_percent, 100)}%`,
+                              background: `linear-gradient(90deg, #3b82f6 0%, ${topic.progress_percent >= 80 ? '#22c55e' : topic.progress_percent >= 50 ? '#06b6d4' : '#3b82f6'} 100%)`,
+                            }}
+                          />
+                        </div>
                       </div>
                     </div>
                   )}
@@ -915,10 +1021,10 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                   {/* Compact dates row */}
                   <div className="flex items-center gap-4 mt-3 text-xs text-gray-400">
                     <span className="inline-flex items-center gap-1 hover:text-gray-600 transition-colors">
-                      <Clock className="w-3 h-3" /> Created {formatRelativeDate(topic.created_at)}
+                      <Clock className="w-3 h-3" /> Created {formatSmartDate(topic.created_at)}
                     </span>
                     <span className="inline-flex items-center gap-1 hover:text-gray-600 transition-colors">
-                      <RefreshCw className="w-3 h-3" /> Updated {formatRelativeDate(topic.updated_at)}
+                      <RefreshCw className="w-3 h-3" /> Updated {formatSmartDate(topic.updated_at)}
                     </span>
                     {topic.due_date && (
                       <span className="inline-flex items-center gap-1 hover:text-gray-600 transition-colors">
@@ -931,7 +1037,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             </div>
             {!editing && (
               <div className="flex gap-1 items-center flex-shrink-0">
-                <button onClick={() => { setEditing(true); setEditTitle(topic.title); setEditDescription(topic.description || ''); setEditArea(topic.area); setEditStatus(topic.status); setEditDueDate(topic.due_date || ''); setEditPriority(topic.priority ?? 0); setEditTags(topic.tags?.join(', ') || ''); setEditStartDate(topic.start_date || ''); setEditProgress(topic.progress_percent ?? 0); }}
+                <button onClick={() => { setEditing(true); setEditTitle(topic.title); setEditDescription(topic.description || ''); setEditArea(topic.area); setEditStatus(topic.status); setEditDueDate(topic.due_date || ''); setEditPriority(topic.priority ?? 0); setEditTags(topic.tags?.join(', ') || ''); setEditStartDate(topic.start_date || ''); setEditProgress(topic.progress_percent ?? 0); setEditFolderId(topic.folder_id || ''); setEditOwner(topic.owner || ''); setEditGoal(topic.goal || ''); }}
                   className="px-3 py-1.5 text-gray-500 hover:text-blue-600 hover:bg-white/80 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-transparent hover:border-gray-200 hover:shadow-sm" title="Edit">
                   <Edit3 className="w-3.5 h-3.5" /> Edit
                 </button>
@@ -948,7 +1054,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                           className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors">
                           <StickyNote className="w-3.5 h-3.5 text-green-500" /> Add Note
                         </button>
-                        <button onClick={() => { navigator.clipboard.writeText(window.location.href); toast.success('Link copied to clipboard'); setShowMoreMenu(false); }}
+                        <button onClick={() => { navigator.clipboard.writeText(window.location.href); toast.success('Link copied'); setShowMoreMenu(false); }}
                           className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors">
                           <Link2 className="w-3.5 h-3.5 text-blue-500" /> Copy Link
                         </button>
@@ -1203,7 +1309,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>}
 
       {/* Search Panel */}
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover-lift">
+      <div id="section-search" className="scroll-mt-8 bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover-lift">
         <button onClick={() => setShowSearch(!showSearch)}
           className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50/80 transition-colors">
           <div className="flex items-center gap-2.5 text-sm font-medium text-gray-700">
@@ -1410,7 +1516,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       )}
 
       {/* Linked Items */}
-      <div>
+      <div id="section-items" className="scroll-mt-8">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-bold text-gray-900 flex items-center gap-2.5">
             <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
@@ -1648,8 +1754,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* AI Analysis */}
-      <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift bg-gradient-to-br from-white via-white to-purple-50/20">
-        <button onClick={() => setShowAnalysis(!showAnalysis)}
+      <div id="section-analysis" className="scroll-mt-8 rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift bg-gradient-to-br from-white via-white to-purple-50/20">
+        <button onClick={() => { setShowAnalysis(!showAnalysis); if (!showAnalysis) setTimeout(() => document.getElementById('section-analysis')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }}
           className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-gray-50/50 transition-colors bg-gradient-to-r from-purple-50/30 to-blue-50/30">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
@@ -1756,7 +1862,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* AI Agents */}
-      <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift bg-gradient-to-br from-white via-white to-blue-50/20">
+      <div id="section-agents" className="scroll-mt-8 rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift bg-gradient-to-br from-white via-white to-blue-50/20">
         <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-50/40 to-purple-50/40">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
@@ -2078,7 +2184,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* Notes */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift">
+      <div id="section-notes" className="scroll-mt-8 bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift">
         <div className="px-5 py-3 flex items-center justify-between border-b border-gray-100">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <StickyNote className="w-4 h-4 text-amber-500" />
@@ -2119,6 +2225,64 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
               notesFocused ? 'notes-textarea border-blue-300' : 'border-gray-200'
             }`}
           />
+        </div>
+      </div>
+
+      {/* Activity Feed */}
+      <div id="section-activity" className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift">
+        <div className="px-5 py-3 border-b border-gray-100">
+          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-blue-500" />
+            Activity
+          </h2>
+        </div>
+        <div className="p-5">
+          <div className="relative pl-6 space-y-4">
+            {/* Created */}
+            <div className="relative">
+              <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-blue-400 ring-2 ring-white" />
+              <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
+              <p className="text-xs font-medium text-gray-700">Topic created</p>
+              <p className="text-[11px] text-gray-400">{formatSmartDate(topic.created_at)}</p>
+            </div>
+            {/* Last updated */}
+            {topic.updated_at !== topic.created_at && (
+              <div className="relative">
+                <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-green-400 ring-2 ring-white" />
+                <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
+                <p className="text-xs font-medium text-gray-700">Last updated</p>
+                <p className="text-[11px] text-gray-400">{formatSmartDate(topic.updated_at)}</p>
+              </div>
+            )}
+            {/* Linked items count */}
+            <div className="relative">
+              <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-purple-400 ring-2 ring-white" />
+              <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
+              <p className="text-xs font-medium text-gray-700">{items.length} linked item{items.length !== 1 ? 's' : ''}</p>
+              <p className="text-[11px] text-gray-400">
+                {Object.entries(sourceCounts).map(([src, count]) => `${count} ${sourceLabel(src).toLowerCase()}`).join(', ') || 'No items yet'}
+              </p>
+            </div>
+            {/* Linked contacts count */}
+            <div className="relative">
+              <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-teal-400 ring-2 ring-white" />
+              <p className="text-xs font-medium text-gray-700">
+                {(() => {
+                  const contactNames = new Set<string>();
+                  items.forEach(item => {
+                    const from = item.metadata?.from;
+                    if (from && typeof from === 'string') {
+                      contactNames.add(from.split('<')[0].trim().toLowerCase());
+                    }
+                  });
+                  (topic.stakeholders || []).forEach(s => contactNames.add(s.toLowerCase()));
+                  if (topic.owner) contactNames.add(topic.owner.toLowerCase());
+                  return `${contactNames.size} linked contact${contactNames.size !== 1 ? 's' : ''}`;
+                })()}
+              </p>
+              <p className="text-[11px] text-gray-400">From communications and stakeholders</p>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -50,13 +50,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     // Only allow known fields to be updated (prevent arbitrary field injection)
-    const allowedFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'summary', 'notes', 'progress_percent', 'updated_at'];
+    const allowedFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'summary', 'notes', 'progress_percent', 'owner', 'goal', 'updated_at'];
     const updateData: Record<string, unknown> = {};
     for (const key of allowedFields) {
       if (key in body) updateData[key] = body[key];
     }
     // Trim title if present
     if (updateData.title && typeof updateData.title === 'string') updateData.title = updateData.title.trim();
+    // Trim owner and goal if present
+    if (updateData.owner !== undefined) updateData.owner = (typeof updateData.owner === 'string' && updateData.owner.trim()) ? updateData.owner.trim() : null;
+    if (updateData.goal !== undefined) updateData.goal = (typeof updateData.goal === 'string' && updateData.goal.trim()) ? updateData.goal.trim() : null;
     // Always update timestamp
     updateData.updated_at = new Date().toISOString();
 

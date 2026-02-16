@@ -244,6 +244,30 @@ export function getContrastColor(hexColor: string): 'white' | 'black' {
   return luminance > 0.5 ? 'black' : 'white';
 }
 
+export function formatSmartDate(dateStr: string | Date): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / (1000 * 60));
+  const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin} min ago`;
+  if (diffHrs < 24) return `${diffHrs} hour${diffHrs !== 1 ? 's' : ''} ago`;
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) {
+    return `Yesterday at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  }
+
+  if (d.getFullYear() === now.getFullYear()) {
+    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 export function getTopicHealthScore(topic: {
   updated_at: string;
   description: string | null;

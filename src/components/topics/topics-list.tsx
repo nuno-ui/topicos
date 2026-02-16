@@ -860,8 +860,11 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
     return (
       <div key={node.folder.id} className="mb-0.5">
-        <div className={`flex items-center gap-1 py-2 px-2 rounded-lg hover:bg-gray-50 group/folder relative transition-colors`}
-          style={{ marginLeft: `${node.depth * 20}px` }}>
+        <div className={`flex items-center gap-1 py-2 px-2 rounded-lg hover:bg-gray-50 group/folder relative transition-colors ${node.folder.color ? 'border-l-2' : ''}`}
+          style={{
+            marginLeft: `${node.depth * 20}px`,
+            ...(node.folder.color ? { borderLeftColor: { red: '#ef4444', blue: '#3b82f6', green: '#22c55e', purple: '#8b5cf6', amber: '#f59e0b', gray: '#6b7280' }[node.folder.color] || undefined } : {}),
+          }}>
           {/* Indentation guide lines */}
           {node.depth > 0 && (
             <div className="absolute left-0 top-0 bottom-0" style={{ left: `${-4}px` }}>
@@ -878,8 +881,13 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             </span>
           </button>
           {(() => {
+            const customColorMap: Record<string, string> = {
+              red: 'text-red-500', blue: 'text-blue-500', green: 'text-green-500',
+              purple: 'text-purple-500', amber: 'text-amber-500', gray: 'text-gray-500',
+            };
             const folderColorMap: Record<string, string> = { work: 'text-blue-500', personal: 'text-green-500', career: 'text-purple-500' };
-            const fColor = node.folder.area ? folderColorMap[node.folder.area] || 'text-amber-500' : 'text-amber-500';
+            const fColor = node.folder.color ? (customColorMap[node.folder.color] || 'text-amber-500')
+              : node.folder.area ? folderColorMap[node.folder.area] || 'text-amber-500' : 'text-amber-500';
             // Use contextual icon for top-level folders
             if (node.depth === 0) {
               const ContextIcon = getFolderIcon(node.folder.name);
@@ -943,6 +951,35 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                   </button>
                 );
               })}
+            </div>
+            <div className="w-px h-4 bg-gray-200 mx-0.5" />
+            <div className="flex gap-0.5 items-center" title="Folder color">
+              <Palette className="w-3 h-3 text-gray-400 mr-0.5" />
+              {([
+                { name: 'red', bg: 'bg-red-500', ring: 'ring-red-300' },
+                { name: 'blue', bg: 'bg-blue-500', ring: 'ring-blue-300' },
+                { name: 'green', bg: 'bg-green-500', ring: 'ring-green-300' },
+                { name: 'purple', bg: 'bg-purple-500', ring: 'ring-purple-300' },
+                { name: 'amber', bg: 'bg-amber-500', ring: 'ring-amber-300' },
+                { name: 'gray', bg: 'bg-gray-500', ring: 'ring-gray-300' },
+              ] as const).map(c => (
+                <button
+                  key={c.name}
+                  onClick={async () => {
+                    const newColor = node.folder.color === c.name ? null : c.name;
+                    const res = await fetch(`/api/folders/${node.folder.id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ color: newColor }),
+                    });
+                    if (res.ok) {
+                      setFolders(prev => prev.map(f => f.id === node.folder.id ? { ...f, color: newColor } : f));
+                    }
+                  }}
+                  className={`w-3.5 h-3.5 rounded-full ${c.bg} transition-all hover:scale-125 ${node.folder.color === c.name ? `ring-2 ${c.ring} ring-offset-1` : 'opacity-60 hover:opacity-100'}`}
+                  title={`${c.name.charAt(0).toUpperCase() + c.name.slice(1)}${node.folder.color === c.name ? ' (active)' : ''}`}
+                />
+              ))}
             </div>
           </div>
         </div>

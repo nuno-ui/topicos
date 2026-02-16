@@ -1,6 +1,6 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import Link from 'next/link';
-import { sourceLabel, formatRelativeDate, getTopicHealthScore, getDaysUntil } from '@/lib/utils';
+import { sourceLabel, formatRelativeDate, getTopicHealthScore, getDaysUntil, formatSmartDate } from '@/lib/utils';
 import { Zap, Clock, FolderKanban, Newspaper, PieChart, Mail, Calendar, FileText, MessageSquare, BookOpen, StickyNote, Link2, File, Search, Users, Plus, Sparkles, Paperclip, TrendingUp, TrendingDown, ArrowRight, Brain, Flame, LinkIcon, CheckCircle2, Circle, Rocket } from 'lucide-react';
 import { DashboardAgents } from '@/components/dashboard/dashboard-agents';
 
@@ -459,6 +459,46 @@ export default async function DashboardPage() {
         <DashboardAgents />
       </div>
 
+      {/* Recent Activity Feed */}
+      {(recentItems.length > 0 || aiRuns.length > 0 || topics.length > 0) && (
+        <div className="mb-8 p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
+              <Clock className="w-3.5 h-3.5 text-white" />
+            </div>
+            Recent Activity
+          </h2>
+          <div className="relative pl-6 space-y-3">
+            {[
+              ...topics
+                .filter((t: any) => new Date(t.updated_at) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
+                .slice(0, 3)
+                .map((t: any) => ({ type: 'topic' as const, title: `Updated topic: ${t.title}`, date: t.updated_at, href: `/topics/${t.id}` })),
+              ...recentItems
+                .slice(0, 3)
+                .map((item: any) => ({ type: 'item' as const, title: `New item: ${item.title}`, date: item.created_at, href: item.topic_id ? `/topics/${item.topic_id}` : '/search' })),
+              ...aiRuns
+                .slice(0, 2)
+                .map((run: any) => ({ type: 'ai' as const, title: `AI ${agentKindLabel(run.kind)}: ${run.input_summary || 'completed'}`, date: run.created_at, href: run.topic_id ? `/topics/${run.topic_id}` : '#' })),
+            ]
+              .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+              .slice(0, 5)
+              .map((entry, i, arr) => (
+                <div key={`${entry.type}-${i}`} className="relative">
+                  <div className={`absolute -left-6 top-1 w-2.5 h-2.5 rounded-full ring-2 ring-white ${
+                    entry.type === 'topic' ? 'bg-blue-400' : entry.type === 'item' ? 'bg-emerald-400' : 'bg-purple-400'
+                  }`} />
+                  {i < arr.length - 1 && <div className="absolute -left-[19px] top-3.5 w-0.5 h-full bg-gray-100" />}
+                  <Link href={entry.href} className="group block">
+                    <p className="text-xs font-medium text-gray-700 group-hover:text-blue-600 transition-colors truncate">{entry.title}</p>
+                    <p className="text-[11px] text-gray-400">{formatSmartDate(entry.date)}</p>
+                  </Link>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Active Topics - 2/3 width */}
         <div className="lg:col-span-2 space-y-6">
@@ -561,7 +601,7 @@ export default async function DashboardPage() {
                             </div>
                           )}
                         </div>
-                        <span className="text-xs text-gray-400 ml-3 flex-shrink-0">{formatRelativeDate(topic.updated_at)}</span>
+                        <span className="text-xs text-gray-400 ml-3 flex-shrink-0">{formatSmartDate(topic.updated_at)}</span>
                       </div>
                     </Link>
                   );
@@ -602,7 +642,7 @@ export default async function DashboardPage() {
                         <p className="text-xs text-gray-500 mt-0.5 truncate">{run.input_summary}</p>
                         <div className="flex gap-3 mt-1.5 text-xs text-gray-400">
                           {run.tokens_used ? <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500" /> {run.tokens_used.toLocaleString()} tokens</span> : null}
-                          <span>{formatRelativeDate(run.created_at)}</span>
+                          <span>{formatSmartDate(run.created_at)}</span>
                         </div>
                       </div>
                     </div>
