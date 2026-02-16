@@ -14,7 +14,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     const { data, error } = await supabase
       .from('contact_topic_links')
-      .select('*, contacts(id, name, email, organization, role, area)')
+      .select('*, contacts(id, name, email, organization, role)')
       .eq('topic_id', id)
       .eq('user_id', user.id);
 
@@ -50,7 +50,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       contact_id,
       topic_id: id,
       role: role || null,
-    }, { onConflict: 'contact_id, topic_id' }).select('*, contacts(id, name, email, organization, role, area)').single();
+    }, { onConflict: 'contact_id, topic_id' }).select('*, contacts(id, name, email, organization, role)').single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ link: data }, { status: 201 });

@@ -79,7 +79,6 @@ interface LinkedContact {
     email: string | null;
     organization: string | null;
     role: string | null;
-    area: string | null;
   } | null;
 }
 
