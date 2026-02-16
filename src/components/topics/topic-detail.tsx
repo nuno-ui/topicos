@@ -114,7 +114,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   // Folders for folder picker
   const [folders, setFolders] = useState<Array<{ id: string; name: string }>>([]);
   useEffect(() => {
-    fetch('/api/folders').then(r => r.json()).then(d => setFolders(d.folders || [])).catch(() => {});
+    fetch('/api/folders').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => setFolders(d.folders || [])).catch(() => {});
   }, []);
 
   // Notes state
@@ -172,6 +172,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showInfoDashboard, setShowInfoDashboard] = useState(false);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
+  const [showLinkedItems, setShowLinkedItems] = useState(true);
 
   // AI Agent success animation and last run tracking
   const [agentSuccess, setAgentSuccess] = useState<string | null>(null);
@@ -515,23 +516,24 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     if (linked > 0) {
       // First enrich the newly linked items, then run AI analysis
       setAnalysisLoading(true);
-      // Enrich first (fetches full content from Notion, Gmail, etc.)
-      fetch(`/api/topics/${topic.id}/enrich`, { method: 'POST' })
-        .catch(() => { /* non-blocking */ })
-        .then(() => fetch('/api/ai/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topic_id: topic.id }),
-        }))
-        .then(async (res) => {
-          if (res && res.ok) {
+      // Enrich first (fetches full content from Notion, Gmail, etc.), then analyze
+      (async () => {
+        try {
+          await fetch(`/api/topics/${topic.id}/enrich`, { method: 'POST' }).catch(() => {});
+          await refreshItems();
+          const res = await fetch('/api/ai/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ topic_id: topic.id }),
+          });
+          if (res.ok) {
             const data = await res.json();
             setAnalysis(data.analysis);
             setShowAnalysis(true);
           }
-        })
-        .catch(() => { /* silent — user can manually refresh */ })
-        .finally(() => setAnalysisLoading(false));
+        } catch { /* silent — user can manually refresh */ }
+        finally { setAnalysisLoading(false); }
+      })();
     }
   }, [topic.id, items]);
 
@@ -894,7 +896,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   return (
     <div className="space-y-6 md:space-y-8 animate-fade-in p-4 md:p-8">
       {/* Header with gradient strip */}
-      <div className="topic-header-strip -mx-4 md:-mx-8 -mt-4 md:-mt-8 px-4 md:px-8 pt-5 pb-6 mb-2 rounded-b-2xl relative overflow-hidden">
+      <div className="topic-header-strip -mx-4 md:-mx-8 -mt-4 md:-mt-8 px-4 md:px-8 pt-5 pb-6 mb-2 rounded-b-2xl relative">
         {/* Decorative dots */}
         <div className="absolute inset-0 dot-pattern opacity-30 pointer-events-none" />
         <div className="relative">
@@ -1645,31 +1647,34 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         </div>
       )}
 
-      {/* Linked Items */}
+      {/* Linked Items - collapsible */}
       <div id="section-items" className="scroll-mt-8">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-bold text-gray-900 flex items-center gap-2.5">
+          <button onClick={() => setShowLinkedItems(!showLinkedItems)}
+            className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
             <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
               <Layers className="w-3.5 h-3.5 text-white" />
             </span>
-            Linked Items
+            <h2 className="text-base font-bold text-gray-900">Linked Items</h2>
             <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{items.length}</span>
-          </h2>
+            {showLinkedItems ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+          </button>
           <div className="flex items-center gap-1.5">
             <button onClick={refreshItems} disabled={itemsRefreshing}
               className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Refresh items">
               <RefreshCw className={`w-3.5 h-3.5 ${itemsRefreshing ? 'animate-spin' : ''}`} />
             </button>
-            <button onClick={() => { setShowLinkForm(v => !v); setShowNoteEditor(false); }}
+            <button onClick={() => { setShowLinkedItems(true); setShowLinkForm(v => !v); setShowNoteEditor(false); }}
               className="px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border border-transparent hover:border-blue-200">
               <Link2 className="w-3.5 h-3.5" /> Add Link
             </button>
-            <button onClick={() => { setShowNoteEditor(true); setShowLinkForm(false); }}
+            <button onClick={() => { setShowLinkedItems(true); setShowNoteEditor(true); setShowLinkForm(false); }}
               className="px-3 py-1.5 text-green-600 hover:bg-green-50 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border border-transparent hover:border-green-200">
               <StickyNote className="w-3.5 h-3.5" /> Add Note
             </button>
           </div>
         </div>
+        {showLinkedItems && (<>
         {/* Add Link Form */}
         {showLinkForm && (
           <div className="mb-4 p-4 bg-blue-50/50 border border-blue-200 rounded-xl space-y-3">
@@ -1885,6 +1890,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             ))}
           </div>
         )}
+        </>)}
       </div>
 
       {/* AI Analysis */}
@@ -1996,7 +2002,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* AI Agents */}
-      <div id="section-agents" className="scroll-mt-8 rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift bg-gradient-to-br from-white via-white to-blue-50/20">
+      <div id="section-agents" className="scroll-mt-8 rounded-xl border border-gray-100 shadow-sm hover-lift bg-gradient-to-br from-white via-white to-blue-50/20">
         <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-50/40 to-purple-50/40">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">

@@ -21,7 +21,11 @@ export async function GET(request: Request) {
       .eq('user_id', user.id);
 
     if (area && area !== 'all') query = query.eq('area', area);
-    if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,organization.ilike.%${search}%`);
+    if (search) {
+      // Escape special ilike characters to prevent pattern injection
+      const safeSearch = search.replace(/[%_\\]/g, '\\$&');
+      query = query.or(`name.ilike.%${safeSearch}%,email.ilike.%${safeSearch}%,organization.ilike.%${safeSearch}%`);
+    }
 
     const validSorts = ['name', 'created_at', 'updated_at', 'interaction_count', 'last_interaction_at', 'organization'];
     const sortField = validSorts.includes(sortBy) ? sortBy : 'name';

@@ -24,8 +24,8 @@ export async function POST(request: Request) {
         // AI generates tags for a topic based on its content
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
-        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(20);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(20);
         const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ tags: string[]; area: string; priority: number }>(
@@ -52,8 +52,8 @@ export async function POST(request: Request) {
         // AI suggests a better title for a topic
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
-        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(10);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(10);
         const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ suggestions: string[] }>(
@@ -73,8 +73,8 @@ export async function POST(request: Request) {
         // AI generates a rich description for a topic
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
-        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(15);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(15);
         const noteContext = await getTopicNoteContext(topic_id);
 
         const { text } = await callClaude(
@@ -94,8 +94,8 @@ export async function POST(request: Request) {
         // AI extracts action items from topic communications
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
-        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata').eq('topic_id', topic_id).limit(20);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata').eq('topic_id', topic_id).limit(20);
         const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ action_items: Array<{ task: string; assignee: string; due: string; priority: string }> }>(
@@ -116,8 +116,8 @@ export async function POST(request: Request) {
         // AI summarizes all communications in a topic
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
-        const { data: items } = await supabase.from('topic_items').select('*').eq('topic_id', topic_id).order('occurred_at', { ascending: true }).limit(30);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const { data: items } = await supabase.from('topic_items').select('*').eq('topic_id', topic_id).order('occurred_at', { ascending: true }).limit(30);
         const noteContext = await getTopicNoteContext(topic_id);
 
         const { text } = await callClaude(

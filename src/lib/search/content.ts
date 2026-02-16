@@ -171,7 +171,7 @@ export async function enrichAndCacheItemContent(
     if (error) {
       console.error(`[Content Enrichment] Failed to save body for item ${item.id} (${item.source}):`, error.message);
     } else {
-      console.log(`[Content Enrichment] ✓ Saved ${result.body.length} chars for ${item.source} item ${item.id}`);
+      // Content enrichment saved successfully
     }
   } else if (!result.body) {
     console.warn(`[Content Enrichment] No content returned for ${item.source} item ${item.id} (external_id: ${item.external_id})`);

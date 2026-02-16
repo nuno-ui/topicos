@@ -22,7 +22,6 @@ export async function GET(request: Request) {
       }),
     });
     const tokenData = await tokenRes.json();
-    console.log('Slack OAuth response keys:', Object.keys(tokenData));
     if (!tokenData.ok) throw new Error(tokenData.error || 'Slack OAuth failed');
 
     // CRITICAL: User tokens are in authed_user, NOT at the top level

@@ -523,22 +523,26 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     if (!confirm(`Delete ${selectedIds.size} selected contact(s)? This cannot be undone.`)) return;
     const ids = Array.from(selectedIds);
     let deleted = 0;
+    const failedIds = new Set<string>();
     for (const id of ids) {
       try {
         const res = await fetch(`/api/contacts/${id}`, { method: 'DELETE' });
         if (res.ok) deleted++;
-      } catch { /* skip */ }
+        else failedIds.add(id);
+      } catch { failedIds.add(id); }
     }
-    setContacts(prev => prev.filter(c => !selectedIds.has(c.id)));
+    setContacts(prev => prev.filter(c => !selectedIds.has(c.id) || failedIds.has(c.id)));
     setSelectedIds(new Set());
     setSelectMode(false);
-    toast.success(`Deleted ${deleted} contact(s)`);
+    if (failedIds.size > 0) toast.error(`Failed to delete ${failedIds.size} contact(s)`);
+    else toast.success(`Deleted ${deleted} contact(s)`);
   };
 
   const bulkSetArea = async (area: string) => {
     if (selectedIds.size === 0) return;
     const ids = Array.from(selectedIds);
     let updated = 0;
+    const succeededIds = new Set<string>();
     for (const id of ids) {
       try {
         const res = await fetch(`/api/contacts/${id}`, {
@@ -546,11 +550,12 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ area: area || null }),
         });
-        if (res.ok) updated++;
+        if (res.ok) { updated++; succeededIds.add(id); }
       } catch { /* skip */ }
     }
-    setContacts(prev => prev.map(c => selectedIds.has(c.id) ? { ...c, area: area || null } : c));
-    toast.success(`Updated area for ${updated} contact(s)`);
+    setContacts(prev => prev.map(c => succeededIds.has(c.id) ? { ...c, area: area || null } : c));
+    if (updated < ids.length) toast.error(`Failed to update ${ids.length - updated} contact(s)`);
+    else toast.success(`Updated area for ${updated} contact(s)`);
   };
 
   // ========== FILTER HELPERS ==========

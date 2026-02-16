@@ -22,7 +22,10 @@ export async function GET(request: Request) {
 
     if (status && status !== 'all') query = query.eq('status', status);
     if (area && area !== 'all') query = query.eq('area', area);
-    if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
+    if (search) {
+      const safeSearch = search.replace(/[%_\\]/g, '\\$&');
+      query = query.or(`title.ilike.%${safeSearch}%,description.ilike.%${safeSearch}%`);
+    }
     query = query.limit(limit);
 
     const { data, error } = await query;

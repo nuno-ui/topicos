@@ -128,10 +128,13 @@ export function SearchPanel() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/topics').then(r => r.json()).then(data => {
+    fetch('/api/topics').then(r => {
+      if (!r.ok) throw new Error(`Failed to load topics: ${r.status}`);
+      return r.json();
+    }).then(data => {
       setTopics(data.topics || []);
-    }).catch(err => {
-      console.error('Failed to load topics for search:', err);
+    }).catch(() => {
+      // Silent — topics list used for optional linking
     });
 
     try {

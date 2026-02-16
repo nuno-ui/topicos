@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     if (!query || typeof query !== 'string' || query.trim().length === 0) {
       return NextResponse.json({ error: 'Query is required' }, { status: 400 });
     }
-    const sanitizedQuery = query.trim().slice(0, 500); // Limit query length
+    const sanitizedQuery = query.trim().slice(0, 500).replace(/[%_\\]/g, '\\$&'); // Limit length & escape ilike chars
     const safeMaxResults = Math.min(Math.max(1, max_results), 100); // Clamp 1-100
 
     // Fetch connected accounts info for the UI
