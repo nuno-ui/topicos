@@ -17,6 +17,7 @@ interface TopicItem {
   source_account_id: string | null;
   title: string;
   snippet: string;
+  body?: string | null;
   url: string;
   occurred_at: string;
   metadata: Record<string, unknown>;
@@ -510,19 +511,24 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     }
     // Auto-refresh AI analysis when new items are linked so Notion/new content is included
     if (linked > 0) {
-      // Run analysis in background — don't await, don't block UI
+      // First enrich the newly linked items, then run AI analysis
       setAnalysisLoading(true);
-      fetch('/api/ai/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic_id: topic.id }),
-      }).then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          setAnalysis(data.analysis);
-          setShowAnalysis(true);
-        }
-      }).catch(() => { /* silent — user can manually refresh */ })
+      // Enrich first (fetches full content from Notion, Gmail, etc.)
+      fetch(`/api/topics/${topic.id}/enrich`, { method: 'POST' })
+        .catch(() => { /* non-blocking */ })
+        .then(() => fetch('/api/ai/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topic_id: topic.id }),
+        }))
+        .then(async (res) => {
+          if (res && res.ok) {
+            const data = await res.json();
+            setAnalysis(data.analysis);
+            setShowAnalysis(true);
+          }
+        })
+        .catch(() => { /* silent — user can manually refresh */ })
         .finally(() => setAnalysisLoading(false));
     }
   }, [topic.id, items]);
@@ -787,6 +793,15 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     setAnalysisLoading(true);
     setShowAnalysis(true);
     try {
+      // First, enrich items that don't have body content yet (fetches from Notion, Gmail, etc.)
+      // This ensures AI has full content, not just snippets
+      const hasUnenriched = items.some(i => !i.body && ['notion', 'gmail', 'drive', 'slack', 'link'].includes(i.source));
+      if (hasUnenriched) {
+        try {
+          await fetch(`/api/topics/${topic.id}/enrich`, { method: 'POST' });
+        } catch { /* non-blocking — continue with analysis even if enrich fails */ }
+      }
+
       const res = await fetch('/api/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

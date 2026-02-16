@@ -160,10 +160,18 @@ export async function enrichAndCacheItemContent(
       updateData.metadata = { ...(item.metadata || {}), ...result.extra_metadata };
     }
 
-    await supabase
+    const { error } = await supabase
       .from('topic_items')
       .update(updateData)
       .eq('id', item.id);
+
+    if (error) {
+      console.error(`[Content Enrichment] Failed to save body for item ${item.id} (${item.source}):`, error.message);
+    } else {
+      console.log(`[Content Enrichment] ✓ Saved ${result.body.length} chars for ${item.source} item ${item.id}`);
+    }
+  } else {
+    console.warn(`[Content Enrichment] No content returned for ${item.source} item ${item.id} (external_id: ${item.external_id})`);
   }
 
   return result;
