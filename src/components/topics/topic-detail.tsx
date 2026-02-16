@@ -102,6 +102,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [allContacts, setAllContacts] = useState<Array<{id: string; name: string; email: string | null}>>([]);
   const [contactSearchLoading, setContactSearchLoading] = useState(false);
   const [linkingContact, setLinkingContact] = useState(false);
+  const [savingExtractedContacts, setSavingExtractedContacts] = useState<Set<number>>(new Set());
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -273,6 +274,104 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     }
+  };
+
+  // Save an extracted contact to the contacts DB and link to this topic
+  const saveAndLinkExtractedContact = async (contact: { name: string; email: string; role: string }, index: number) => {
+    setSavingExtractedContacts(prev => new Set(prev).add(index));
+    try {
+      // 1. Create or upsert the contact
+      const createRes = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: contact.name,
+          email: contact.email || null,
+          role: contact.role || null,
+          area: topic.area || 'work',
+        }),
+      });
+      if (!createRes.ok) {
+        const errData = await createRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to create contact');
+      }
+      const contactData = await createRes.json();
+      const contactId = contactData.contact?.id;
+      if (!contactId) throw new Error('No contact ID returned');
+
+      // 2. Link the contact to this topic
+      const linkRes = await fetch(`/api/topics/${topic.id}/contacts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact_id: contactId, role: contact.role || null }),
+      });
+      if (!linkRes.ok) {
+        const errData = await linkRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to link contact');
+      }
+      const linkData = await linkRes.json();
+
+      // 3. Update local state
+      setLinkedContacts(prev => [...prev.filter(c => c.contact_id !== contactId), linkData.link]);
+      toast.success(`${contact.name} saved & linked to topic`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save contact');
+    }
+    setSavingExtractedContacts(prev => {
+      const next = new Set(prev);
+      next.delete(index);
+      return next;
+    });
+  };
+
+  // Save ALL extracted contacts and link them to this topic
+  const saveAllExtractedContacts = async () => {
+    let saved = 0;
+    let failed = 0;
+    for (let i = 0; i < extractedContacts.length; i++) {
+      const c = extractedContacts[i];
+      // Skip if already linked (check by email)
+      const alreadyLinked = linkedContacts.some(lc =>
+        lc.contacts?.email && c.email && lc.contacts.email.toLowerCase() === c.email.toLowerCase()
+      );
+      if (alreadyLinked) continue;
+
+      setSavingExtractedContacts(prev => new Set(prev).add(i));
+      try {
+        const createRes = await fetch('/api/contacts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: c.name,
+            email: c.email || null,
+            role: c.role || null,
+            area: topic.area || 'work',
+          }),
+        });
+        if (!createRes.ok) throw new Error('Create failed');
+        const contactData = await createRes.json();
+        const contactId = contactData.contact?.id;
+        if (!contactId) throw new Error('No ID');
+
+        const linkRes = await fetch(`/api/topics/${topic.id}/contacts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contact_id: contactId, role: c.role || null }),
+        });
+        if (linkRes.ok) {
+          const linkData = await linkRes.json();
+          setLinkedContacts(prev => [...prev.filter(lc => lc.contact_id !== contactId), linkData.link]);
+          saved++;
+        } else { failed++; }
+      } catch { failed++; }
+      setSavingExtractedContacts(prev => {
+        const next = new Set(prev);
+        next.delete(i);
+        return next;
+      });
+    }
+    if (saved > 0) toast.success(`Saved & linked ${saved} contact${saved !== 1 ? 's' : ''}`);
+    if (failed > 0) toast.error(`${failed} contact${failed !== 1 ? 's' : ''} failed`);
   };
 
   // Refresh topic data from server
@@ -2441,21 +2540,54 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
       {/* Extracted contacts */}
       {showExtractedContacts && extractedContacts.length > 0 && (
         <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden bg-teal-50/50 px-4 py-3">
-          <p className="text-xs text-teal-700 font-medium mb-2">Extracted Contacts ({extractedContacts.length}):</p>
-          <div className="space-y-1.5">
-            {extractedContacts.map((c, i) => (
-              <div key={i} className="flex items-center gap-2 text-sm p-2 bg-white rounded border border-teal-100">
-                <div className="w-7 h-7 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-medium flex-shrink-0">
-                  {c.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-gray-800 font-medium truncate">{c.name}</p>
-                  <p className="text-xs text-gray-400">{c.email} &bull; {c.role}</p>
-                </div>
-              </div>
-            ))}
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-teal-700 font-medium">Extracted Contacts ({extractedContacts.length}):</p>
+            <button
+              onClick={saveAllExtractedContacts}
+              disabled={savingExtractedContacts.size > 0}
+              className="px-3 py-1.5 bg-teal-600 text-white rounded-lg text-xs font-medium hover:bg-teal-700 disabled:opacity-50 flex items-center gap-1.5 transition-colors shadow-sm"
+            >
+              {savingExtractedContacts.size > 0 ? <Loader2 className="w-3 h-3 animate-spin" /> : <Users className="w-3 h-3" />}
+              Save All & Link to Topic
+            </button>
           </div>
-          <button onClick={() => setShowExtractedContacts(false)} className="text-xs text-teal-600 hover:underline mt-2">Dismiss</button>
+          <div className="space-y-1.5">
+            {extractedContacts.map((c, i) => {
+              const alreadyLinked = linkedContacts.some(lc =>
+                lc.contacts?.email && c.email && lc.contacts.email.toLowerCase() === c.email.toLowerCase()
+              );
+              const isSaving = savingExtractedContacts.has(i);
+              return (
+                <div key={i} className={`flex items-center gap-2 text-sm p-2.5 bg-white rounded-lg border ${alreadyLinked ? 'border-green-200 bg-green-50/30' : 'border-teal-100'} transition-all`}>
+                  <div className="w-8 h-8 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-semibold flex-shrink-0">
+                    {c.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-gray-800 font-medium truncate">{c.name}</p>
+                    <p className="text-xs text-gray-400">{c.email}{c.role ? ` \u00b7 ${c.role}` : ''}</p>
+                  </div>
+                  {alreadyLinked ? (
+                    <span className="text-xs text-green-600 font-medium flex items-center gap-1 flex-shrink-0 bg-green-50 px-2 py-1 rounded-full">
+                      <Check className="w-3 h-3" /> Linked
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => saveAndLinkExtractedContact(c, i)}
+                      disabled={isSaving}
+                      className="px-2.5 py-1.5 bg-teal-50 text-teal-700 border border-teal-200 rounded-lg text-xs font-medium hover:bg-teal-100 hover:border-teal-300 disabled:opacity-50 flex items-center gap-1 transition-colors flex-shrink-0"
+                    >
+                      {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
+                      {isSaving ? 'Saving...' : 'Save & Link'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-3 mt-2">
+            <button onClick={() => setShowExtractedContacts(false)} className="text-xs text-teal-600 hover:underline">Dismiss</button>
+            <button onClick={() => { setActiveSection('contacts'); }} className="text-xs text-teal-600 hover:underline">Go to Contacts tab</button>
+          </div>
         </div>
       )}
 
