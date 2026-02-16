@@ -378,8 +378,8 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
 
       setContact(prev => ({
         ...prev,
-        ...data.contact,
-        metadata,
+        ...(data.contact ?? {}),
+        metadata: { ...(data.contact?.metadata ?? {}), ...metadata },
         contact_topic_links: prev.contact_topic_links,
       }));
       setEditing(false);

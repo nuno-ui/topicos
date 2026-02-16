@@ -101,6 +101,10 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   const [editArea, setEditArea] = useState(topic.area);
   const [editStatus, setEditStatus] = useState(topic.status);
   const [editDueDate, setEditDueDate] = useState(topic.due_date || '');
+  const [editPriority, setEditPriority] = useState(topic.priority ?? 0);
+  const [editTags, setEditTags] = useState(topic.tags?.join(', ') || '');
+  const [editStartDate, setEditStartDate] = useState(topic.start_date || '');
+  const [editProgress, setEditProgress] = useState(topic.progress_percent ?? 0);
 
   // Notes state
   const [notes, setNotes] = useState(topic.notes || '');
@@ -405,11 +409,15 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
           area: editArea,
           status: editStatus,
           due_date: editDueDate || null,
+          start_date: editStartDate || null,
+          priority: editPriority,
+          tags: editTags.split(',').map(t => t.trim()).filter(Boolean),
+          progress_percent: editProgress,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setTopic(data.topic);
+      setTopic(prev => ({ ...prev, ...data.topic }));
       setEditing(false);
       toast.success('Topic updated');
     } catch (err) {
@@ -723,6 +731,45 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                     <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)}
                       className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
                   </div>
+                  {/* Dates row */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
+                      <input type="date" value={editStartDate} onChange={e => setEditStartDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Progress ({editProgress}%)</label>
+                      <input type="range" min={0} max={100} value={editProgress} onChange={e => setEditProgress(Number(e.target.value))}
+                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 mt-2" />
+                    </div>
+                  </div>
+                  {/* Priority buttons */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Priority</label>
+                    <div className="flex gap-1">
+                      {[0, 1, 2, 3, 4, 5].map(p => (
+                        <button key={p} type="button" onClick={() => setEditPriority(p)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+                            editPriority === p
+                              ? p === 0 ? 'bg-gray-100 text-gray-700 border-gray-400 ring-1 ring-gray-400'
+                                : p >= 4 ? 'bg-red-100 text-red-700 border-red-400 ring-1 ring-red-400'
+                                : p === 3 ? 'bg-orange-100 text-orange-700 border-orange-400 ring-1 ring-orange-400'
+                                : 'bg-amber-100 text-amber-700 border-amber-400 ring-1 ring-amber-400'
+                              : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                          }`}>
+                          {p === 0 ? 'None' : `P${p}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Tags input */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Tags (comma-separated)</label>
+                    <input value={editTags} onChange={e => setEditTags(e.target.value)}
+                      placeholder="e.g. urgent, frontend, review"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80" />
+                  </div>
                   <div className="flex gap-2">
                     <button onClick={saveTopic} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors shadow-sm">
                       <Save className="w-4 h-4" /> Save
@@ -734,7 +781,34 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                 </div>
               ) : (
                 <>
-                  <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mt-1 leading-tight tracking-tight">{topic.title}</h1>
+                  <div className="flex items-start gap-2 mt-1">
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight tracking-tight">{topic.title}</h1>
+                    <button
+                      onClick={() => runAgent('suggest_title')}
+                      disabled={!!agentLoading}
+                      className="mt-1 p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-all flex-shrink-0 disabled:opacity-50"
+                      title="AI: Suggest better titles"
+                    >
+                      {agentLoading === 'suggest_title' ? <Loader2 className="w-4 h-4 animate-spin text-purple-500" /> : <Wand2 className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {/* Title suggestions inline */}
+                  {showTitleSuggestions && titleSuggestions.length > 0 && (
+                    <div className="mt-2 p-3 bg-purple-50/70 rounded-xl border border-purple-100 animate-slide-up">
+                      <p className="text-xs text-purple-700 font-medium mb-2 flex items-center gap-1.5">
+                        <Sparkles className="w-3 h-3" /> Suggested Titles
+                      </p>
+                      <div className="space-y-1">
+                        {titleSuggestions.map((s, i) => (
+                          <button key={i} onClick={() => applyTitle(s)}
+                            className="block w-full text-left px-3 py-2 text-sm bg-white rounded-lg border border-purple-100 hover:border-purple-300 hover:bg-purple-50 transition-colors font-medium text-gray-800">
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                      <button onClick={() => setShowTitleSuggestions(false)} className="text-xs text-purple-500 hover:text-purple-700 hover:underline mt-2">Dismiss</button>
+                    </div>
+                  )}
 
                   {/* Badges row */}
                   <div className="flex items-center gap-2 mt-3 flex-wrap">
@@ -821,7 +895,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             </div>
             {!editing && (
               <div className="flex gap-1 items-center flex-shrink-0">
-                <button onClick={() => { setEditing(true); setEditTitle(topic.title); setEditDescription(topic.description || ''); setEditArea(topic.area); setEditStatus(topic.status); setEditDueDate(topic.due_date || ''); }}
+                <button onClick={() => { setEditing(true); setEditTitle(topic.title); setEditDescription(topic.description || ''); setEditArea(topic.area); setEditStatus(topic.status); setEditDueDate(topic.due_date || ''); setEditPriority(topic.priority ?? 0); setEditTags(topic.tags?.join(', ') || ''); setEditStartDate(topic.start_date || ''); setEditProgress(topic.progress_percent ?? 0); }}
                   className="px-3 py-1.5 text-gray-500 hover:text-blue-600 hover:bg-white/80 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-transparent hover:border-gray-200 hover:shadow-sm" title="Edit">
                   <Edit3 className="w-3.5 h-3.5" /> Edit
                 </button>
@@ -862,27 +936,40 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* Topic Info Card - description, tags */}
-      {(topic.description || (topic.tags && topic.tags.length > 0) || topic.goal) && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-3 hover-lift">
-          {topic.description && (
-            <p className="text-sm text-gray-600 leading-relaxed">{topic.description}</p>
-          )}
-          {topic.goal && (
-            <div className="flex items-start gap-2.5 p-3 bg-blue-50/50 rounded-lg border border-blue-100/50">
-              <Target className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-gray-700"><span className="font-semibold text-gray-800">Goal:</span> {topic.goal}</p>
-            </div>
-          )}
-          {topic.tags && topic.tags.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <Tag className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              {topic.tags.map((tag, i) => (
-                <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-gradient-to-r from-gray-50 to-gray-100 text-gray-600 font-medium border border-gray-200/60">{tag}</span>
-              ))}
-            </div>
-          )}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-3 hover-lift">
+        {/* Description with AI refresh button */}
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            {topic.description ? (
+              <p className="text-sm text-gray-600 leading-relaxed">{topic.description}</p>
+            ) : (
+              <p className="text-sm text-gray-400 italic">No description yet</p>
+            )}
+          </div>
+          <button
+            onClick={() => runAgent('generate_description')}
+            disabled={!!agentLoading}
+            className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-all flex-shrink-0 disabled:opacity-50"
+            title="AI: Generate description"
+          >
+            {agentLoading === 'generate_description' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-green-500" /> : <Wand2 className="w-3.5 h-3.5" />}
+          </button>
         </div>
-      )}
+        {topic.goal && (
+          <div className="flex items-start gap-2.5 p-3 bg-blue-50/50 rounded-lg border border-blue-100/50">
+            <Target className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+            <p className="text-sm text-gray-700"><span className="font-semibold text-gray-800">Goal:</span> {topic.goal}</p>
+          </div>
+        )}
+        {topic.tags && topic.tags.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Tag className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+            {topic.tags.map((tag, i) => (
+              <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-gradient-to-r from-gray-50 to-gray-100 text-gray-600 font-medium border border-gray-200/60">{tag}</span>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Topic Info Dashboard - collapsible */}
       <button onClick={() => setShowInfoDashboard(!showInfoDashboard)}

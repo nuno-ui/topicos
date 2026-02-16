@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client';
 import { formatRelativeDate } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban } from 'lucide-react';
 import Link from 'next/link';
 
 // --- Area border color map for topic cards ---
@@ -43,6 +43,77 @@ const statusColors: Record<string, string> = {
   completed: 'bg-gray-100 text-gray-600',
   archived: 'bg-amber-100 text-amber-700',
 };
+
+// --- Area card definitions for area-first navigation ---
+const areaCardConfig: Record<string, {
+  label: string;
+  icon: typeof Briefcase;
+  gradient: string;
+  hoverGradient: string;
+  iconBg: string;
+  border: string;
+  textColor: string;
+  subtextColor: string;
+  countBg: string;
+  countText: string;
+}> = {
+  work: {
+    label: 'Work',
+    icon: Briefcase,
+    gradient: 'from-blue-500 to-blue-600',
+    hoverGradient: 'hover:from-blue-600 hover:to-blue-700',
+    iconBg: 'bg-white/20',
+    border: 'border-blue-400/30',
+    textColor: 'text-white',
+    subtextColor: 'text-blue-100',
+    countBg: 'bg-white/20',
+    countText: 'text-white',
+  },
+  personal: {
+    label: 'Personal',
+    icon: Heart,
+    gradient: 'from-emerald-500 to-green-600',
+    hoverGradient: 'hover:from-emerald-600 hover:to-green-700',
+    iconBg: 'bg-white/20',
+    border: 'border-green-400/30',
+    textColor: 'text-white',
+    subtextColor: 'text-green-100',
+    countBg: 'bg-white/20',
+    countText: 'text-white',
+  },
+  career: {
+    label: 'Career',
+    icon: Rocket,
+    gradient: 'from-purple-500 to-violet-600',
+    hoverGradient: 'hover:from-purple-600 hover:to-violet-700',
+    iconBg: 'bg-white/20',
+    border: 'border-purple-400/30',
+    textColor: 'text-white',
+    subtextColor: 'text-purple-100',
+    countBg: 'bg-white/20',
+    countText: 'text-white',
+  },
+};
+
+// --- Contextual folder icon based on folder name ---
+function getFolderIcon(folderName: string): typeof Folder {
+  const name = folderName.toLowerCase();
+  if (name.includes('dev') || name.includes('code') || name.includes('tech') || name.includes('eng')) return Code;
+  if (name.includes('design') || name.includes('ui') || name.includes('ux')) return Palette;
+  if (name.includes('market') || name.includes('campaign') || name.includes('ads')) return Megaphone;
+  if (name.includes('finance') || name.includes('money') || name.includes('budget') || name.includes('invoice')) return DollarSign;
+  if (name.includes('health') || name.includes('fitness') || name.includes('wellness')) return Heart;
+  if (name.includes('learn') || name.includes('study') || name.includes('education') || name.includes('course')) return BookOpen;
+  if (name.includes('travel') || name.includes('trip') || name.includes('vacation')) return Plane;
+  if (name.includes('home') || name.includes('house') || name.includes('apartment')) return Home;
+  if (name.includes('project') || name.includes('sprint')) return Layers;
+  if (name.includes('client') || name.includes('customer') || name.includes('partner')) return Users;
+  if (name.includes('meeting') || name.includes('calendar') || name.includes('schedule')) return Calendar;
+  if (name.includes('email') || name.includes('mail') || name.includes('newsletter')) return Mail;
+  if (name.includes('note') || name.includes('doc') || name.includes('writing')) return FileText;
+  if (name.includes('idea') || name.includes('brain') || name.includes('research')) return Brain;
+  return FolderKanban;
+}
 
 // --- Helper: highlight matching text in search results ---
 function HighlightText({ text, query }: { text: string; query: string }) {
@@ -95,6 +166,7 @@ interface FolderType {
 export function TopicsList({ initialTopics, initialFolders }: { initialTopics: Topic[]; initialFolders: FolderType[] }) {
   const [topics, setTopics] = useState(initialTopics);
   const [folders, setFolders] = useState(initialFolders);
+  const [selectedArea, setSelectedArea] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -487,6 +559,52 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
   const areaCounts = useMemo(() => topics.reduce((acc, t) => { acc[t.area] = (acc[t.area] || 0) + 1; return acc; }, {} as Record<string, number>), [topics]);
 
+  // Area-level stats for the area cards
+  const areaStats = useMemo(() => {
+    const stats: Record<string, { total: number; active: number; folders: number; overdue: number; recentlyUpdated: number }> = {};
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    for (const a of ['work', 'personal', 'career']) {
+      const areaTopics = topics.filter(t => t.area === a);
+      const areaFolders = folders.filter(f => f.area === a);
+      stats[a] = {
+        total: areaTopics.length,
+        active: areaTopics.filter(t => t.status === 'active').length,
+        folders: areaFolders.length,
+        overdue: areaTopics.filter(t => t.due_date && new Date(t.due_date).getTime() < Date.now() && t.status === 'active').length,
+        recentlyUpdated: areaTopics.filter(t => new Date(t.updated_at).getTime() >= sevenDaysAgo).length,
+      };
+    }
+    return stats;
+  }, [topics, folders]);
+
+  // Filtered topics and folders by selected area
+  const areaFilteredTopics = useMemo(() => {
+    if (!selectedArea) return filteredTopics;
+    return filteredTopics.filter(t => t.area === selectedArea);
+  }, [filteredTopics, selectedArea]);
+
+  const areaFilteredFolders = useMemo(() => {
+    if (!selectedArea) return folders;
+    return folders.filter(f => f.area === selectedArea || !f.area);
+  }, [folders, selectedArea]);
+
+  const areaFolderTree = useMemo(() => {
+    const relevantFolders = areaFilteredFolders;
+    const rootFolders = relevantFolders.filter(f => !f.parent_id);
+    const getChildren = (parentId: string): FolderType[] => relevantFolders.filter(f => f.parent_id === parentId);
+    interface FolderTreeNode { folder: FolderType; children: FolderTreeNode[]; depth: number; }
+    const buildTree = (folder: FolderType, depth: number): FolderTreeNode => ({
+      folder,
+      children: getChildren(folder.id).map(c => buildTree(c, depth + 1)),
+      depth,
+    });
+    return rootFolders.map(f => buildTree(f, 0));
+  }, [areaFilteredFolders]);
+
+  const areaUnfolderedTopics = useMemo(() => {
+    return areaFilteredTopics.filter(t => !t.folder_id);
+  }, [areaFilteredTopics]);
+
   // Dashboard stats computation
   const dashboardStats = useMemo(() => {
     const now = Date.now();
@@ -742,11 +860,12 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
   // Render folder tree node (improved with indentation guides and drag indicator)
   const renderFolderNode = (node: { folder: FolderType; children: any[]; depth: number }) => {
-    const folderTopics = filteredTopics.filter(t => t.folder_id === node.folder.id);
+    const topicsSource = selectedArea ? areaFilteredTopics : filteredTopics;
+    const folderTopics = topicsSource.filter(t => t.folder_id === node.folder.id);
     const isExpanded = expandedFolders.has(node.folder.id);
     // Recursively count all topics in this folder and subfolders
     const countDeep = (n: { folder: FolderType; children: any[] }): number => {
-      const direct = filteredTopics.filter(t => t.folder_id === n.folder.id).length;
+      const direct = topicsSource.filter(t => t.folder_id === n.folder.id).length;
       return direct + n.children.reduce((sum: number, c: any) => sum + countDeep(c), 0);
     };
     const totalCount = countDeep(node);
@@ -773,6 +892,11 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
           {(() => {
             const folderColorMap: Record<string, string> = { work: 'text-blue-500', personal: 'text-green-500', career: 'text-purple-500' };
             const fColor = node.folder.area ? folderColorMap[node.folder.area] || 'text-amber-500' : 'text-amber-500';
+            // Use contextual icon for top-level folders
+            if (node.depth === 0) {
+              const ContextIcon = getFolderIcon(node.folder.name);
+              return <ContextIcon className={`w-4 h-4 ${fColor} flex-shrink-0`} />;
+            }
             return isExpanded
               ? <FolderOpen className={`w-4 h-4 ${fColor} flex-shrink-0`} />
               : <Folder className={`w-4 h-4 ${fColor} flex-shrink-0`} />;
@@ -831,171 +955,15 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
   const unfolderedTopics = filteredTopics.filter(t => !t.folder_id);
 
+  // The current topics to display (area-filtered or all)
+  const displayTopics = selectedArea ? areaFilteredTopics : filteredTopics;
+  const displayFolderTree = selectedArea ? areaFolderTree : folderTree;
+  const displayUnfoldered = selectedArea ? areaUnfolderedTopics : unfolderedTopics;
+  const displayFolders = selectedArea ? areaFilteredFolders : folders;
+
   return (
     <div>
-      {/* Dashboard Stats Cards */}
-      <div className="grid grid-cols-5 gap-3 mb-4">
-        <button onClick={() => { setStatsFilter(statsFilter === 'active' ? null : 'active'); setFilterStatus('active'); setFilterArea('all'); }}
-          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'active' ? 'border-blue-300 bg-blue-50 shadow-sm ring-1 ring-blue-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500 font-medium">Active Topics</span>
-            <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
-              <CircleDot className="w-3.5 h-3.5 text-blue-500" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.active}</p>
-        </button>
-        <button onClick={() => {
-            if (dashboardStats.overdue > 0) {
-              setStatsFilter(statsFilter === 'overdue' ? null : 'overdue');
-              setFilterStatus('active');
-            }
-          }}
-          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'overdue' ? 'border-red-300 bg-red-50 shadow-sm ring-1 ring-red-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500 font-medium">Overdue</span>
-            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${dashboardStats.overdue > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
-              <AlertTriangle className={`w-3.5 h-3.5 ${dashboardStats.overdue > 0 ? 'text-red-500' : 'text-gray-300'}`} />
-            </div>
-          </div>
-          <p className={`text-2xl font-bold mt-1 ${dashboardStats.overdue > 0 ? 'text-red-600' : 'text-gray-900'}`}>{dashboardStats.overdue}</p>
-        </button>
-        <button onClick={() => {
-            if (dashboardStats.needsAttention > 0) {
-              setStatsFilter(statsFilter === 'needsAttention' ? null : 'needsAttention');
-              setFilterStatus('active');
-            }
-          }}
-          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'needsAttention' ? 'border-amber-300 bg-amber-50 shadow-sm ring-1 ring-amber-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500 font-medium">Needs Attention</span>
-            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${dashboardStats.needsAttention > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
-              <ShieldAlert className={`w-3.5 h-3.5 ${dashboardStats.needsAttention > 0 ? 'text-amber-500' : 'text-gray-300'}`} />
-            </div>
-          </div>
-          <p className={`text-2xl font-bold mt-1 ${dashboardStats.needsAttention > 0 ? 'text-amber-600' : 'text-gray-900'}`}>{dashboardStats.needsAttention}</p>
-        </button>
-        <button onClick={() => { setStatsFilter(statsFilter === 'recent' ? null : 'recent'); }}
-          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'recent' ? 'border-green-300 bg-green-50 shadow-sm ring-1 ring-green-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500 font-medium">Updated This Week</span>
-            <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
-              <TrendingUp className="w-3.5 h-3.5 text-green-500" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.updatedThisWeek}</p>
-        </button>
-        <div className="p-3 rounded-xl border border-gray-100 bg-white text-left">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500 font-medium">Avg Items/Topic</span>
-            <div className="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center">
-              <BarChart3 className="w-3.5 h-3.5 text-purple-500" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.avgItems}</p>
-        </div>
-      </div>
-
-      {/* Search + Actions bar */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex-1 relative">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input ref={searchInputRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search titles, descriptions, tags... (press / to focus)" className="w-full pl-10 pr-20 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          {searchQuery && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-              <span className="text-[11px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded font-medium">
-                {filteredTopics.length} result{filteredTopics.length !== 1 ? 's' : ''}
-              </span>
-              <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-600">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-        </div>
-        <button onClick={() => setShowCreate(!showCreate)}
-          className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors flex-shrink-0">
-          {showCreate ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          {showCreate ? 'Cancel' : 'New Topic'}
-        </button>
-        <button onClick={() => { setShowCreateFolder(!showCreateFolder); setNewFolderParent(null); }}
-          className="px-3 py-2.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm font-medium hover:bg-amber-100 flex items-center gap-2 transition-colors flex-shrink-0">
-          <FolderPlus className="w-4 h-4" /> Folder
-        </button>
-        <button onClick={() => setShowFilters(!showFilters)}
-          className={`px-3 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors flex-shrink-0 ${
-            showFilters ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-          }`}>
-          <Filter className="w-4 h-4" /> Filters
-        </button>
-      </div>
-
-      {/* AI Agents Bar */}
-      <div className="flex gap-2 mb-4 flex-wrap">
-        <button onClick={handleSuggestTopics} disabled={!!aiLoading}
-          className="px-3 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 flex items-center gap-1.5 disabled:opacity-50">
-          {aiLoading === 'suggest_topics' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
-          AI Suggest Topics
-        </button>
-        {(() => {
-          const staleCount = topics.filter(t => {
-            const daysSince = Math.floor((Date.now() - new Date(t.updated_at).getTime()) / (1000 * 60 * 60 * 24));
-            return daysSince > 7 && t.status === 'active';
-          }).length;
-          if (staleCount > 0) return (
-            <button onClick={() => { setSearchQuery(''); setFilterStatus('active'); setSortBy('updated_at'); }}
-              className="px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 flex items-center gap-1.5">
-              <AlertTriangle className="w-3.5 h-3.5" />
-              {staleCount} Stale Topic{staleCount !== 1 ? 's' : ''}
-            </button>
-          );
-          return null;
-        })()}
-        <button onClick={runReorganize} disabled={reorgLoading || !!aiLoading}
-          className="px-3 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-medium hover:bg-indigo-100 flex items-center gap-1.5 disabled:opacity-50 transition-colors">
-          {reorgLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
-          {reorgLoading ? 'Analyzing...' : 'AI Reorganize'}
-        </button>
-        <button onClick={handleAiAnalyzeAll} disabled={aiAnalyzeAllLoading || selectedTopics.size === 0}
-          className="px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:bg-emerald-100 flex items-center gap-1.5 disabled:opacity-50 transition-colors"
-          title={selectedTopics.size === 0 ? 'Select topics first' : `Analyze ${selectedTopics.size} selected topics`}>
-          {aiAnalyzeAllLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-          {aiAnalyzeAllLoading ? 'Analyzing...' : `AI Analyze${selectedTopics.size > 0 ? ` (${selectedTopics.size})` : ''}`}
-        </button>
-        <button onClick={() => setViewMode(viewMode === 'folders' ? 'flat' : 'folders')}
-          className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 border transition-colors ${
-            viewMode === 'folders' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-gray-600 border-gray-200'
-          }`}>
-          <Folder className="w-3.5 h-3.5" /> {viewMode === 'folders' ? 'Folder View' : 'Flat View'}
-        </button>
-      </div>
-
-      {/* AI Suggestions */}
-      {aiSuggestions.length > 0 && (
-        <div className="mb-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-          <h3 className="text-sm font-semibold text-purple-800 mb-3 flex items-center gap-2">
-            <Sparkles className="w-4 h-4" /> AI Suggested Topics
-          </h3>
-          <div className="space-y-2">
-            {aiSuggestions.map((s, i) => (
-              <div key={i} className="flex items-start justify-between gap-3 p-3 bg-white rounded-lg border border-purple-100">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">{s.title}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{s.description}</p>
-                  <p className="text-xs text-purple-600 mt-1 italic">{s.reason}</p>
-                </div>
-                <button onClick={() => createSuggestedTopic(s)}
-                  className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 flex-shrink-0">
-                  Create
-                </button>
-              </div>
-            ))}
-            <button onClick={() => setAiSuggestions([])} className="text-xs text-purple-600 hover:underline">Dismiss</button>
-          </div>
-        </div>
-      )}
-
-      {/* AI Reorganization Suggestions - Modal-style Panel */}
+      {/* AI Reorganization Suggestions - Modal-style Panel (always available) */}
       {showReorg && reorgSuggestions && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setShowReorg(false)}>
           <div className="bg-white rounded-2xl shadow-2xl border border-indigo-200 w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -1046,365 +1014,731 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
         </div>
       )}
 
-      {/* Filters */}
-      {showFilters && (
-        <div className="mb-4 p-4 bg-white rounded-xl border border-gray-100 shadow-sm space-y-3">
-          <div className="flex gap-4 flex-wrap items-end">
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Area</label>
-              <div className="flex gap-1">
-                <button onClick={() => setFilterArea('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterArea === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>All</button>
-                {(['work', 'personal', 'career'] as const).map(a => (
-                  <button key={a} onClick={() => setFilterArea(a)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterArea === a ? 'bg-gray-900 text-white' : `${areaColors[a]} hover:opacity-80`}`}>
-                    {a} {areaCounts[a] ? `(${areaCounts[a]})` : ''}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Status</label>
-              <div className="flex gap-1">
-                <button onClick={() => setFilterStatus('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterStatus === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>All</button>
-                {(['active', 'completed', 'archived'] as const).map(s => (
-                  <button key={s} onClick={() => setFilterStatus(s)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterStatus === s ? 'bg-gray-900 text-white' : `${statusColors[s]} hover:opacity-80`}`}>{s}</button>
-                ))}
-              </div>
-            </div>
-            <div className="flex items-center gap-1 ml-auto">
-              <ArrowUpDown className="w-3 h-3 text-gray-400" />
-              <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="text-xs border rounded-lg px-2 py-1.5 text-gray-600 bg-white">
-                <option value="updated_at">Last Updated</option>
-                <option value="priority">Priority</option>
-                <option value="due_date">Due Date</option>
-                <option value="items">Item Count</option>
-                <option value="title">Title</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Active filter chips */}
-      {hasActiveFilters && (
-        <div className="mb-4 flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-gray-500 font-medium">Active filters:</span>
-          {searchQuery.trim() && (
-            <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-              Search: &ldquo;{searchQuery}&rdquo;
-              <button onClick={() => setSearchQuery('')} className="ml-0.5 hover:text-blue-900"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filterArea !== 'all' && (
-            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border ${areaColors[filterArea] || 'bg-gray-50 text-gray-600'} border-current/20`}>
-              Area: {filterArea}
-              <button onClick={() => setFilterArea('all')} className="ml-0.5 hover:opacity-70"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filterStatus !== 'active' && (
-            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border ${statusColors[filterStatus] || 'bg-gray-50 text-gray-600'} border-current/20`}>
-              Status: {filterStatus}
-              <button onClick={() => setFilterStatus('active')} className="ml-0.5 hover:opacity-70"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {statsFilter && (
-            <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
-              Dashboard: {statsFilter}
-              <button onClick={() => setStatsFilter(null)} className="ml-0.5 hover:text-purple-900"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          <button onClick={clearAllFilters} className="text-xs text-red-600 hover:text-red-800 hover:underline ml-1">
-            Clear all
-          </button>
-        </div>
-      )}
-
-      {/* Create folder form */}
-      {showCreateFolder && (
-        <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex gap-2 items-center flex-wrap">
-          <Folder className="w-4 h-4 text-amber-600" />
-          <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') createFolder(); if (e.key === 'Escape') setShowCreateFolder(false); }}
-            placeholder="Folder name" className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 min-w-[150px]" autoFocus />
-          <select value={newFolderArea} onChange={e => setNewFolderArea(e.target.value)}
-            className="px-2 py-1.5 border rounded-lg text-xs text-gray-600">
-            <option value="">No area</option>
-            <option value="work">Work</option>
-            <option value="personal">Personal</option>
-            <option value="career">Career</option>
-          </select>
-          {folders.length > 0 && (
-            <select value={newFolderParent || ''} onChange={e => setNewFolderParent(e.target.value || null)}
-              className="px-2 py-1.5 border rounded-lg text-xs text-gray-600">
-              <option value="">Root level</option>
-              {folders.map(f => (
-                <option key={f.id} value={f.id}>{getFolderPath(f.id).join(' / ')}</option>
-              ))}
-            </select>
-          )}
-          <button onClick={createFolder} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700">Create</button>
-          <button onClick={() => setShowCreateFolder(false)} className="p-1 text-gray-400 hover:text-gray-600">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Create topic form - enhanced with priority, tags, start date, validation */}
-      {showCreate && (
-        <div className="mb-4 p-5 bg-white rounded-xl border border-blue-200 shadow-md space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
-              <Plus className="w-4 h-4 text-blue-600" /> Create New Topic
-            </h3>
-            <button onClick={() => { setShowCreate(false); setFormErrors({}); }} className="p-1 text-gray-400 hover:text-gray-600">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Title */}
-          <div>
-            <label className="text-xs font-medium text-gray-500 block mb-1">Title *</label>
-            <input value={title} onChange={e => { setTitle(e.target.value); setFormErrors(prev => ({ ...prev, title: '' })); }}
-              onKeyDown={e => e.key === 'Enter' && handleCreate()}
-              placeholder="What is this topic about?"
-              className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.title ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} autoFocus />
-            {formErrors.title && <p className="text-xs text-red-500 mt-1">{formErrors.title}</p>}
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="text-xs font-medium text-gray-500 block mb-1">Description</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)}
-              placeholder="Add a brief description (optional)"
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={2} />
-          </div>
-
-          {/* Row: Area + Priority */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1">Area</label>
-              <select value={area} onChange={e => setArea(e.target.value)}
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="work">Work</option>
-                <option value="personal">Personal</option>
-                <option value="career">Career</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1">Priority</label>
-              <div className="flex gap-1">
-                {([1, 2, 3, 4, 5] as const).map(p => {
-                  const meta = priorityMeta[p];
-                  return (
-                    <button key={p} type="button" onClick={() => setCreatePriority(p)}
-                      className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all border ${
-                        createPriority === p
-                          ? p >= 4
-                            ? 'bg-red-50 border-red-300 text-red-700 shadow-sm'
-                            : 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
-                          : 'border-gray-200 text-gray-500 hover:bg-gray-50'
-                      }`}>
-                      {meta.flame && <Flame className="w-3 h-3 inline mr-0.5" />}
-                      {meta.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* Row: Start Date + Due Date */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1">Start Date</label>
-              <input type="date" value={createStartDate} onChange={e => { setCreateStartDate(e.target.value); setFormErrors(prev => ({ ...prev, startDate: '' })); }}
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.startDate ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} />
-              {formErrors.startDate && <p className="text-xs text-red-500 mt-1">{formErrors.startDate}</p>}
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1">Due Date</label>
-              <input type="date" value={dueDate} onChange={e => { setDueDate(e.target.value); setFormErrors(prev => ({ ...prev, dueDate: '' })); }}
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.dueDate ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} />
-              {formErrors.dueDate && <p className="text-xs text-red-500 mt-1">{formErrors.dueDate}</p>}
-            </div>
-          </div>
-
-          {/* Row: Tags + Folder */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1">
-                <Hash className="w-3 h-3 inline mr-0.5" /> Tags
-              </label>
-              <input value={createTags} onChange={e => setCreateTags(e.target.value)}
-                placeholder="design, urgent, q1 (comma separated)"
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              {createTags && (
-                <div className="flex gap-1 mt-1.5 flex-wrap">
-                  {createTags.split(',').map(t => t.trim()).filter(Boolean).map((tag, idx) => (
-                    <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${tagPillColors[idx % tagPillColors.length]}`}>
-                      {tag}
-                    </span>
-                  ))}
+      {/* ======================== AREA SELECTION VIEW ======================== */}
+      {!selectedArea ? (
+        <div>
+          {/* Dashboard Stats Cards - compact row */}
+          <div className="grid grid-cols-5 gap-3 mb-6">
+            <button onClick={() => { setStatsFilter(statsFilter === 'active' ? null : 'active'); setFilterStatus('active'); setFilterArea('all'); }}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'active' ? 'border-blue-300 bg-blue-50 shadow-sm ring-1 ring-blue-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500 font-medium">Active Topics</span>
+                <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
+                  <CircleDot className="w-3.5 h-3.5 text-blue-500" />
                 </div>
-              )}
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1">Folder</label>
-              {folders.length > 0 ? (
-                <select value={createFolderId || ''} onChange={e => setCreateFolderId(e.target.value || null)}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="">No folder</option>
-                  {folders.map(f => (
-                    <option key={f.id} value={f.id}>{getFolderPath(f.id).join(' / ')}</option>
-                  ))}
-                </select>
-              ) : (
-                <p className="text-xs text-gray-400 py-2.5">No folders yet</p>
-              )}
-            </div>
-          </div>
-
-          {/* Submit */}
-          <div className="flex justify-end pt-1">
-            <button onClick={handleCreate} disabled={createSubmitting}
-              className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center gap-2 shadow-sm hover:shadow-md">
-              {createSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              {createSubmitting ? 'Creating...' : 'Create Topic'}
+              </div>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.active}</p>
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk actions toolbar - floating action bar */}
-      {selectedTopics.size > 0 && (
-        <div className="mb-3 p-3 bg-white rounded-xl border border-blue-200 shadow-lg flex items-center gap-3 animate-fade-in sticky top-2 z-30">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4 text-blue-600" />
-            </div>
-            <span className="text-sm font-semibold text-blue-700">{selectedTopics.size} selected</span>
-          </div>
-          <div className="h-6 w-px bg-gray-200" />
-          <div className="flex gap-2 flex-wrap">
-            <button onClick={() => bulkChangeStatus('completed')} disabled={bulkActionLoading}
-              className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 disabled:opacity-50 transition-colors flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3" /> Complete
-            </button>
-            <button onClick={() => bulkChangeStatus('archived')} disabled={bulkActionLoading}
-              className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 transition-colors flex items-center gap-1">
-              <Archive className="w-3 h-3" /> Archive
-            </button>
-            <button onClick={() => bulkChangeStatus('active')} disabled={bulkActionLoading}
-              className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 transition-colors flex items-center gap-1">
-              <CircleDot className="w-3 h-3" /> Reactivate
-            </button>
-            {/* Change Area picker */}
-            <div className="relative">
-              <button onClick={() => setShowBulkAreaPicker(!showBulkAreaPicker)} disabled={bulkActionLoading}
-                className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 transition-colors flex items-center gap-1">
-                <Tag className="w-3 h-3" /> Change Area
-              </button>
-              {showBulkAreaPicker && (
-                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1 z-20 min-w-[120px]">
-                  {(['work', 'personal', 'career'] as const).map(a => (
-                    <button key={a} onClick={() => bulkChangeArea(a)}
-                      className={`w-full text-left px-3 py-1.5 rounded text-xs font-medium hover:bg-gray-50 flex items-center gap-2 ${areaColors[a]}`}>
-                      <span className={`w-2 h-2 rounded-full ${a === 'work' ? 'bg-blue-500' : a === 'personal' ? 'bg-green-500' : 'bg-purple-500'}`} />
-                      {a.charAt(0).toUpperCase() + a.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <button onClick={handleAiAnalyzeAll} disabled={aiAnalyzeAllLoading || bulkActionLoading}
-              className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:bg-emerald-100 disabled:opacity-50 transition-colors flex items-center gap-1">
-              {aiAnalyzeAllLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-              AI Analyze
-            </button>
-          </div>
-          <button onClick={() => { setSelectedTopics(new Set()); setShowBulkAreaPicker(false); }}
-            className="ml-auto text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-            <X className="w-3 h-3" /> Clear
-          </button>
-        </div>
-      )}
-
-      {/* Results count */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">
-            {filteredTopics.length === topics.length
-              ? `${filteredTopics.length} topic${filteredTopics.length !== 1 ? 's' : ''}`
-              : `Showing ${filteredTopics.length} of ${topics.length} topics`
-            }
-          </span>
-          {filteredTopics.length > 0 && (
             <button onClick={() => {
-              if (selectedTopics.size === filteredTopics.length) setSelectedTopics(new Set());
-              else setSelectedTopics(new Set(filteredTopics.map(t => t.id)));
-            }} className="text-xs text-blue-600 hover:text-blue-800">
-              {selectedTopics.size === filteredTopics.length ? 'Deselect all' : 'Select all'}
+                if (dashboardStats.overdue > 0) {
+                  setStatsFilter(statsFilter === 'overdue' ? null : 'overdue');
+                  setFilterStatus('active');
+                }
+              }}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'overdue' ? 'border-red-300 bg-red-50 shadow-sm ring-1 ring-red-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500 font-medium">Overdue</span>
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${dashboardStats.overdue > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+                  <AlertTriangle className={`w-3.5 h-3.5 ${dashboardStats.overdue > 0 ? 'text-red-500' : 'text-gray-300'}`} />
+                </div>
+              </div>
+              <p className={`text-2xl font-bold mt-1 ${dashboardStats.overdue > 0 ? 'text-red-600' : 'text-gray-900'}`}>{dashboardStats.overdue}</p>
             </button>
-          )}
-        </div>
-        <div className="text-[11px] text-gray-400 flex items-center gap-3">
-          <span title="New topic">N</span>
-          <span title="Focus search">/</span>
-          <span title="Clear filters">Esc</span>
-        </div>
-      </div>
-
-      {/* Topic list */}
-      {filteredTopics.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-xl border border-gray-100 shadow-sm">
-          {/* Empty state illustration */}
-          <div className="mx-auto w-16 h-16 rounded-full bg-gray-50 flex items-center justify-center mb-4">
-            <Inbox className="w-8 h-8 text-gray-300" />
+            <button onClick={() => {
+                if (dashboardStats.needsAttention > 0) {
+                  setStatsFilter(statsFilter === 'needsAttention' ? null : 'needsAttention');
+                  setFilterStatus('active');
+                }
+              }}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'needsAttention' ? 'border-amber-300 bg-amber-50 shadow-sm ring-1 ring-amber-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500 font-medium">Needs Attention</span>
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${dashboardStats.needsAttention > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                  <ShieldAlert className={`w-3.5 h-3.5 ${dashboardStats.needsAttention > 0 ? 'text-amber-500' : 'text-gray-300'}`} />
+                </div>
+              </div>
+              <p className={`text-2xl font-bold mt-1 ${dashboardStats.needsAttention > 0 ? 'text-amber-600' : 'text-gray-900'}`}>{dashboardStats.needsAttention}</p>
+            </button>
+            <button onClick={() => { setStatsFilter(statsFilter === 'recent' ? null : 'recent'); }}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${statsFilter === 'recent' ? 'border-green-300 bg-green-50 shadow-sm ring-1 ring-green-200' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500 font-medium">Updated This Week</span>
+                <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
+                  <TrendingUp className="w-3.5 h-3.5 text-green-500" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.updatedThisWeek}</p>
+            </button>
+            <div className="p-3 rounded-xl border border-gray-100 bg-white text-left">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500 font-medium">Avg Items/Topic</span>
+                <div className="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center">
+                  <BarChart3 className="w-3.5 h-3.5 text-purple-500" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.avgItems}</p>
+            </div>
           </div>
-          <h3 className="text-lg font-semibold text-gray-700 mb-1">
-            {hasActiveFilters ? 'No matching topics' : 'No topics yet'}
-          </h3>
-          <p className="text-sm text-gray-400 mb-6 max-w-sm mx-auto">
-            {hasActiveFilters
-              ? `No topics match your current filters.${searchQuery ? ` Try a different search term.` : ''}`
-              : 'Create your first topic to start organizing your items, or import from your connected sources.'}
-          </p>
-          <div className="flex items-center justify-center gap-3">
-            {hasActiveFilters && (
-              <button onClick={clearAllFilters}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
-                Clear Filters
-              </button>
-            )}
-            <button onClick={() => { setShowCreate(true); setSearchQuery(''); }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2">
-              <Plus className="w-4 h-4" /> Create Topic
+
+          {/* Area Cards - the main navigation */}
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            {(['work', 'personal', 'career'] as const).map(areaKey => {
+              const config = areaCardConfig[areaKey];
+              const stats = areaStats[areaKey];
+              const Icon = config.icon;
+              return (
+                <button key={areaKey}
+                  onClick={() => { setSelectedArea(areaKey); setFilterArea('all'); }}
+                  className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${config.gradient} ${config.hoverGradient} p-6 text-left transition-all duration-300 hover:shadow-xl hover:shadow-${areaKey === 'work' ? 'blue' : areaKey === 'personal' ? 'green' : 'purple'}-500/20 hover:scale-[1.02] active:scale-[0.98]`}>
+                  {/* Decorative background circle */}
+                  <div className="absolute -right-6 -top-6 w-32 h-32 rounded-full bg-white/10 transition-transform duration-300 group-hover:scale-110" />
+                  <div className="absolute -right-2 -bottom-8 w-24 h-24 rounded-full bg-white/5" />
+
+                  {/* Icon */}
+                  <div className={`w-12 h-12 rounded-xl ${config.iconBg} flex items-center justify-center mb-4 backdrop-blur-sm`}>
+                    <Icon className="w-6 h-6 text-white" />
+                  </div>
+
+                  {/* Title */}
+                  <h3 className={`text-xl font-bold ${config.textColor} mb-1`}>
+                    {config.label}
+                  </h3>
+
+                  {/* Stats */}
+                  <div className={`flex items-center gap-3 ${config.subtextColor} text-sm mb-3`}>
+                    <span className="font-medium">{stats.total} topic{stats.total !== 1 ? 's' : ''}</span>
+                    <span className="w-1 h-1 rounded-full bg-white/40" />
+                    <span>{stats.folders} folder{stats.folders !== 1 ? 's' : ''}</span>
+                  </div>
+
+                  {/* Detail chips */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {stats.active > 0 && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${config.countBg} ${config.countText} font-medium backdrop-blur-sm`}>
+                        {stats.active} active
+                      </span>
+                    )}
+                    {stats.overdue > 0 && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-red-400/30 text-white font-medium backdrop-blur-sm flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> {stats.overdue} overdue
+                      </span>
+                    )}
+                    {stats.recentlyUpdated > 0 && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${config.countBg} ${config.countText} font-medium backdrop-blur-sm`}>
+                        {stats.recentlyUpdated} updated this week
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Arrow indicator */}
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-all duration-300 group-hover:translate-x-0 -translate-x-2">
+                    <ChevronRight className="w-6 h-6 text-white/60" />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Quick actions row on area selection page */}
+          <div className="flex items-center gap-3">
+            <button onClick={() => setShowCreate(!showCreate)}
+              className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors">
+              {showCreate ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {showCreate ? 'Cancel' : 'New Topic'}
             </button>
             <button onClick={handleSuggestTopics} disabled={!!aiLoading}
-              className="px-4 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-sm font-medium hover:bg-purple-100 transition-colors flex items-center gap-2 disabled:opacity-50">
-              <Brain className="w-4 h-4" /> Import from Sources
+              className="px-3 py-2.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-sm font-medium hover:bg-purple-100 flex items-center gap-2 disabled:opacity-50 transition-colors">
+              {aiLoading === 'suggest_topics' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
+              AI Suggest Topics
+            </button>
+            <button onClick={runReorganize} disabled={reorgLoading || !!aiLoading}
+              className="px-3 py-2.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-sm font-medium hover:bg-indigo-100 flex items-center gap-2 disabled:opacity-50 transition-colors">
+              {reorgLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+              {reorgLoading ? 'Analyzing...' : 'AI Reorganize'}
             </button>
           </div>
-        </div>
-      ) : viewMode === 'folders' && folders.length > 0 ? (
-        <div>
-          {/* Folder tree */}
-          {folderTree.map(node => renderFolderNode(node))}
-          {/* Unfiled topics */}
-          {unfolderedTopics.length > 0 && (
-            <div className="mt-4">
-              <div className="flex items-center gap-2 mb-2 px-2">
-                <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Unfiled</span>
-                <span className="text-xs text-gray-300">({unfolderedTopics.length})</span>
+
+          {/* Create topic form on area page */}
+          {showCreate && (
+            <div className="mt-4 p-5 bg-white rounded-xl border border-blue-200 shadow-md space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-blue-600" /> Create New Topic
+                </h3>
+                <button onClick={() => { setShowCreate(false); setFormErrors({}); }} className="p-1 text-gray-400 hover:text-gray-600">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <div className="grid gap-1.5">
-                {unfolderedTopics.map(t => renderTopicCard(t))}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Title *</label>
+                <input value={title} onChange={e => { setTitle(e.target.value); setFormErrors(prev => ({ ...prev, title: '' })); }}
+                  onKeyDown={e => e.key === 'Enter' && handleCreate()}
+                  placeholder="What is this topic about?"
+                  className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.title ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} autoFocus />
+                {formErrors.title && <p className="text-xs text-red-500 mt-1">{formErrors.title}</p>}
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Description</label>
+                <textarea value={description} onChange={e => setDescription(e.target.value)}
+                  placeholder="Add a brief description (optional)"
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={2} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">Area</label>
+                  <select value={area} onChange={e => setArea(e.target.value)}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="work">Work</option>
+                    <option value="personal">Personal</option>
+                    <option value="career">Career</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">Priority</label>
+                  <div className="flex gap-1">
+                    {([1, 2, 3, 4, 5] as const).map(p => {
+                      const meta = priorityMeta[p];
+                      return (
+                        <button key={p} type="button" onClick={() => setCreatePriority(p)}
+                          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all border ${
+                            createPriority === p
+                              ? p >= 4 ? 'bg-red-50 border-red-300 text-red-700 shadow-sm' : 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
+                              : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                          }`}>
+                          {meta.flame && <Flame className="w-3 h-3 inline mr-0.5" />}
+                          {meta.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">Due Date</label>
+                  <input type="date" value={dueDate} onChange={e => { setDueDate(e.target.value); setFormErrors(prev => ({ ...prev, dueDate: '' })); }}
+                    className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.dueDate ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} />
+                  {formErrors.dueDate && <p className="text-xs text-red-500 mt-1">{formErrors.dueDate}</p>}
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">Folder</label>
+                  {folders.length > 0 ? (
+                    <select value={createFolderId || ''} onChange={e => setCreateFolderId(e.target.value || null)}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="">No folder</option>
+                      {folders.map(f => (
+                        <option key={f.id} value={f.id}>{getFolderPath(f.id).join(' / ')}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-xs text-gray-400 py-2.5">No folders yet</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex justify-end pt-1">
+                <button onClick={handleCreate} disabled={createSubmitting}
+                  className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center gap-2 shadow-sm hover:shadow-md">
+                  {createSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  {createSubmitting ? 'Creating...' : 'Create Topic'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* AI Suggestions on area page */}
+          {aiSuggestions.length > 0 && (
+            <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+              <h3 className="text-sm font-semibold text-purple-800 mb-3 flex items-center gap-2">
+                <Sparkles className="w-4 h-4" /> AI Suggested Topics
+              </h3>
+              <div className="space-y-2">
+                {aiSuggestions.map((s, i) => (
+                  <div key={i} className="flex items-start justify-between gap-3 p-3 bg-white rounded-lg border border-purple-100">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900">{s.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{s.description}</p>
+                      <p className="text-xs text-purple-600 mt-1 italic">{s.reason}</p>
+                    </div>
+                    <button onClick={() => createSuggestedTopic(s)}
+                      className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 flex-shrink-0">
+                      Create
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => setAiSuggestions([])} className="text-xs text-purple-600 hover:underline">Dismiss</button>
               </div>
             </div>
           )}
         </div>
       ) : (
-        <div className="grid gap-1.5">
-          {filteredTopics.map(t => renderTopicCard(t))}
+        /* ======================== AREA DETAIL VIEW ======================== */
+        <div>
+          {/* Breadcrumb + Back button */}
+          <div className="flex items-center gap-3 mb-4">
+            <button onClick={() => { setSelectedArea(null); setSearchQuery(''); setFilterArea('all'); setFilterStatus('active'); setStatsFilter(null); setSelectedTopics(new Set()); }}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors group">
+              <ArrowLeft className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
+              <span className="text-gray-400">Topics</span>
+            </button>
+            <ChevronRight className="w-4 h-4 text-gray-300" />
+            {(() => {
+              const config = areaCardConfig[selectedArea];
+              const Icon = config.icon;
+              return (
+                <div className="flex items-center gap-2">
+                  <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${config.gradient} flex items-center justify-center`}>
+                    <Icon className="w-4 h-4 text-white" />
+                  </div>
+                  <span className="text-sm font-semibold text-gray-900">{config.label}</span>
+                  <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+                    {areaStats[selectedArea]?.total || 0} topics
+                  </span>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Search + Actions bar */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 relative">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input ref={searchInputRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search titles, descriptions, tags... (press / to focus)" className="w-full pl-10 pr-20 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {searchQuery && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                  <span className="text-[11px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded font-medium">
+                    {displayTopics.length} result{displayTopics.length !== 1 ? 's' : ''}
+                  </span>
+                  <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-600">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+            <button onClick={() => { setShowCreate(!showCreate); if (!showCreate) setArea(selectedArea); }}
+              className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors flex-shrink-0">
+              {showCreate ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {showCreate ? 'Cancel' : 'New Topic'}
+            </button>
+            <button onClick={() => { setShowCreateFolder(!showCreateFolder); setNewFolderParent(null); if (!showCreateFolder) setNewFolderArea(selectedArea); }}
+              className="px-3 py-2.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm font-medium hover:bg-amber-100 flex items-center gap-2 transition-colors flex-shrink-0">
+              <FolderPlus className="w-4 h-4" /> Folder
+            </button>
+            <button onClick={() => setShowFilters(!showFilters)}
+              className={`px-3 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors flex-shrink-0 ${
+                showFilters ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}>
+              <Filter className="w-4 h-4" /> Filters
+            </button>
+          </div>
+
+          {/* AI Agents Bar */}
+          <div className="flex gap-2 mb-4 flex-wrap">
+            <button onClick={handleSuggestTopics} disabled={!!aiLoading}
+              className="px-3 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 flex items-center gap-1.5 disabled:opacity-50">
+              {aiLoading === 'suggest_topics' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
+              AI Suggest Topics
+            </button>
+            {(() => {
+              const areaTopicsForStale = topics.filter(t => t.area === selectedArea);
+              const staleCount = areaTopicsForStale.filter(t => {
+                const daysSince = Math.floor((Date.now() - new Date(t.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+                return daysSince > 7 && t.status === 'active';
+              }).length;
+              if (staleCount > 0) return (
+                <button onClick={() => { setSearchQuery(''); setFilterStatus('active'); setSortBy('updated_at'); }}
+                  className="px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {staleCount} Stale Topic{staleCount !== 1 ? 's' : ''}
+                </button>
+              );
+              return null;
+            })()}
+            <button onClick={runReorganize} disabled={reorgLoading || !!aiLoading}
+              className="px-3 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-medium hover:bg-indigo-100 flex items-center gap-1.5 disabled:opacity-50 transition-colors">
+              {reorgLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+              {reorgLoading ? 'Analyzing...' : 'AI Reorganize'}
+            </button>
+            <button onClick={handleAiAnalyzeAll} disabled={aiAnalyzeAllLoading || selectedTopics.size === 0}
+              className="px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:bg-emerald-100 flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+              title={selectedTopics.size === 0 ? 'Select topics first' : `Analyze ${selectedTopics.size} selected topics`}>
+              {aiAnalyzeAllLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+              {aiAnalyzeAllLoading ? 'Analyzing...' : `AI Analyze${selectedTopics.size > 0 ? ` (${selectedTopics.size})` : ''}`}
+            </button>
+            <button onClick={() => setViewMode(viewMode === 'folders' ? 'flat' : 'folders')}
+              className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 border transition-colors ${
+                viewMode === 'folders' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-gray-600 border-gray-200'
+              }`}>
+              <Folder className="w-3.5 h-3.5" /> {viewMode === 'folders' ? 'Folder View' : 'Flat View'}
+            </button>
+          </div>
+
+          {/* AI Suggestions */}
+          {aiSuggestions.length > 0 && (
+            <div className="mb-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+              <h3 className="text-sm font-semibold text-purple-800 mb-3 flex items-center gap-2">
+                <Sparkles className="w-4 h-4" /> AI Suggested Topics
+              </h3>
+              <div className="space-y-2">
+                {aiSuggestions.map((s, i) => (
+                  <div key={i} className="flex items-start justify-between gap-3 p-3 bg-white rounded-lg border border-purple-100">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900">{s.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{s.description}</p>
+                      <p className="text-xs text-purple-600 mt-1 italic">{s.reason}</p>
+                    </div>
+                    <button onClick={() => createSuggestedTopic(s)}
+                      className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 flex-shrink-0">
+                      Create
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => setAiSuggestions([])} className="text-xs text-purple-600 hover:underline">Dismiss</button>
+              </div>
+            </div>
+          )}
+
+          {/* Filters */}
+          {showFilters && (
+            <div className="mb-4 p-4 bg-white rounded-xl border border-gray-100 shadow-sm space-y-3">
+              <div className="flex gap-4 flex-wrap items-end">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Status</label>
+                  <div className="flex gap-1">
+                    <button onClick={() => setFilterStatus('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterStatus === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>All</button>
+                    {(['active', 'completed', 'archived'] as const).map(s => (
+                      <button key={s} onClick={() => setFilterStatus(s)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterStatus === s ? 'bg-gray-900 text-white' : `${statusColors[s]} hover:opacity-80`}`}>{s}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 ml-auto">
+                  <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                  <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="text-xs border rounded-lg px-2 py-1.5 text-gray-600 bg-white">
+                    <option value="updated_at">Last Updated</option>
+                    <option value="priority">Priority</option>
+                    <option value="due_date">Due Date</option>
+                    <option value="items">Item Count</option>
+                    <option value="title">Title</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Active filter chips */}
+          {(searchQuery.trim() !== '' || filterStatus !== 'active' || statsFilter !== null) && (
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-500 font-medium">Active filters:</span>
+              {searchQuery.trim() && (
+                <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                  Search: &ldquo;{searchQuery}&rdquo;
+                  <button onClick={() => setSearchQuery('')} className="ml-0.5 hover:text-blue-900"><X className="w-3 h-3" /></button>
+                </span>
+              )}
+              {filterStatus !== 'active' && (
+                <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border ${statusColors[filterStatus] || 'bg-gray-50 text-gray-600'} border-current/20`}>
+                  Status: {filterStatus}
+                  <button onClick={() => setFilterStatus('active')} className="ml-0.5 hover:opacity-70"><X className="w-3 h-3" /></button>
+                </span>
+              )}
+              {statsFilter && (
+                <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                  Dashboard: {statsFilter}
+                  <button onClick={() => setStatsFilter(null)} className="ml-0.5 hover:text-purple-900"><X className="w-3 h-3" /></button>
+                </span>
+              )}
+              <button onClick={() => { setSearchQuery(''); setFilterStatus('active'); setStatsFilter(null); }} className="text-xs text-red-600 hover:text-red-800 hover:underline ml-1">
+                Clear all
+              </button>
+            </div>
+          )}
+
+          {/* Create folder form */}
+          {showCreateFolder && (
+            <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex gap-2 items-center flex-wrap">
+              <Folder className="w-4 h-4 text-amber-600" />
+              <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') createFolder(); if (e.key === 'Escape') setShowCreateFolder(false); }}
+                placeholder="Folder name" className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 min-w-[150px]" autoFocus />
+              <select value={newFolderArea} onChange={e => setNewFolderArea(e.target.value)}
+                className="px-2 py-1.5 border rounded-lg text-xs text-gray-600">
+                <option value="">No area</option>
+                <option value="work">Work</option>
+                <option value="personal">Personal</option>
+                <option value="career">Career</option>
+              </select>
+              {folders.length > 0 && (
+                <select value={newFolderParent || ''} onChange={e => setNewFolderParent(e.target.value || null)}
+                  className="px-2 py-1.5 border rounded-lg text-xs text-gray-600">
+                  <option value="">Root level</option>
+                  {folders.map(f => (
+                    <option key={f.id} value={f.id}>{getFolderPath(f.id).join(' / ')}</option>
+                  ))}
+                </select>
+              )}
+              <button onClick={createFolder} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700">Create</button>
+              <button onClick={() => setShowCreateFolder(false)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Create topic form */}
+          {showCreate && (
+            <div className="mb-4 p-5 bg-white rounded-xl border border-blue-200 shadow-md space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-blue-600" /> Create New Topic
+                </h3>
+                <button onClick={() => { setShowCreate(false); setFormErrors({}); }} className="p-1 text-gray-400 hover:text-gray-600">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Title */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Title *</label>
+                <input value={title} onChange={e => { setTitle(e.target.value); setFormErrors(prev => ({ ...prev, title: '' })); }}
+                  onKeyDown={e => e.key === 'Enter' && handleCreate()}
+                  placeholder="What is this topic about?"
+                  className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.title ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} autoFocus />
+                {formErrors.title && <p className="text-xs text-red-500 mt-1">{formErrors.title}</p>}
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Description</label>
+                <textarea value={description} onChange={e => setDescription(e.target.value)}
+                  placeholder="Add a brief description (optional)"
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={2} />
+              </div>
+
+              {/* Row: Area + Priority */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">Area</label>
+                  <select value={area} onChange={e => setArea(e.target.value)}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="work">Work</option>
+                    <option value="personal">Personal</option>
+                    <option value="career">Career</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">Priority</label>
+                  <div className="flex gap-1">
+                    {([1, 2, 3, 4, 5] as const).map(p => {
+                      const meta = priorityMeta[p];
+                      return (
+                        <button key={p} type="button" onClick={() => setCreatePriority(p)}
+                          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all border ${
+                            createPriority === p
+                              ? p >= 4
+                                ? 'bg-red-50 border-red-300 text-red-700 shadow-sm'
+                                : 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
+                              : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                          }`}>
+                          {meta.flame && <Flame className="w-3 h-3 inline mr-0.5" />}
+                          {meta.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Row: Start Date + Due Date */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">Start Date</label>
+                  <input type="date" value={createStartDate} onChange={e => { setCreateStartDate(e.target.value); setFormErrors(prev => ({ ...prev, startDate: '' })); }}
+                    className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.startDate ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} />
+                  {formErrors.startDate && <p className="text-xs text-red-500 mt-1">{formErrors.startDate}</p>}
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">Due Date</label>
+                  <input type="date" value={dueDate} onChange={e => { setDueDate(e.target.value); setFormErrors(prev => ({ ...prev, dueDate: '' })); }}
+                    className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.dueDate ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} />
+                  {formErrors.dueDate && <p className="text-xs text-red-500 mt-1">{formErrors.dueDate}</p>}
+                </div>
+              </div>
+
+              {/* Row: Tags + Folder */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">
+                    <Hash className="w-3 h-3 inline mr-0.5" /> Tags
+                  </label>
+                  <input value={createTags} onChange={e => setCreateTags(e.target.value)}
+                    placeholder="design, urgent, q1 (comma separated)"
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  {createTags && (
+                    <div className="flex gap-1 mt-1.5 flex-wrap">
+                      {createTags.split(',').map(t => t.trim()).filter(Boolean).map((tag, idx) => (
+                        <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${tagPillColors[idx % tagPillColors.length]}`}>
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">Folder</label>
+                  {displayFolders.length > 0 ? (
+                    <select value={createFolderId || ''} onChange={e => setCreateFolderId(e.target.value || null)}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="">No folder</option>
+                      {displayFolders.map(f => (
+                        <option key={f.id} value={f.id}>{getFolderPath(f.id).join(' / ')}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-xs text-gray-400 py-2.5">No folders yet</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Submit */}
+              <div className="flex justify-end pt-1">
+                <button onClick={handleCreate} disabled={createSubmitting}
+                  className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center gap-2 shadow-sm hover:shadow-md">
+                  {createSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  {createSubmitting ? 'Creating...' : 'Create Topic'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Bulk actions toolbar - floating action bar */}
+          {selectedTopics.size > 0 && (
+            <div className="mb-3 p-3 bg-white rounded-xl border border-blue-200 shadow-lg flex items-center gap-3 animate-fade-in sticky top-2 z-30">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                  <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                </div>
+                <span className="text-sm font-semibold text-blue-700">{selectedTopics.size} selected</span>
+              </div>
+              <div className="h-6 w-px bg-gray-200" />
+              <div className="flex gap-2 flex-wrap">
+                <button onClick={() => bulkChangeStatus('completed')} disabled={bulkActionLoading}
+                  className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Complete
+                </button>
+                <button onClick={() => bulkChangeStatus('archived')} disabled={bulkActionLoading}
+                  className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+                  <Archive className="w-3 h-3" /> Archive
+                </button>
+                <button onClick={() => bulkChangeStatus('active')} disabled={bulkActionLoading}
+                  className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+                  <CircleDot className="w-3 h-3" /> Reactivate
+                </button>
+                {/* Change Area picker */}
+                <div className="relative">
+                  <button onClick={() => setShowBulkAreaPicker(!showBulkAreaPicker)} disabled={bulkActionLoading}
+                    className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+                    <Tag className="w-3 h-3" /> Change Area
+                  </button>
+                  {showBulkAreaPicker && (
+                    <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1 z-20 min-w-[120px]">
+                      {(['work', 'personal', 'career'] as const).map(a => (
+                        <button key={a} onClick={() => bulkChangeArea(a)}
+                          className={`w-full text-left px-3 py-1.5 rounded text-xs font-medium hover:bg-gray-50 flex items-center gap-2 ${areaColors[a]}`}>
+                          <span className={`w-2 h-2 rounded-full ${a === 'work' ? 'bg-blue-500' : a === 'personal' ? 'bg-green-500' : 'bg-purple-500'}`} />
+                          {a.charAt(0).toUpperCase() + a.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button onClick={handleAiAnalyzeAll} disabled={aiAnalyzeAllLoading || bulkActionLoading}
+                  className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:bg-emerald-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+                  {aiAnalyzeAllLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                  AI Analyze
+                </button>
+              </div>
+              <button onClick={() => { setSelectedTopics(new Set()); setShowBulkAreaPicker(false); }}
+                className="ml-auto text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
+                <X className="w-3 h-3" /> Clear
+              </button>
+            </div>
+          )}
+
+          {/* Results count */}
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-500">
+                {displayTopics.length} topic{displayTopics.length !== 1 ? 's' : ''}
+                {searchQuery.trim() || filterStatus !== 'active' ? ` (filtered)` : ''}
+              </span>
+              {displayTopics.length > 0 && (
+                <button onClick={() => {
+                  if (selectedTopics.size === displayTopics.length) setSelectedTopics(new Set());
+                  else setSelectedTopics(new Set(displayTopics.map(t => t.id)));
+                }} className="text-xs text-blue-600 hover:text-blue-800">
+                  {selectedTopics.size === displayTopics.length ? 'Deselect all' : 'Select all'}
+                </button>
+              )}
+            </div>
+            <div className="text-[11px] text-gray-400 flex items-center gap-3">
+              <span title="New topic">N</span>
+              <span title="Focus search">/</span>
+              <span title="Clear filters">Esc</span>
+            </div>
+          </div>
+
+          {/* Topic list */}
+          {displayTopics.length === 0 ? (
+            <div className="text-center py-16 bg-white rounded-xl border border-gray-100 shadow-sm">
+              <div className="mx-auto w-14 h-14 rounded-full bg-gray-50 flex items-center justify-center mb-4">
+                <Inbox className="w-7 h-7 text-gray-300" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-700 mb-1">
+                {searchQuery.trim() || filterStatus !== 'active' ? 'No matching topics' : `No topics in ${areaCardConfig[selectedArea]?.label || selectedArea}`}
+              </h3>
+              <p className="text-sm text-gray-400 mb-6 max-w-sm mx-auto">
+                {searchQuery.trim() || filterStatus !== 'active'
+                  ? `No topics match your current filters.${searchQuery ? ` Try a different search term.` : ''}`
+                  : `Create your first topic in ${areaCardConfig[selectedArea]?.label || selectedArea} to get started.`}
+              </p>
+              <div className="flex items-center justify-center gap-3">
+                {(searchQuery.trim() || filterStatus !== 'active') && (
+                  <button onClick={() => { setSearchQuery(''); setFilterStatus('active'); setStatsFilter(null); }}
+                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
+                    Clear Filters
+                  </button>
+                )}
+                <button onClick={() => { setShowCreate(true); setSearchQuery(''); setArea(selectedArea); }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2">
+                  <Plus className="w-4 h-4" /> Create Topic
+                </button>
+                <button onClick={handleSuggestTopics} disabled={!!aiLoading}
+                  className="px-4 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-sm font-medium hover:bg-purple-100 transition-colors flex items-center gap-2 disabled:opacity-50">
+                  <Brain className="w-4 h-4" /> Import from Sources
+                </button>
+              </div>
+            </div>
+          ) : viewMode === 'folders' && displayFolders.length > 0 ? (
+            <div>
+              {/* Folder tree */}
+              {displayFolderTree.map(node => renderFolderNode(node))}
+              {/* Unfiled topics */}
+              {displayUnfoldered.length > 0 && (
+                <div className="mt-4">
+                  <div className="flex items-center gap-2 mb-2 px-2">
+                    <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Unfiled</span>
+                    <span className="text-xs text-gray-300">({displayUnfoldered.length})</span>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                    {displayUnfoldered.map(t => renderTopicCard(t))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+              {displayTopics.map(t => renderTopicCard(t))}
+            </div>
+          )}
         </div>
       )}
     </div>

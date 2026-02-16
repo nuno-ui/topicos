@@ -9,7 +9,7 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await request.json();
-    const { query, sources = ['gmail', 'calendar', 'drive', 'slack'], topic_id, date_from, date_to, max_results = 20, account_ids } = body;
+    const { query, sources = ['gmail', 'calendar', 'drive', 'slack', 'notion'], topic_id, date_from, date_to, max_results = 20, account_ids } = body;
     if (!query || typeof query !== 'string' || query.trim().length === 0) {
       return NextResponse.json({ error: 'Query is required' }, { status: 400 });
     }
