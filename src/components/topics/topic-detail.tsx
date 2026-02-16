@@ -391,6 +391,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     setLinkingItems(true);
     let linked = 0;
     let alreadyLinked = 0;
+    const successKeys = new Set<string>(); // Track successfully linked items
     for (const result of resultsToLink) {
       try {
         const res = await fetch(`/api/topics/${topic.id}/items`, {
@@ -414,11 +415,13 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
           const data = await res.json();
           setItems(prev => [data.item, ...prev]);
           linked++;
+          successKeys.add(`${result.source}:${result.external_id}`);
         } else if (res.status === 409) {
           // Item already linked to this topic — make sure it's in local state
           const dupeData = await res.json();
           if (dupeData.same_topic) {
             alreadyLinked++;
+            successKeys.add(`${result.source}:${result.external_id}`);
             // Check if it's already in local items state
             const alreadyInState = items.some(i => i.source === result.source && i.external_id === result.external_id);
             if (!alreadyInState) {
@@ -462,6 +465,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
               const data = await forceRes.json();
               setItems(prev => [data.item, ...prev]);
               linked++;
+              successKeys.add(`${result.source}:${result.external_id}`);
             }
           }
         } else {
@@ -475,13 +479,13 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         console.error('Link failed:', err);
       }
     }
-    // Mark linked in search results
+    // Mark ONLY successfully linked items in search results (not failed ones)
     setSearchResults(prev => prev.map(r =>
-      resultsToLink.some(l => l.source === r.source && l.external_id === r.external_id)
+      successKeys.has(`${r.source}:${r.external_id}`)
         ? { ...r, already_linked: true } : r
     ));
     setAiFindResults(prev => prev.map(r =>
-      resultsToLink.some(l => l.source === r.source && l.external_id === r.external_id)
+      successKeys.has(`${r.source}:${r.external_id}`)
         ? { ...r, already_linked: true } : r
     ));
     setSelectedResults(new Set());

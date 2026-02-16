@@ -13,9 +13,7 @@ ALTER TABLE public.topic_items DROP CONSTRAINT IF EXISTS topic_items_source_chec
 ALTER TABLE public.topic_items ADD CONSTRAINT topic_items_source_check
   CHECK (source IN ('gmail', 'calendar', 'drive', 'slack', 'notion', 'manual', 'link'));
 
--- Also fix items table source constraint if it exists
-ALTER TABLE public.items DROP CONSTRAINT IF EXISTS items_source_check;
-ALTER TABLE public.items ADD CONSTRAINT items_source_check
-  CHECK (source IN ('gmail', 'calendar', 'drive', 'slack', 'notion', 'manual', 'link'));
+-- Note: public.items table does not exist in this schema, only topic_items.
+-- The constraint fix above is sufficient.
 
 -- DONE! Notion pages and links can now be linked to topics.
