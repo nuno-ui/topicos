@@ -186,7 +186,22 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   const [aiAnalyzeAllLoading, setAiAnalyzeAllLoading] = useState(false);
 
   // Folder state
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(folders.map(f => f.id)));
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => {
+    // Only auto-expand folders that have topics inside them
+    const foldersWithTopics = new Set<string>();
+    for (const t of initialTopics) {
+      if (t.folder_id) {
+        foldersWithTopics.add(t.folder_id);
+        // Also expand parent folders so nested folders with topics are visible
+        let parent = initialFolders.find(f => f.id === t.folder_id);
+        while (parent?.parent_id) {
+          foldersWithTopics.add(parent.parent_id);
+          parent = initialFolders.find(f => f.id === parent!.parent_id);
+        }
+      }
+    }
+    return foldersWithTopics;
+  });
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
@@ -590,7 +605,11 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     for (const a of ['work', 'personal', 'career']) {
       const areaTopics = topics.filter(t => t.area === a);
-      const areaFolders = folders.filter(f => f.area === a);
+      const areaFolders = folders.filter(f => {
+        if (f.area) return f.area === a;
+        const folderTopics = topics.filter(t => t.folder_id === f.id);
+        return folderTopics.some(t => t.area === a);
+      });
       stats[a] = {
         total: areaTopics.length,
         active: areaTopics.filter(t => t.status === 'active').length,
@@ -610,8 +629,14 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
   const areaFilteredFolders = useMemo(() => {
     if (!selectedArea) return folders;
-    return folders.filter(f => f.area === selectedArea || !f.area);
-  }, [folders, selectedArea]);
+    return folders.filter(f => {
+      // If folder has explicit area, use it
+      if (f.area) return f.area === selectedArea;
+      // Otherwise, infer area from topics inside this folder
+      const folderTopics = topics.filter(t => t.folder_id === f.id);
+      return folderTopics.some(t => t.area === selectedArea);
+    });
+  }, [folders, selectedArea, topics]);
 
   const areaFolderTree = useMemo(() => {
     const relevantFolders = areaFilteredFolders;
@@ -907,7 +932,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
           ) : (
             <span className="text-sm font-medium text-gray-700 flex-1 cursor-pointer flex items-center gap-1.5" onClick={() => toggleFolder(node.folder.id)}>
               {node.folder.name}
-              {node.folder.area && (
+              {node.folder.area && !selectedArea && (
                 <span className={`text-[11px] px-1.5 py-0 rounded-full ${areaColors[node.folder.area] || 'bg-gray-100 text-gray-600'}`}>
                   {node.folder.area}
                 </span>
@@ -930,57 +955,62 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete folder">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
-            <div className="w-px h-4 bg-gray-200 mx-0.5" />
-            <div className="flex gap-0.5 items-center" title="Move to area">
-              <ArrowRightLeft className="w-3 h-3 text-gray-400 mr-0.5" />
-              {(['work', 'personal', 'career'] as const).map(a => {
-                const isActive = node.folder.area === a;
-                const colorMap: Record<string, { active: string; inactive: string }> = {
-                  work: { active: 'bg-blue-500 text-white', inactive: 'text-blue-600 hover:bg-blue-50 border border-blue-200' },
-                  personal: { active: 'bg-green-500 text-white', inactive: 'text-green-600 hover:bg-green-50 border border-green-200' },
-                  career: { active: 'bg-purple-500 text-white', inactive: 'text-purple-600 hover:bg-purple-50 border border-purple-200' },
-                };
-                return (
-                  <button
-                    key={a}
-                    onClick={() => { if (!isActive) changeFolderArea(node.folder.id, a); }}
-                    className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full transition-colors ${isActive ? colorMap[a].active : colorMap[a].inactive}`}
-                    title={`Move to ${a}`}
-                  >
-                    {a.charAt(0).toUpperCase() + a.slice(1)}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="w-px h-4 bg-gray-200 mx-0.5" />
-            <div className="flex gap-0.5 items-center" title="Folder color">
-              <Palette className="w-3 h-3 text-gray-400 mr-0.5" />
-              {([
-                { name: 'red', bg: 'bg-red-500', ring: 'ring-red-300' },
-                { name: 'blue', bg: 'bg-blue-500', ring: 'ring-blue-300' },
-                { name: 'green', bg: 'bg-green-500', ring: 'ring-green-300' },
-                { name: 'purple', bg: 'bg-purple-500', ring: 'ring-purple-300' },
-                { name: 'amber', bg: 'bg-amber-500', ring: 'ring-amber-300' },
-                { name: 'gray', bg: 'bg-gray-500', ring: 'ring-gray-300' },
-              ] as const).map(c => (
-                <button
-                  key={c.name}
-                  onClick={async () => {
-                    const newColor = node.folder.color === c.name ? null : c.name;
-                    const res = await fetch(`/api/folders/${node.folder.id}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ color: newColor }),
-                    });
-                    if (res.ok) {
-                      setFolders(prev => prev.map(f => f.id === node.folder.id ? { ...f, color: newColor } : f));
-                    }
-                  }}
-                  className={`w-3.5 h-3.5 rounded-full ${c.bg} transition-all hover:scale-125 ${node.folder.color === c.name ? `ring-2 ${c.ring} ring-offset-1` : 'opacity-60 hover:opacity-100'}`}
-                  title={`${c.name.charAt(0).toUpperCase() + c.name.slice(1)}${node.folder.color === c.name ? ' (active)' : ''}`}
-                />
-              ))}
-            </div>
+            {/* Area move pills and color picker - only show when NOT inside an area view */}
+            {!selectedArea && (
+              <>
+                <div className="w-px h-4 bg-gray-200 mx-0.5" />
+                <div className="flex gap-0.5 items-center" title="Move to area">
+                  <ArrowRightLeft className="w-3 h-3 text-gray-400 mr-0.5" />
+                  {(['work', 'personal', 'career'] as const).map(a => {
+                    const isActive = node.folder.area === a;
+                    const colorMap: Record<string, { active: string; inactive: string }> = {
+                      work: { active: 'bg-blue-500 text-white', inactive: 'text-blue-600 hover:bg-blue-50 border border-blue-200' },
+                      personal: { active: 'bg-green-500 text-white', inactive: 'text-green-600 hover:bg-green-50 border border-green-200' },
+                      career: { active: 'bg-purple-500 text-white', inactive: 'text-purple-600 hover:bg-purple-50 border border-purple-200' },
+                    };
+                    return (
+                      <button
+                        key={a}
+                        onClick={() => { if (!isActive) changeFolderArea(node.folder.id, a); }}
+                        className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full transition-colors ${isActive ? colorMap[a].active : colorMap[a].inactive}`}
+                        title={`Move to ${a}`}
+                      >
+                        {a.charAt(0).toUpperCase() + a.slice(1)}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="w-px h-4 bg-gray-200 mx-0.5" />
+                <div className="flex gap-0.5 items-center" title="Folder color">
+                  <Palette className="w-3 h-3 text-gray-400 mr-0.5" />
+                  {([
+                    { name: 'red', bg: 'bg-red-500', ring: 'ring-red-300' },
+                    { name: 'blue', bg: 'bg-blue-500', ring: 'ring-blue-300' },
+                    { name: 'green', bg: 'bg-green-500', ring: 'ring-green-300' },
+                    { name: 'purple', bg: 'bg-purple-500', ring: 'ring-purple-300' },
+                    { name: 'amber', bg: 'bg-amber-500', ring: 'ring-amber-300' },
+                    { name: 'gray', bg: 'bg-gray-500', ring: 'ring-gray-300' },
+                  ] as const).map(c => (
+                    <button
+                      key={c.name}
+                      onClick={async () => {
+                        const newColor = node.folder.color === c.name ? null : c.name;
+                        const res = await fetch(`/api/folders/${node.folder.id}`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ color: newColor }),
+                        });
+                        if (res.ok) {
+                          setFolders(prev => prev.map(f => f.id === node.folder.id ? { ...f, color: newColor } : f));
+                        }
+                      }}
+                      className={`w-3.5 h-3.5 rounded-full ${c.bg} transition-all hover:scale-125 ${node.folder.color === c.name ? `ring-2 ${c.ring} ring-offset-1` : 'opacity-60 hover:opacity-100'}`}
+                      title={`${c.name.charAt(0).toUpperCase() + c.name.slice(1)}${node.folder.color === c.name ? ' (active)' : ''}`}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
         {/* Collapsible content with animation */}
@@ -1321,24 +1351,23 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
         /* ======================== AREA DETAIL VIEW ======================== */
         <div>
           {/* Breadcrumb + Back button */}
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-2 mb-4">
             <button onClick={() => { setSelectedArea(null); setSearchQuery(''); setFilterArea('all'); setFilterStatus('active'); setStatsFilter(null); setSelectedTopics(new Set()); }}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors group">
-              <ArrowLeft className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
-              <span className="text-gray-400">Topics</span>
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors">
+              <ArrowLeft className="w-4 h-4" />
+              All Areas
             </button>
             <ChevronRight className="w-4 h-4 text-gray-300" />
             {(() => {
               const config = areaCardConfig[selectedArea];
               const Icon = config.icon;
+              const stats = areaStats[selectedArea];
               return (
-                <div className="flex items-center gap-2">
-                  <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${config.gradient} flex items-center justify-center`}>
-                    <Icon className="w-4 h-4 text-white" />
-                  </div>
-                  <span className="text-sm font-semibold text-gray-900">{config.label}</span>
-                  <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
-                    {areaStats[selectedArea]?.total || 0} topics
+                <div className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-gradient-to-r ${config.gradient} shadow-sm`}>
+                  <Icon className="w-4 h-4 text-white" />
+                  <span className="text-sm font-semibold text-white">{config.label}</span>
+                  <span className="text-xs text-white/80 bg-white/20 px-2 py-0.5 rounded-full font-medium">
+                    {stats?.total || 0} topic{(stats?.total || 0) !== 1 ? 's' : ''}
                   </span>
                 </div>
               );
@@ -1766,74 +1795,18 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             </div>
           ) : viewMode === 'folders' && displayFolders.length > 0 ? (
             <div>
-              {/* Folder cards grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-                {displayFolderTree.map(node => {
-                  const topicsSource = selectedArea ? areaFilteredTopics : filteredTopics;
-                  const countDeepFn = (n: { folder: FolderType; children: any[] }): number => {
-                    const direct = topicsSource.filter(t => t.folder_id === n.folder.id).length;
-                    return direct + n.children.reduce((sum: number, c: any) => sum + countDeepFn(c), 0);
-                  };
-                  const totalCount = countDeepFn(node);
-                  const folderTopics = topicsSource.filter(t => t.folder_id === node.folder.id);
-                  const latestTopic = folderTopics.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0];
-                  const firstDesc = folderTopics.find(t => t.description)?.description;
-                  const ContextIcon = getFolderIcon(node.folder.name);
-                  const areaBorderMap: Record<string, string> = { work: 'border-l-blue-500', personal: 'border-l-green-500', career: 'border-l-purple-500' };
-                  const areaIconBg: Record<string, string> = { work: 'bg-blue-100 text-blue-600', personal: 'bg-green-100 text-green-600', career: 'bg-purple-100 text-purple-600' };
-                  const folderArea = node.folder.area || selectedArea || 'work';
-                  const isExpanded = expandedFolders.has(node.folder.id);
-
-                  return (
-                    <div
-                      key={node.folder.id}
-                      className={`group/fcard relative bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-gray-200 transition-all cursor-pointer border-l-4 ${areaBorderMap[folderArea] || 'border-l-gray-300'} overflow-hidden`}
-                      onClick={() => toggleFolder(node.folder.id)}
-                    >
-                      <div className="p-4">
-                        <div className="flex items-start gap-3">
-                          <div className={`w-10 h-10 rounded-xl ${areaIconBg[folderArea] || 'bg-gray-100 text-gray-600'} flex items-center justify-center flex-shrink-0`}>
-                            <ContextIcon className="w-5 h-5" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-semibold text-sm text-gray-900 truncate">{node.folder.name}</h3>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${totalCount > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'}`}>
-                                {totalCount} topic{totalCount !== 1 ? 's' : ''}
-                              </span>
-                            </div>
-                            {firstDesc && (
-                              <p className="text-xs text-gray-400 mt-1 line-clamp-1">{firstDesc}</p>
-                            )}
-                            {latestTopic && (
-                              <p className="text-[10px] text-gray-400 mt-1.5 flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                Updated {formatRelativeDate(latestTopic.updated_at)}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      {/* Hover overlay */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-blue-50/80 to-transparent opacity-0 group-hover/fcard:opacity-100 transition-opacity flex items-end justify-center pb-3 pointer-events-none">
-                        <span className="text-xs font-semibold text-blue-600 flex items-center gap-1">
-                          {isExpanded ? 'Collapse' : 'Open'} <ChevronRight className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Expanded folder contents */}
+              {/* Folder tree view */}
               {displayFolderTree.map(node => renderFolderNode(node))}
 
               {/* Unfiled topics */}
               {displayUnfoldered.length > 0 && (
-                <div className="mt-4">
-                  <div className="flex items-center gap-2 mb-2 px-2">
-                    <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Unfiled</span>
-                    <span className="text-xs text-gray-300">({displayUnfoldered.length})</span>
+                <div className="mt-6">
+                  <div className="border-t border-gray-200 pt-4 mb-3">
+                    <div className="flex items-center gap-2 px-2">
+                      <Inbox className="w-4 h-4 text-gray-400" />
+                      <span className="text-sm font-medium text-gray-500">Topics without a folder</span>
+                      <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{displayUnfoldered.length}</span>
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
                     {displayUnfoldered.map(t => renderTopicCard(t))}
