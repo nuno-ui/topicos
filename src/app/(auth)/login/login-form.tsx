@@ -43,7 +43,7 @@ export function LoginForm() {
     <div className="space-y-6">
       {/* Google OAuth - primary CTA */}
       <button onClick={handleGoogleLogin}
-        className="w-full py-3 px-4 bg-white border border-gray-200 rounded-xl font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm transition-all flex items-center justify-center gap-3 text-sm">
+        className="w-full py-3 px-4 bg-white border border-gray-200 rounded-xl font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 hover:shadow-md transition-all flex items-center justify-center gap-3 text-sm group hover-lift">
         <svg className="w-5 h-5" viewBox="0 0 24 24">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
           <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -69,7 +69,7 @@ export function LoginForm() {
             className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder:text-gray-400" />
         </div>
         <button type="submit" disabled={loading}
-          className="w-full py-3 brand-gradient text-white rounded-xl font-semibold text-sm hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+          className="w-full py-3 brand-gradient text-white rounded-xl font-semibold text-sm hover:opacity-90 hover:shadow-lg hover:shadow-blue-500/20 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
           {loading ? 'Sending link...' : 'Send Magic Link'}
         </button>

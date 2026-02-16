@@ -87,6 +87,20 @@ interface ContactDetailProps {
 // Helpers
 // ============================
 
+const avatarGradients = [
+  { bg: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)', text: 'text-white' },
+  { bg: 'linear-gradient(135deg, #22c55e 0%, #0ea5e9 100%)', text: 'text-white' },
+  { bg: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)', text: 'text-white' },
+  { bg: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)', text: 'text-white' },
+  { bg: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)', text: 'text-white' },
+  { bg: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)', text: 'text-white' },
+];
+
+const getAvatarGradient = (name: string) => {
+  const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return avatarGradients[hash % avatarGradients.length];
+};
+
 const avatarColors = [
   'bg-blue-100 text-blue-700',
   'bg-green-100 text-green-700',
@@ -126,12 +140,12 @@ const statusColor = (status: string | undefined) => {
 };
 
 const getEngagementLevel = (lastInteraction: string | null) => {
-  if (!lastInteraction) return { label: 'New', color: 'bg-gray-100 text-gray-600' };
+  if (!lastInteraction) return { label: 'New', color: 'bg-gray-100 text-gray-600', dotColor: 'bg-gray-400' };
   const days = Math.floor((Date.now() - new Date(lastInteraction).getTime()) / (1000 * 60 * 60 * 24));
-  if (days <= 7) return { label: 'Active', color: 'bg-green-100 text-green-700' };
-  if (days <= 30) return { label: 'Recent', color: 'bg-blue-100 text-blue-700' };
-  if (days <= 90) return { label: 'Idle', color: 'bg-amber-100 text-amber-700' };
-  return { label: 'Cold', color: 'bg-red-100 text-red-700' };
+  if (days <= 7) return { label: 'Active', color: 'bg-green-100 text-green-700', dotColor: 'bg-green-500' };
+  if (days <= 30) return { label: 'Recent', color: 'bg-blue-100 text-blue-700', dotColor: 'bg-blue-500' };
+  if (days <= 90) return { label: 'Idle', color: 'bg-amber-100 text-amber-700', dotColor: 'bg-amber-500' };
+  return { label: 'Cold', color: 'bg-red-100 text-red-700', dotColor: 'bg-red-500' };
 };
 
 const getDaysAgo = (dateStr: string | null): number | null => {
@@ -581,72 +595,99 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
         <div className="h-1 w-full" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }} />
 
         <div className="p-6">
-          {/* Back button */}
-          <Link
-            href="/contacts"
-            className="inline-flex items-center gap-1.5 text-sm font-medium bg-gradient-to-r from-blue-500 to-purple-500 bg-clip-text text-transparent hover:opacity-80 transition-opacity mb-5"
-          >
-            <ArrowLeft className="w-4 h-4 text-blue-500" />
-            Back to Contacts
-          </Link>
+          {/* Breadcrumb with gradient accent */}
+          <div className="flex items-center gap-2 mb-5">
+            <Link
+              href="/contacts"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              Contacts
+            </Link>
+            <span className="text-gray-300">/</span>
+            <span className="text-sm font-semibold bg-clip-text text-transparent" style={{ backgroundImage: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}>
+              {contact.name}
+            </span>
+          </div>
 
           {editing ? (
             /* ---- EDIT MODE ---- */
             <div className="space-y-5 mt-2">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                    <User className="w-3.5 h-3.5" /> Name *
-                  </label>
+                {/* Floating label input: Name */}
+                <div className="relative">
                   <input
                     value={editName}
                     onChange={e => setEditName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow"
+                    className="peer w-full px-3.5 pt-5 pb-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow placeholder-transparent"
                     placeholder="Full name"
+                    id="edit-name"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5" /> Email
+                  <label
+                    htmlFor="edit-name"
+                    className="absolute left-3.5 top-1.5 text-[10px] font-semibold text-blue-600 flex items-center gap-1 pointer-events-none transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-xs peer-placeholder-shown:text-gray-400 peer-placeholder-shown:font-medium peer-focus:top-1.5 peer-focus:text-[10px] peer-focus:font-semibold peer-focus:text-blue-600"
+                  >
+                    <User className="w-3 h-3" /> Name *
                   </label>
+                </div>
+                {/* Floating label input: Email */}
+                <div className="relative">
                   <input
                     value={editEmail}
                     onChange={e => setEditEmail(e.target.value)}
                     type="email"
-                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow"
+                    className="peer w-full px-3.5 pt-5 pb-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow placeholder-transparent"
                     placeholder="email@example.com"
+                    id="edit-email"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                    <Building className="w-3.5 h-3.5" /> Organization
+                  <label
+                    htmlFor="edit-email"
+                    className="absolute left-3.5 top-1.5 text-[10px] font-semibold text-blue-600 flex items-center gap-1 pointer-events-none transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-xs peer-placeholder-shown:text-gray-400 peer-placeholder-shown:font-medium peer-focus:top-1.5 peer-focus:text-[10px] peer-focus:font-semibold peer-focus:text-blue-600"
+                  >
+                    <Mail className="w-3 h-3" /> Email
                   </label>
+                </div>
+                {/* Floating label input: Organization */}
+                <div className="relative">
                   <input
                     value={editOrganization}
                     onChange={e => setEditOrganization(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow"
+                    className="peer w-full px-3.5 pt-5 pb-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow placeholder-transparent"
                     placeholder="Company or organization"
+                    id="edit-org"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                    <Target className="w-3.5 h-3.5" /> Role
+                  <label
+                    htmlFor="edit-org"
+                    className="absolute left-3.5 top-1.5 text-[10px] font-semibold text-blue-600 flex items-center gap-1 pointer-events-none transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-xs peer-placeholder-shown:text-gray-400 peer-placeholder-shown:font-medium peer-focus:top-1.5 peer-focus:text-[10px] peer-focus:font-semibold peer-focus:text-blue-600"
+                  >
+                    <Building className="w-3 h-3" /> Organization
                   </label>
+                </div>
+                {/* Floating label input: Role */}
+                <div className="relative">
                   <input
                     value={editRole}
                     onChange={e => setEditRole(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow"
+                    className="peer w-full px-3.5 pt-5 pb-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow placeholder-transparent"
                     placeholder="Job title or role"
+                    id="edit-role"
                   />
+                  <label
+                    htmlFor="edit-role"
+                    className="absolute left-3.5 top-1.5 text-[10px] font-semibold text-blue-600 flex items-center gap-1 pointer-events-none transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-xs peer-placeholder-shown:text-gray-400 peer-placeholder-shown:font-medium peer-focus:top-1.5 peer-focus:text-[10px] peer-focus:font-semibold peer-focus:text-blue-600"
+                  >
+                    <Target className="w-3 h-3" /> Role
+                  </label>
                 </div>
+                {/* Area select */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5" /> Area
+                  <label className="block text-[10px] font-semibold text-blue-600 mb-1 flex items-center gap-1">
+                    <MapPin className="w-3 h-3" /> Area
                   </label>
                   <select
                     value={editArea}
                     onChange={e => setEditArea(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow"
+                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow bg-white"
                   >
                     <option value="">No area</option>
                     <option value="work">Work</option>
@@ -656,66 +697,92 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                  <StickyNote className="w-3.5 h-3.5" /> Notes
-                </label>
+              {/* Notes textarea */}
+              <div className="relative">
                 <textarea
                   value={editNotes}
                   onChange={e => setEditNotes(e.target.value)}
-                  className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow"
+                  className="peer w-full px-3.5 pt-6 pb-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow placeholder-transparent"
                   rows={3}
                   placeholder="Notes about this contact..."
+                  id="edit-notes"
                 />
+                <label
+                  htmlFor="edit-notes"
+                  className="absolute left-3.5 top-1.5 text-[10px] font-semibold text-blue-600 flex items-center gap-1 pointer-events-none"
+                >
+                  <StickyNote className="w-3 h-3" /> Notes
+                </label>
               </div>
 
               {/* Extended fields */}
               <div className="border-t border-gray-100 pt-5">
-                <h3 className="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-3">Extended Info</h3>
+                <h3 className="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #6b7280 0%, #9ca3af 100%)' }}>
+                    <Globe className="w-2.5 h-2.5 text-white" />
+                  </div>
+                  Extended Info
+                </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5" /> Phone
-                    </label>
+                  <div className="relative">
                     <input
                       value={editPhone}
                       onChange={e => setEditPhone(e.target.value)}
-                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow"
+                      className="peer w-full px-3.5 pt-5 pb-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow placeholder-transparent"
                       placeholder="+1 (555) 000-0000"
+                      id="edit-phone"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                      <Globe className="w-3.5 h-3.5" /> LinkedIn
+                    <label
+                      htmlFor="edit-phone"
+                      className="absolute left-3.5 top-1.5 text-[10px] font-semibold text-blue-600 flex items-center gap-1 pointer-events-none transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-xs peer-placeholder-shown:text-gray-400 peer-placeholder-shown:font-medium peer-focus:top-1.5 peer-focus:text-[10px] peer-focus:font-semibold peer-focus:text-blue-600"
+                    >
+                      <Phone className="w-3 h-3" /> Phone
                     </label>
+                  </div>
+                  <div className="relative">
                     <input
                       value={editLinkedin}
                       onChange={e => setEditLinkedin(e.target.value)}
-                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow"
+                      className="peer w-full px-3.5 pt-5 pb-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow placeholder-transparent"
                       placeholder="linkedin.com/in/username"
+                      id="edit-linkedin"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                      <MessageSquare className="w-3.5 h-3.5" /> Twitter / X
+                    <label
+                      htmlFor="edit-linkedin"
+                      className="absolute left-3.5 top-1.5 text-[10px] font-semibold text-blue-600 flex items-center gap-1 pointer-events-none transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-xs peer-placeholder-shown:text-gray-400 peer-placeholder-shown:font-medium peer-focus:top-1.5 peer-focus:text-[10px] peer-focus:font-semibold peer-focus:text-blue-600"
+                    >
+                      <Globe className="w-3 h-3" /> LinkedIn
                     </label>
+                  </div>
+                  <div className="relative">
                     <input
                       value={editTwitter}
                       onChange={e => setEditTwitter(e.target.value)}
-                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow"
+                      className="peer w-full px-3.5 pt-5 pb-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow placeholder-transparent"
                       placeholder="@handle"
+                      id="edit-twitter"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5" /> Timezone
+                    <label
+                      htmlFor="edit-twitter"
+                      className="absolute left-3.5 top-1.5 text-[10px] font-semibold text-blue-600 flex items-center gap-1 pointer-events-none transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-xs peer-placeholder-shown:text-gray-400 peer-placeholder-shown:font-medium peer-focus:top-1.5 peer-focus:text-[10px] peer-focus:font-semibold peer-focus:text-blue-600"
+                    >
+                      <MessageSquare className="w-3 h-3" /> Twitter / X
                     </label>
+                  </div>
+                  <div className="relative">
                     <input
                       value={editTimezone}
                       onChange={e => setEditTimezone(e.target.value)}
-                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow"
+                      className="peer w-full px-3.5 pt-5 pb-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-shadow placeholder-transparent"
                       placeholder="e.g. America/New_York"
+                      id="edit-timezone"
                     />
+                    <label
+                      htmlFor="edit-timezone"
+                      className="absolute left-3.5 top-1.5 text-[10px] font-semibold text-blue-600 flex items-center gap-1 pointer-events-none transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-xs peer-placeholder-shown:text-gray-400 peer-placeholder-shown:font-medium peer-focus:top-1.5 peer-focus:text-[10px] peer-focus:font-semibold peer-focus:text-blue-600"
+                    >
+                      <Clock className="w-3 h-3" /> Timezone
+                    </label>
                   </div>
                 </div>
               </div>
@@ -724,10 +791,10 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                 <button
                   onClick={saveContact}
                   disabled={saving}
-                  className="px-6 py-2.5 text-white rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-50 flex items-center gap-2 shadow-sm transition-opacity"
+                  className="px-6 py-2.5 text-white rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-50 flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
                   style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}
                 >
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   Save Changes
                 </button>
                 <button
@@ -744,95 +811,107 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
           ) : (
             /* ---- DISPLAY MODE ---- */
             <div className="flex flex-col sm:flex-row items-start gap-6">
-              {/* Avatar with gradient border ring */}
-              <div className="flex-shrink-0 p-[3px] rounded-full" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}>
-                <div className={cn('w-20 h-20 rounded-full flex items-center justify-center text-xl font-bold ring-2 ring-white', getAvatarColor(contact.name))}>
+              {/* Large avatar with gradient background based on name hash */}
+              <div className="relative flex-shrink-0">
+                <div
+                  className={cn('w-14 h-14 rounded-2xl flex items-center justify-center text-lg font-bold shadow-lg', getAvatarGradient(contact.name).text)}
+                  style={{ background: getAvatarGradient(contact.name).bg }}
+                >
                   {getInitials(contact.name)}
                 </div>
+                {/* Activity level indicator with colored dot animation */}
+                <div className={cn('absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white animate-pulse-dot', engagement.dotColor)} />
               </div>
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-4">
                   <div>
+                    {/* Name in large bold text with subtle gradient */}
                     <h1
-                      className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent leading-tight"
+                      className="text-2xl font-extrabold tracking-tight bg-clip-text text-transparent leading-tight"
                       style={{ backgroundImage: 'linear-gradient(135deg, #1e293b 0%, #3b82f6 50%, #8b5cf6 100%)' }}
                     >
                       {contact.name}
                     </h1>
 
-                    {/* Contact info cards */}
-                    <div className="flex items-center gap-3 mt-3 flex-wrap">
-                      {contact.organization && (
-                        <span className="inline-flex items-center gap-1.5 text-sm text-gray-600 bg-gray-50 border border-gray-200/80 rounded-lg px-3 py-1.5">
-                          <Building className="w-3.5 h-3.5 text-gray-400" />
-                          {contact.organization}
+                    {/* Organization and role shown below name */}
+                    {(contact.organization || contact.role) && (
+                      <div className="flex items-center gap-2 mt-1.5 text-sm text-gray-500">
+                        {contact.role && (
+                          <span className="font-medium text-gray-700">{contact.role}</span>
+                        )}
+                        {contact.role && contact.organization && (
+                          <span className="text-gray-300">at</span>
+                        )}
+                        {contact.organization && (
+                          <span className="font-medium text-gray-700 flex items-center gap-1">
+                            <Building className="w-3.5 h-3.5 text-gray-400" />
+                            {contact.organization}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Badges row: Area, Activity level, interaction count */}
+                    <div className="flex items-center gap-2 mt-3 flex-wrap">
+                      {contact.area && (
+                        <span className={cn('text-xs px-3 py-1 rounded-full font-semibold capitalize', areaColor(contact.area))}>
+                          {contact.area}
                         </span>
                       )}
-                      {contact.role && (
-                        <span className="inline-flex items-center gap-1.5 text-sm text-gray-600 bg-gray-50 border border-gray-200/80 rounded-lg px-3 py-1.5">
-                          <Target className="w-3.5 h-3.5 text-gray-400" />
-                          {contact.role}
+                      <span className={cn('text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1.5', engagement.color)}>
+                        <span className={cn('w-1.5 h-1.5 rounded-full animate-pulse-dot', engagement.dotColor)} />
+                        {engagement.label}
+                      </span>
+                      {contact.interaction_count > 0 && (
+                        <span className="text-xs text-gray-600 flex items-center gap-1.5 bg-gray-50 rounded-full px-3 py-1 border border-gray-100">
+                          <Activity className="w-3 h-3 text-gray-400" />
+                          {contact.interaction_count} interaction{contact.interaction_count !== 1 ? 's' : ''}
                         </span>
                       )}
-                      {contact.email && (
-                        <span className="inline-flex items-center gap-1.5 text-sm bg-gray-50 border border-gray-200/80 rounded-lg px-3 py-1.5">
-                          <Mail className="w-3.5 h-3.5 text-gray-400" />
-                          <a
-                            href={`mailto:${contact.email}`}
-                            className="text-blue-600 hover:text-blue-800 hover:underline"
-                          >
-                            {contact.email}
-                          </a>
-                          <button
-                            onClick={copyEmail}
-                            className="p-0.5 text-gray-400 hover:text-gray-600 rounded transition-colors"
-                            title="Copy email"
-                          >
-                            <Copy className="w-3 h-3" />
-                          </button>
+                      {daysAgo !== null && (
+                        <span className="text-xs text-gray-500 flex items-center gap-1.5 bg-gray-50 rounded-full px-3 py-1 border border-gray-100">
+                          <Clock className="w-3 h-3 text-gray-400" />
+                          {daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo}d ago`}
+                        </span>
+                      )}
+                      {lastSavedAt && (
+                        <span className="text-xs text-green-700 flex items-center gap-1.5 bg-green-50 rounded-full px-3 py-1 font-medium border border-green-100">
+                          <Check className="w-3 h-3" />
+                          Saved {lastSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       )}
                     </div>
+
+                    {/* Email display */}
+                    {contact.email && (
+                      <div className="flex items-center gap-1.5 mt-2.5">
+                        <Mail className="w-3.5 h-3.5 text-gray-400" />
+                        <a
+                          href={`mailto:${contact.email}`}
+                          className="text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+                        >
+                          {contact.email}
+                        </a>
+                        <button
+                          onClick={copyEmail}
+                          className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-all"
+                          title="Copy email"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <button
                     onClick={startEdit}
-                    className="px-4 py-2.5 text-sm font-semibold text-blue-600 bg-white border-2 border-blue-200 rounded-xl hover:bg-blue-50 hover:border-blue-300 transition-all flex items-center gap-2 shadow-sm"
+                    className="px-4 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90 flex items-center gap-2 shadow-sm transition-all"
+                    style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}
                     title="Edit contact"
                   >
                     <Edit3 className="w-4 h-4" />
-                    Edit Contact
+                    Edit
                   </button>
-                </div>
-
-                {/* Badges row */}
-                <div className="flex items-center gap-2.5 mt-4 flex-wrap">
-                  {contact.area && (
-                    <span className={cn('text-xs px-3 py-1.5 rounded-full font-semibold capitalize', areaColor(contact.area))}>
-                      {contact.area}
-                    </span>
-                  )}
-                  <span className={cn('text-xs px-3 py-1.5 rounded-full font-semibold', engagement.color)}>
-                    {engagement.label}
-                  </span>
-                  {contact.interaction_count > 0 && (
-                    <span className="text-xs text-gray-600 flex items-center gap-1.5 bg-gray-50 rounded-full px-3 py-1.5">
-                      <Activity className="w-3 h-3 text-gray-400" />
-                      {contact.interaction_count} interaction{contact.interaction_count !== 1 ? 's' : ''}
-                    </span>
-                  )}
-                  {daysAgo !== null && (
-                    <span className="text-xs text-gray-600 flex items-center gap-1.5 bg-gray-50 rounded-full px-3 py-1.5">
-                      <Clock className="w-3 h-3 text-gray-400" />
-                      {daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo}d ago`}
-                    </span>
-                  )}
-                  {lastSavedAt && (
-                    <span className="text-xs text-green-700 flex items-center gap-1.5 bg-green-50 rounded-full px-3 py-1.5 font-medium">
-                      <Check className="w-3 h-3" />
-                      Saved {lastSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  )}
                 </div>
               </div>
             </div>
@@ -844,14 +923,17 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
           2. Quick Action Bar (sticky, glass morphism)
           ============================ */}
       {!editing && (
-        <div className="animate-fade-in sticky top-0 z-20 glass rounded-2xl border border-white/40 shadow-lg p-3">
-          <div className="flex items-center gap-2 flex-wrap">
+        <div className="animate-fade-in sticky top-0 z-20 glass-dark rounded-2xl border border-white/60 shadow-lg p-2.5" style={{ backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Primary actions group */}
             {contact.email && (
               <a
                 href={`mailto:${contact.email}`}
-                className="group relative px-3.5 py-2 bg-white/70 text-gray-700 border border-gray-200/60 rounded-xl text-xs font-medium hover:bg-white hover:shadow-sm flex items-center gap-1.5 transition-all"
+                className="group relative px-3 py-2 text-blue-700 rounded-xl text-xs font-semibold hover:bg-blue-50 flex items-center gap-1.5 transition-all"
               >
-                <Mail className="w-3.5 h-3.5" />
+                <div className="w-6 h-6 rounded-lg bg-blue-100 flex items-center justify-center">
+                  <Mail className="w-3 h-3 text-blue-600" />
+                </div>
                 Email
                 <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
                   Send email to {contact.name}
@@ -859,13 +941,17 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               </a>
             )}
 
+            <div className="w-px h-6 bg-gray-200 mx-0.5" />
+
             <button
               onClick={() => runAgent('enrich_contact')}
               disabled={!!agentLoading}
-              className="group relative px-3.5 py-2 bg-purple-50/80 text-purple-700 border border-purple-200/60 rounded-xl text-xs font-medium hover:bg-purple-100 hover:shadow-sm disabled:opacity-50 flex items-center gap-1.5 transition-all"
+              className="group relative px-3 py-2 text-purple-700 rounded-xl text-xs font-semibold hover:bg-purple-50 disabled:opacity-50 flex items-center gap-1.5 transition-all"
             >
-              {agentLoading === 'enrich_contact' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
-              AI Enrich
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)' }}>
+                {agentLoading === 'enrich_contact' ? <Loader2 className="w-3 h-3 animate-spin text-white" /> : <Brain className="w-3 h-3 text-white" />}
+              </div>
+              Enrich
               <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
                 Enrich profile with AI
               </span>
@@ -874,33 +960,27 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
             <button
               onClick={() => runAgent('contact_intelligence')}
               disabled={!!agentLoading}
-              className="group relative px-3.5 py-2 bg-purple-50/80 text-purple-700 border border-purple-200/60 rounded-xl text-xs font-medium hover:bg-purple-100 hover:shadow-sm disabled:opacity-50 flex items-center gap-1.5 transition-all"
+              className="group relative px-3 py-2 text-purple-700 rounded-xl text-xs font-semibold hover:bg-purple-50 disabled:opacity-50 flex items-center gap-1.5 transition-all"
             >
-              {agentLoading === 'contact_intelligence' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%)' }}>
+                {agentLoading === 'contact_intelligence' ? <Loader2 className="w-3 h-3 animate-spin text-white" /> : <Sparkles className="w-3 h-3 text-white" />}
+              </div>
               Intelligence
               <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
                 Generate intelligence report
               </span>
             </button>
 
-            <button
-              onClick={() => runAgent('propose_next_email')}
-              disabled={!!agentLoading}
-              className="group relative px-3.5 py-2 bg-purple-50/80 text-purple-700 border border-purple-200/60 rounded-xl text-xs font-medium hover:bg-purple-100 hover:shadow-sm disabled:opacity-50 flex items-center gap-1.5 transition-all"
-            >
-              {agentLoading === 'propose_next_email' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
-              Suggest Email
-              <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
-                AI-suggested next email
-              </span>
-            </button>
+            <div className="w-px h-6 bg-gray-200 mx-0.5" />
 
             <div className="relative">
               <button
                 onClick={() => setShowLinkDropdown(!showLinkDropdown)}
-                className="group relative px-3.5 py-2 bg-blue-50/80 text-blue-700 border border-blue-200/60 rounded-xl text-xs font-medium hover:bg-blue-100 hover:shadow-sm flex items-center gap-1.5 transition-all"
+                className="group relative px-3 py-2 text-blue-700 rounded-xl text-xs font-semibold hover:bg-blue-50 flex items-center gap-1.5 transition-all"
               >
-                <LinkIcon className="w-3.5 h-3.5" />
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}>
+                  <LinkIcon className="w-3 h-3 text-white" />
+                </div>
                 Link Topic
                 <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
                   Link a topic to this contact
@@ -908,27 +988,27 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               </button>
             </div>
 
-            {contact.email && (
-              <button
-                onClick={copyEmail}
-                className="group relative px-3.5 py-2 bg-white/70 text-gray-700 border border-gray-200/60 rounded-xl text-xs font-medium hover:bg-white hover:shadow-sm flex items-center gap-1.5 transition-all"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                Copy
-                <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
-                  Copy email address
-                </span>
-              </button>
-            )}
-
             <div className="flex-1" />
 
             <button
+              onClick={() => runAgent('propose_next_email')}
+              disabled={!!agentLoading}
+              className="group relative px-3 py-2 text-purple-700 rounded-xl text-xs font-semibold hover:bg-purple-50 disabled:opacity-50 flex items-center gap-1.5 transition-all"
+            >
+              <div className="w-6 h-6 rounded-lg bg-purple-100 flex items-center justify-center">
+                {agentLoading === 'propose_next_email' ? <Loader2 className="w-3 h-3 animate-spin text-purple-600" /> : <Wand2 className="w-3 h-3 text-purple-600" />}
+              </div>
+              Suggest Email
+              <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
+                AI-suggested next email
+              </span>
+            </button>
+
+            <button
               onClick={deleteContact}
-              className="group relative px-3.5 py-2 bg-red-50/80 text-red-600 border border-red-200/60 rounded-xl text-xs font-medium hover:bg-red-100 hover:shadow-sm flex items-center gap-1.5 transition-all"
+              className="group relative p-2 text-gray-400 rounded-xl text-xs font-medium hover:bg-red-50 hover:text-red-600 flex items-center gap-1.5 transition-all"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              Delete
               <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
                 Delete this contact
               </span>
@@ -1093,68 +1173,73 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
         const esBody = emailSuggestion.body as string | undefined;
         const esKeyPoints = Array.isArray(emailSuggestion.key_points) ? (emailSuggestion.key_points as string[]) : [];
         return (
-          <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm overflow-hidden">
-            {/* Purple gradient top border */}
-            <div className="h-1 w-full" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #a78bfa 50%, #3b82f6 100%)' }} />
-            <div className="px-5 py-3.5 flex items-center justify-between border-b border-gray-100">
-              <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)' }}>
-                  <Wand2 className="w-3.5 h-3.5 text-white" />
-                </div>
-                Suggested Email
-                {esUrgency && (
-                  <span className={cn(
-                    'text-xs px-2.5 py-1 rounded-full font-semibold',
-                    esUrgency === 'high' ? 'bg-red-100 text-red-700' :
-                    esUrgency === 'medium' ? 'bg-amber-100 text-amber-700' :
-                    'bg-green-100 text-green-700'
-                  )}>
-                    {esUrgency.charAt(0).toUpperCase() + esUrgency.slice(1)} urgency
-                  </span>
-                )}
-              </h3>
-              <button onClick={() => setShowEmailSuggestion(false)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-5 space-y-5">
-              {esSubject && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider">Subject</p>
-                  <p className="text-sm font-bold text-gray-900">{esSubject}</p>
-                </div>
-              )}
-              {esKeyPoints.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wider">Key Points</p>
-                  <ul className="space-y-2">
-                    {esKeyPoints.map((point, i) => (
-                      <li key={i} className="text-sm text-gray-600 flex items-start gap-2.5 leading-relaxed">
-                        <span className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)' }} />
-                        {point}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {esBody && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider">Draft Body</p>
-                  <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600 whitespace-pre-wrap leading-relaxed border border-gray-100">
-                    {esBody}
+          <div className="animate-fade-in rounded-2xl shadow-md overflow-hidden" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.06) 0%, rgba(168,85,247,0.04) 50%, rgba(59,130,246,0.03) 100%)' }}>
+            <div className="border border-purple-200/50 rounded-2xl overflow-hidden">
+              {/* Purple gradient top border */}
+              <div className="h-1.5 w-full" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #a855f7 50%, #6366f1 100%)' }} />
+              <div className="px-5 py-3.5 flex items-center justify-between border-b border-purple-100/40">
+                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center shadow-sm" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%)' }}>
+                    <Wand2 className="w-3.5 h-3.5 text-white" />
                   </div>
-                </div>
-              )}
-              {contact.email && (
-                <a
-                  href={`mailto:${contact.email}?subject=${encodeURIComponent(esSubject || '')}&body=${encodeURIComponent(esBody || '')}`}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity shadow-sm"
-                  style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)' }}
-                >
-                  <Mail className="w-4 h-4" />
-                  Open in Email
-                </a>
-              )}
+                  Suggested Email
+                  {esUrgency && (
+                    <span className={cn(
+                      'text-xs px-2.5 py-1 rounded-full font-semibold',
+                      esUrgency === 'high' ? 'bg-red-100 text-red-700' :
+                      esUrgency === 'medium' ? 'bg-amber-100 text-amber-700' :
+                      'bg-green-100 text-green-700'
+                    )}>
+                      {esUrgency.charAt(0).toUpperCase() + esUrgency.slice(1)} urgency
+                    </span>
+                  )}
+                </h3>
+                <button onClick={() => setShowEmailSuggestion(false)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-purple-50 rounded-lg transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-5 space-y-5">
+                {/* Subject line preview */}
+                {esSubject && (
+                  <div className="p-3.5 rounded-xl bg-white/80 border border-purple-100/40">
+                    <p className="text-[10px] font-semibold text-purple-500 mb-1 uppercase tracking-wider">Subject</p>
+                    <p className="text-sm font-bold text-gray-900">{esSubject}</p>
+                  </div>
+                )}
+                {/* Key points as bullet list */}
+                {esKeyPoints.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-purple-500 mb-2.5 uppercase tracking-wider">Key Points</p>
+                    <ul className="space-y-2">
+                      {esKeyPoints.map((point, i) => (
+                        <li key={i} className="text-sm text-gray-600 flex items-start gap-2.5 leading-relaxed">
+                          <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0 shadow-sm" style={{ background: 'linear-gradient(135deg, #8b5cf6, #a855f7)' }} />
+                          {point}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {esBody && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-purple-500 mb-1.5 uppercase tracking-wider">Draft Body</p>
+                    <div className="bg-white/80 rounded-xl p-4 text-sm text-gray-600 whitespace-pre-wrap leading-relaxed border border-purple-100/30">
+                      {esBody}
+                    </div>
+                  </div>
+                )}
+                {/* "Open in Email" button with mail icon */}
+                {contact.email && (
+                  <a
+                    href={`mailto:${contact.email}?subject=${encodeURIComponent(esSubject || '')}&body=${encodeURIComponent(esBody || '')}`}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-all shadow-md hover:shadow-lg"
+                    style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%)' }}
+                  >
+                    <Mail className="w-4 h-4" />
+                    Open in Email
+                  </a>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -1169,114 +1254,131 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
         const sentimentVal = intelligence.sentiment as string | undefined;
         const keyThemes = Array.isArray(intelligence.key_themes) ? (intelligence.key_themes as string[]) : [];
         const recs = Array.isArray(intelligence.recommendations) ? (intelligence.recommendations as string[]) : [];
+        const themeColors = ['bg-purple-100 text-purple-700 border-purple-200', 'bg-blue-100 text-blue-700 border-blue-200', 'bg-pink-100 text-pink-700 border-pink-200', 'bg-cyan-100 text-cyan-700 border-cyan-200', 'bg-amber-100 text-amber-700 border-amber-200', 'bg-emerald-100 text-emerald-700 border-emerald-200'];
         return (
-          <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm overflow-hidden">
-            <div className="h-1 w-full" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%)' }} />
-            <div className="px-5 py-3.5 flex items-center justify-between border-b border-gray-100">
-              <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%)' }}>
-                  <Sparkles className="w-3.5 h-3.5 text-white" />
-                </div>
-                Contact Intelligence
-              </h3>
-              <button onClick={() => setShowIntelligence(false)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-5 space-y-6">
-              {/* Relationship Health Gauge - gradient progress bar */}
-              {healthScore !== null && (
-                <div className="p-5 rounded-xl bg-gradient-to-br from-gray-50 to-white border border-gray-100">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <p className="text-sm font-bold text-gray-900">Relationship Health</p>
-                      <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">
-                        {healthScore >= 70 ? 'Strong relationship - keep it up!' : healthScore >= 40 ? 'Needs attention - consider reaching out' : 'At risk - immediate action recommended'}
-                      </p>
+          <div className="animate-fade-in rounded-2xl shadow-sm overflow-hidden" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.04) 0%, rgba(59,130,246,0.04) 50%, rgba(236,72,153,0.03) 100%)' }}>
+            <div className="border border-purple-200/40 rounded-2xl overflow-hidden">
+              <div className="h-1 w-full" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #3b82f6 50%, #ec4899 100%)' }} />
+              <div className="px-5 py-3.5 flex items-center justify-between border-b border-purple-100/40">
+                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%)' }}>
+                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  Contact Intelligence
+                </h3>
+                <button onClick={() => setShowIntelligence(false)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-purple-50 rounded-lg transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-5 space-y-6">
+                {/* Relationship Health Visual Gauge (0-100) */}
+                {healthScore !== null && (
+                  <div className="p-5 rounded-xl border border-gray-100" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(249,250,251,0.9) 100%)' }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                          <Heart className="w-4 h-4 text-pink-500" />
+                          Relationship Health
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                          {healthScore >= 70 ? 'Strong relationship - keep it up!' : healthScore >= 40 ? 'Needs attention - consider reaching out' : 'At risk - immediate action recommended'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-3xl font-extrabold bg-clip-text text-transparent" style={{ backgroundImage: healthScore >= 70 ? 'linear-gradient(135deg, #22c55e, #16a34a)' : healthScore >= 40 ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'linear-gradient(135deg, #ef4444, #dc2626)' }}>
+                          {healthScore}
+                        </span>
+                        <span className="text-xs text-gray-400 ml-0.5">/100</span>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <span className="text-2xl font-extrabold bg-clip-text text-transparent" style={{ backgroundImage: healthScore >= 70 ? 'linear-gradient(135deg, #22c55e, #16a34a)' : healthScore >= 40 ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'linear-gradient(135deg, #ef4444, #dc2626)' }}>
-                        {healthScore}
-                      </span>
-                      <span className="text-xs text-gray-400 ml-0.5">/100</span>
+                    {/* Segmented gauge bar */}
+                    <div className="flex gap-1 w-full">
+                      {Array.from({ length: 10 }, (_, i) => {
+                        const segmentVal = (i + 1) * 10;
+                        const filled = healthScore >= segmentVal;
+                        const partial = !filled && healthScore > (i * 10);
+                        return (
+                          <div
+                            key={i}
+                            className="flex-1 h-3 rounded-full transition-all duration-500"
+                            style={{
+                              background: filled || partial
+                                ? healthScore >= 70
+                                  ? 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)'
+                                  : healthScore >= 40
+                                  ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                                  : 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
+                                : '#e5e7eb',
+                              opacity: partial ? 0.5 : 1,
+                            }}
+                          />
+                        );
+                      })}
                     </div>
-                  </div>
-                  <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-700 ease-out"
-                      style={{
-                        width: `${healthScore}%`,
-                        background: healthScore >= 70
-                          ? 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)'
-                          : healthScore >= 40
-                          ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-                          : 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-                      }}
-                    />
-                  </div>
-                  <div className="flex justify-between mt-1.5">
-                    <span className="text-[10px] text-gray-400">At Risk</span>
-                    <span className="text-[10px] text-gray-400">Needs Attention</span>
-                    <span className="text-[10px] text-gray-400">Strong</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Communication Pattern & Sentiment in a grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {commPattern && (
-                  <div className="p-4 rounded-xl bg-gray-50 border border-gray-100">
-                    <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1.5 uppercase tracking-wider">
-                      <MessageSquare className="w-3 h-3" /> Communication Pattern
-                    </p>
-                    <p className="text-sm text-gray-600 leading-relaxed">{commPattern}</p>
+                    <div className="flex justify-between mt-2">
+                      <span className="text-[10px] text-red-400 font-medium">At Risk</span>
+                      <span className="text-[10px] text-amber-400 font-medium">Needs Attention</span>
+                      <span className="text-[10px] text-green-500 font-medium">Strong</span>
+                    </div>
                   </div>
                 )}
 
-                {sentimentVal && (
-                  <div className="p-4 rounded-xl bg-gray-50 border border-gray-100">
-                    <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1.5 uppercase tracking-wider">
-                      <Heart className="w-3 h-3" /> Sentiment
+                {/* Communication Pattern & Sentiment in a grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {commPattern && (
+                    <div className="p-4 rounded-xl bg-white border border-gray-100 hover:border-purple-200 transition-colors">
+                      <p className="text-xs font-semibold text-purple-600 mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+                        <MessageSquare className="w-3 h-3" /> Communication Pattern
+                      </p>
+                      <p className="text-sm text-gray-600 leading-relaxed">{commPattern}</p>
+                    </div>
+                  )}
+
+                  {sentimentVal && (
+                    <div className="p-4 rounded-xl bg-white border border-gray-100 hover:border-pink-200 transition-colors">
+                      <p className="text-xs font-semibold text-pink-600 mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+                        <Heart className="w-3 h-3" /> Sentiment
+                      </p>
+                      <p className="text-sm text-gray-600 leading-relaxed">{sentimentVal}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Key Themes as colored tag pills */}
+                {keyThemes.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-600 mb-2.5 flex items-center gap-1.5 uppercase tracking-wider">
+                      <Tag className="w-3 h-3" /> Key Themes
                     </p>
-                    <p className="text-sm text-gray-600 leading-relaxed">{sentimentVal}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {keyThemes.map((theme, i) => (
+                        <span key={i} className={cn('text-xs px-3 py-1.5 rounded-full font-semibold border', themeColors[i % themeColors.length])}>
+                          {theme}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Action Recommendations as checklist */}
+                {recs.length > 0 && (
+                  <div className="p-4 rounded-xl bg-white border border-gray-100">
+                    <p className="text-xs font-semibold text-gray-600 mb-3 flex items-center gap-1.5 uppercase tracking-wider">
+                      <Target className="w-3 h-3" /> Action Recommendations
+                    </p>
+                    <ul className="space-y-2.5">
+                      {recs.map((rec, i) => (
+                        <li key={i} className="flex items-start gap-3 text-sm text-gray-600 leading-relaxed">
+                          <div className="w-5 h-5 mt-0.5 flex-shrink-0 rounded-md border-2 border-purple-300 flex items-center justify-center bg-white hover:bg-purple-50 transition-colors cursor-default">
+                            <Check className="w-3 h-3 text-purple-500" />
+                          </div>
+                          {rec}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>
-
-              {/* Key Themes */}
-              {keyThemes.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-600 mb-2.5 flex items-center gap-1.5 uppercase tracking-wider">
-                    <Tag className="w-3 h-3" /> Key Themes
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {keyThemes.map((theme, i) => (
-                      <span key={i} className="text-xs px-3 py-1.5 bg-purple-50 text-purple-700 rounded-full font-semibold border border-purple-100/60">
-                        {theme}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Action Recommendations */}
-              {recs.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-600 mb-2.5 flex items-center gap-1.5 uppercase tracking-wider">
-                    <Target className="w-3 h-3" /> Action Recommendations
-                  </p>
-                  <ul className="space-y-2">
-                    {recs.map((rec, i) => (
-                      <li key={i} className="flex items-start gap-3 text-sm text-gray-600 leading-relaxed">
-                        <div className="w-5 h-5 mt-0.5 flex-shrink-0 rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%)' }}>
-                          <Check className="w-3 h-3 text-white" />
-                        </div>
-                        {rec}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </div>
           </div>
         );
@@ -1286,23 +1388,25 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
           4. Pending Topics Section
           ============================ */}
       {pendingTopics.length > 0 && (
-        <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm">
+        <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm hover-lift overflow-hidden">
+          {/* Gradient accent on section header */}
+          <div className="h-0.5 w-full" style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)' }} />
           <button
             onClick={() => setShowPendingTopics(!showPendingTopics)}
             className="w-full px-5 py-4 flex items-center justify-between text-left"
           >
             <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)' }}>
+                <AlertTriangle className="w-3.5 h-3.5 text-white" />
               </div>
               Pending Topics
-              <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">{pendingTopics.length}</span>
+              <span className="text-[10px] font-bold text-white px-2 py-0.5 rounded-full" style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)' }}>{pendingTopics.length}</span>
             </h2>
             {showPendingTopics ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
           </button>
 
           {showPendingTopics && (
-            <div className="px-5 pb-5 space-y-2.5">
+            <div className="px-5 pb-5 space-y-2">
               {pendingTopics.map(link => {
                 const topic = link.topics;
                 if (!topic) return null;
@@ -1310,22 +1414,27 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                 const isOverdue = dueDate ? dueDate < new Date() : false;
                 const overdueDays = dueDate ? Math.floor((Date.now() - dueDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
                 const priority = topic.priority ?? 0;
-                const areaBorderMap: Record<string, string> = { work: '#3b82f6', personal: '#22c55e', career: '#8b5cf6' };
-                const borderColor = areaBorderMap[topic.area || ''] || '#e5e7eb';
 
                 return (
                   <div
                     key={link.topic_id}
-                    className="flex items-center gap-3 p-4 rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-sm transition-all"
-                    style={{ borderLeftWidth: '3px', borderLeftColor: borderColor }}
+                    className={cn(
+                      'group flex items-center gap-3 p-3.5 rounded-xl border transition-all hover:shadow-sm',
+                      isOverdue
+                        ? 'border-red-200 bg-red-50/30 hover:border-red-300'
+                        : 'border-gray-100 bg-white hover:border-blue-200'
+                    )}
+                    style={isOverdue ? { borderLeftWidth: '3px', borderLeftColor: '#ef4444' } : { borderLeftWidth: '3px', borderLeftColor: '#22c55e' }}
                   >
+                    {/* Priority indicator */}
+                    <div className={cn(
+                      'w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold',
+                      priority >= 4 ? 'bg-red-100 text-red-700' : priority === 3 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                    )}>
+                      P{priority || 0}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        {/* Status dot */}
-                        <span className={cn(
-                          'w-2 h-2 rounded-full flex-shrink-0',
-                          isOverdue ? 'bg-red-500' : priority >= 4 ? 'bg-red-500' : priority === 3 ? 'bg-amber-500' : 'bg-emerald-500'
-                        )} />
                         <Link
                           href={`/topics/${link.topic_id}`}
                           className="text-sm font-semibold text-gray-900 hover:text-blue-600 truncate transition-colors"
@@ -1341,7 +1450,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                           </span>
                         )}
                         {isOverdue && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-bold flex items-center gap-1">
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-bold flex items-center gap-1 animate-pulse-dot">
                             <AlertTriangle className="w-3 h-3" />
                             {overdueDays}d overdue
                           </span>
@@ -1358,7 +1467,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                         )}
                       </div>
                       {dueDate && !isOverdue && (
-                        <p className="text-xs text-gray-600 mt-1.5 flex items-center gap-1">
+                        <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
                           <Clock className="w-3 h-3 text-gray-400" />
                           Due {formatShortDate(topic.due_date!)}
                         </p>
@@ -1366,7 +1475,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                     </div>
                     <Link
                       href={`/topics/${link.topic_id}`}
-                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all flex-shrink-0"
+                      className="p-2 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all flex-shrink-0 opacity-0 group-hover:opacity-100"
                     >
                       <ExternalLink className="w-4 h-4" />
                     </Link>
@@ -1381,7 +1490,9 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       {/* ============================
           5. All Related Topics Section
           ============================ */}
-      <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm">
+      <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm hover-lift overflow-hidden">
+        {/* Gradient accent on section header */}
+        <div className="h-0.5 w-full" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }} />
         <button
           onClick={() => setShowAllTopics(!showAllTopics)}
           className="w-full px-5 py-4 flex items-center justify-between text-left"
@@ -1391,7 +1502,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               <LinkIcon className="w-3.5 h-3.5 text-white" />
             </div>
             Related Topics
-            <span className="text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full">{topicLinks.length}</span>
+            <span className="text-[10px] font-bold text-white px-2 py-0.5 rounded-full" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}>{topicLinks.length}</span>
           </h2>
           {showAllTopics ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </button>
@@ -1407,24 +1518,40 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                 <p className="text-xs text-gray-400 mt-1">Use the Link Topic button above to connect topics.</p>
               </div>
             ) : (
-              <div className="space-y-2.5">
+              <div className="space-y-2">
                 {topicLinks.map(link => {
                   const topic = link.topics;
                   if (!topic) return null;
-                  const areaBorderMap: Record<string, string> = { work: '#3b82f6', personal: '#22c55e', career: '#8b5cf6' };
-                  const borderColor = areaBorderMap[topic.area || ''] || '#e5e7eb';
+                  const isTopicOverdue = topic.due_date ? new Date(topic.due_date) < new Date() : false;
+                  const isTopicActive = topic.status === 'active';
+                  const topicPriority = topic.priority ?? 0;
                   const statusDotColor: Record<string, string> = { active: 'bg-emerald-500', completed: 'bg-gray-400', archived: 'bg-amber-500' };
+                  // Health indicator: green if active + recent update, amber if stale, red if overdue
+                  const lastUpdate = topic.updated_at ? Math.floor((Date.now() - new Date(topic.updated_at).getTime()) / (1000 * 60 * 60 * 24)) : 999;
+                  const healthColor = isTopicOverdue ? '#ef4444' : (isTopicActive && lastUpdate <= 7) ? '#22c55e' : (isTopicActive && lastUpdate <= 30) ? '#f59e0b' : '#94a3b8';
 
                   return (
                     <div
                       key={link.topic_id}
-                      className="flex items-center gap-3 p-4 rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-sm transition-all group"
-                      style={{ borderLeftWidth: '3px', borderLeftColor: borderColor }}
+                      className={cn(
+                        'group flex items-center gap-3 p-3.5 rounded-xl border transition-all hover:shadow-sm',
+                        isTopicOverdue
+                          ? 'border-red-200 bg-red-50/20 hover:border-red-300'
+                          : isTopicActive
+                          ? 'border-green-100 bg-white hover:border-green-200'
+                          : 'border-gray-100 bg-white hover:border-blue-200'
+                      )}
+                      style={isTopicOverdue ? { borderLeftWidth: '3px', borderLeftColor: '#ef4444' } : isTopicActive ? { borderLeftWidth: '3px', borderLeftColor: '#22c55e' } : { borderLeftWidth: '3px', borderLeftColor: '#94a3b8' }}
                     >
+                      {/* Topic health indicator */}
+                      <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: healthColor }} />
+                        {topicPriority > 0 && (
+                          <span className="text-[9px] font-bold text-gray-400">P{topicPriority}</span>
+                        )}
+                      </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          {/* Status dot */}
-                          <span className={cn('w-2 h-2 rounded-full flex-shrink-0', statusDotColor[topic.status || 'active'] || 'bg-gray-400')} />
                           <Link
                             href={`/topics/${link.topic_id}`}
                             className="text-sm font-semibold text-gray-900 hover:text-blue-600 truncate transition-colors"
@@ -1545,17 +1672,19 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       {/* ============================
           7. Communication Timeline
           ============================ */}
-      <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm">
+      <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm hover-lift overflow-hidden">
+        {/* Gradient accent on section header */}
+        <div className="h-0.5 w-full" style={{ background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)' }} />
         <button
           onClick={() => setShowTimeline(!showTimeline)}
           className="w-full px-5 py-4 flex items-center justify-between text-left"
         >
           <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center">
-              <Clock className="w-3.5 h-3.5 text-gray-600" />
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)' }}>
+              <Clock className="w-3.5 h-3.5 text-white" />
             </div>
             Communication History
-            <span className="text-xs bg-gray-100 text-gray-600 font-semibold px-2 py-0.5 rounded-full">{relatedItems.length}</span>
+            <span className="text-[10px] font-bold text-white px-2 py-0.5 rounded-full" style={{ background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)' }}>{relatedItems.length}</span>
           </h2>
           {showTimeline ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </button>
@@ -1564,24 +1693,24 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
           <div className="px-5 pb-5">
             {relatedItems.length === 0 ? (
               <div className="text-center py-10">
-                <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-gray-100 flex items-center justify-center">
+                <div className="w-12 h-12 mx-auto mb-3 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #f0f9ff 0%, #ede9fe 100%)' }}>
                   <Clock className="w-6 h-6 text-gray-300" />
                 </div>
-                <p className="text-sm text-gray-600">No communication history yet.</p>
+                <p className="text-sm text-gray-600 font-medium">No communication history yet.</p>
                 <p className="text-xs text-gray-400 mt-1">Interactions will appear here as they occur.</p>
               </div>
             ) : (() => {
               let displayedCount = 0;
               const totalCount = relatedItems.length;
               const maxDisplay = timelineDisplayCount;
-              const sourceColorMap: Record<string, string> = {
-                email: 'bg-blue-100 text-blue-600',
-                gmail: 'bg-red-100 text-red-600',
-                slack: 'bg-purple-100 text-purple-600',
-                calendar: 'bg-green-100 text-green-600',
-                meeting: 'bg-amber-100 text-amber-600',
-                manual: 'bg-gray-100 text-gray-600',
-                notion: 'bg-gray-900/10 text-gray-700',
+              const sourceGradientMap: Record<string, string> = {
+                email: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                gmail: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                slack: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                calendar: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+                meeting: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                manual: 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)',
+                notion: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
               };
 
               return (
@@ -1600,12 +1729,16 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
 
                     return (
                       <div key={groupName}>
-                        <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-3">{groupName}</h3>
-                        {/* Timeline with vertical connector */}
+                        <div className="flex items-center gap-2 mb-3">
+                          <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">{groupName}</h3>
+                          <div className="flex-1 h-px bg-gradient-to-r from-gray-200 to-transparent" />
+                          <span className="text-[10px] text-gray-400 font-medium">{groupItems.length} items</span>
+                        </div>
+                        {/* Timeline with vertical connector line */}
                         <div className="relative">
-                          {/* Vertical line */}
-                          <div className="absolute left-[15px] top-2 bottom-2 w-px bg-gray-200" />
-                          <div className="space-y-0">
+                          {/* Vertical timeline line */}
+                          <div className="absolute left-[15px] top-4 bottom-4 w-[2px] rounded-full" style={{ background: 'linear-gradient(to bottom, #e5e7eb 0%, #d1d5db 50%, transparent 100%)' }} />
+                          <div className="space-y-0.5">
                             {itemsToShow.map((item, idx) => {
                               const itemSource = (item.source as string) || 'manual';
                               const itemTitle = (item.title as string) || 'Untitled';
@@ -1619,13 +1752,21 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                               const metaTo = itemMeta.to as string | undefined;
                               const metaChannel = itemMeta.channel as string | undefined;
                               const metaLocation = itemMeta.location as string | undefined;
-                              const iconColor = sourceColorMap[itemSource] || sourceColorMap.manual;
+                              const sourceGradient = sourceGradientMap[itemSource] || sourceGradientMap.manual;
 
                               return (
-                                <div key={idx} className="flex items-start gap-4 py-3 group">
-                                  {/* Source icon as colored circle */}
-                                  <div className={cn('relative z-10 w-[30px] h-[30px] rounded-full flex items-center justify-center flex-shrink-0 ring-2 ring-white', iconColor)} title={itemSource}>
-                                    <SourceIcon source={itemSource} className="w-3.5 h-3.5" />
+                                <div
+                                  key={idx}
+                                  className="flex items-start gap-4 py-2.5 group animate-fade-in"
+                                  style={{ animationDelay: `${idx * 30}ms` }}
+                                >
+                                  {/* Source icon with colored gradient background */}
+                                  <div
+                                    className="relative z-10 w-[30px] h-[30px] rounded-full flex items-center justify-center flex-shrink-0 ring-2 ring-white shadow-sm"
+                                    style={{ background: sourceGradient }}
+                                    title={itemSource}
+                                  >
+                                    <SourceIcon source={itemSource} className="w-3.5 h-3.5 text-white" />
                                   </div>
                                   <div className="flex-1 min-w-0 p-3 rounded-xl border border-transparent group-hover:border-gray-200 group-hover:bg-gray-50/50 transition-all -mt-0.5">
                                     <div className="flex items-start justify-between gap-2">
@@ -1638,10 +1779,10 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                                           <p className="text-sm font-semibold text-gray-900 truncate">{itemTitle}</p>
                                         )}
                                         {truncatedSnippet && (
-                                          <p className="text-xs text-gray-600 mt-1 line-clamp-2 leading-relaxed">{truncatedSnippet}</p>
+                                          <p className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">{truncatedSnippet}</p>
                                         )}
                                         {/* Metadata details */}
-                                        <div className="flex items-center gap-3 mt-2 flex-wrap">
+                                        <div className="flex items-center gap-2 mt-2 flex-wrap">
                                           {metaFrom && (
                                             <span className="text-[10px] text-gray-600 bg-gray-100 rounded-full px-2 py-0.5 font-medium">From: {metaFrom}</span>
                                           )}
@@ -1649,7 +1790,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                                             <span className="text-[10px] text-gray-600 bg-gray-100 rounded-full px-2 py-0.5 font-medium">To: {metaTo}</span>
                                           )}
                                           {metaChannel && (
-                                            <span className="text-[10px] text-gray-600 bg-gray-100 rounded-full px-2 py-0.5 font-medium">#{metaChannel}</span>
+                                            <span className="text-[10px] text-purple-600 bg-purple-50 rounded-full px-2 py-0.5 font-medium">#{metaChannel}</span>
                                           )}
                                           {metaLocation && (
                                             <span className="text-[10px] text-gray-600 bg-gray-100 rounded-full px-2 py-0.5 font-medium flex items-center gap-0.5">
@@ -1666,7 +1807,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                                           )}
                                         </div>
                                       </div>
-                                      <span className="text-[10px] text-gray-400 flex-shrink-0 whitespace-nowrap font-medium bg-gray-50 rounded-full px-2 py-0.5">
+                                      <span className="text-[10px] text-gray-400 flex-shrink-0 whitespace-nowrap font-medium bg-gray-50 rounded-full px-2.5 py-0.5 border border-gray-100">
                                         {formatRelativeDate(itemDate)}
                                       </span>
                                     </div>
@@ -1683,8 +1824,8 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                   {totalCount > maxDisplay && (
                     <button
                       onClick={() => setTimelineDisplayCount(prev => prev + 20)}
-                      className="w-full py-3 text-sm font-semibold hover:opacity-90 rounded-xl transition-all text-center text-white shadow-sm"
-                      style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}
+                      className="w-full py-2.5 text-sm font-semibold hover:opacity-90 rounded-xl transition-all text-center text-white shadow-sm"
+                      style={{ background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)' }}
                     >
                       Load More ({totalCount - maxDisplay} remaining)
                     </button>
@@ -1705,52 +1846,63 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
         const extTwitter = contact.metadata?.twitter as string | undefined;
         const extTimezone = contact.metadata?.timezone as string | undefined;
         return (
-          <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm p-5">
-            <h2 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center">
-                <Globe className="w-3.5 h-3.5 text-gray-600" />
+          <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm hover-lift overflow-hidden">
+            <div className="h-0.5 w-full" style={{ background: 'linear-gradient(135deg, #6b7280 0%, #9ca3af 100%)' }} />
+            <div className="p-5">
+              <h2 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #6b7280 0%, #9ca3af 100%)' }}>
+                  <Globe className="w-3.5 h-3.5 text-white" />
+                </div>
+                Extended Info
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {extPhone && (
+                  <div className="flex items-center gap-3 text-sm text-gray-700 p-3 rounded-xl bg-gradient-to-br from-gray-50 to-white border border-gray-100 hover:border-gray-200 transition-colors">
+                    <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+                      <Phone className="w-3.5 h-3.5 text-gray-500" />
+                    </div>
+                    <span className="leading-relaxed font-medium">{extPhone}</span>
+                  </div>
+                )}
+                {extLinkedin && (
+                  <div className="flex items-center gap-3 text-sm p-3 rounded-xl bg-gradient-to-br from-blue-50/30 to-white border border-gray-100 hover:border-blue-200 transition-colors">
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+                      <Globe className="w-3.5 h-3.5 text-blue-500" />
+                    </div>
+                    <a
+                      href={extLinkedin.startsWith('http') ? extLinkedin : `https://${extLinkedin}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 hover:underline truncate leading-relaxed font-medium"
+                    >
+                      {extLinkedin}
+                    </a>
+                  </div>
+                )}
+                {extTwitter && (
+                  <div className="flex items-center gap-3 text-sm p-3 rounded-xl bg-gradient-to-br from-gray-50 to-white border border-gray-100 hover:border-gray-200 transition-colors">
+                    <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+                      <MessageSquare className="w-3.5 h-3.5 text-gray-500" />
+                    </div>
+                    <a
+                      href={extTwitter.startsWith('http') ? extTwitter : `https://x.com/${extTwitter.replace(/^@/, '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 hover:underline leading-relaxed font-medium"
+                    >
+                      {extTwitter}
+                    </a>
+                  </div>
+                )}
+                {extTimezone && (
+                  <div className="flex items-center gap-3 text-sm text-gray-700 p-3 rounded-xl bg-gradient-to-br from-gray-50 to-white border border-gray-100 hover:border-gray-200 transition-colors">
+                    <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+                      <Clock className="w-3.5 h-3.5 text-gray-500" />
+                    </div>
+                    <span className="leading-relaxed font-medium">{extTimezone}</span>
+                  </div>
+                )}
               </div>
-              Extended Info
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {extPhone && (
-                <div className="flex items-center gap-3 text-sm text-gray-600 p-3 rounded-xl bg-gray-50 border border-gray-100">
-                  <Phone className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <span className="leading-relaxed">{extPhone}</span>
-                </div>
-              )}
-              {extLinkedin && (
-                <div className="flex items-center gap-3 text-sm p-3 rounded-xl bg-gray-50 border border-gray-100">
-                  <Globe className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <a
-                    href={extLinkedin.startsWith('http') ? extLinkedin : `https://${extLinkedin}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800 hover:underline truncate leading-relaxed"
-                  >
-                    {extLinkedin}
-                  </a>
-                </div>
-              )}
-              {extTwitter && (
-                <div className="flex items-center gap-3 text-sm p-3 rounded-xl bg-gray-50 border border-gray-100">
-                  <MessageSquare className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <a
-                    href={extTwitter.startsWith('http') ? extTwitter : `https://x.com/${extTwitter.replace(/^@/, '')}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800 hover:underline leading-relaxed"
-                  >
-                    {extTwitter}
-                  </a>
-                </div>
-              )}
-              {extTimezone && (
-                <div className="flex items-center gap-3 text-sm text-gray-600 p-3 rounded-xl bg-gray-50 border border-gray-100">
-                  <Clock className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <span className="leading-relaxed">{extTimezone}</span>
-                </div>
-              )}
             </div>
           </div>
         );
@@ -1759,11 +1911,13 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       {/* ============================
           10. Notes Section
           ============================ */}
-      <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm p-5">
+      <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm hover-lift overflow-hidden">
+        <div className="h-0.5 w-full" style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)' }} />
+        <div className="p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center">
-              <StickyNote className="w-3.5 h-3.5 text-amber-600" />
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)' }}>
+              <StickyNote className="w-3.5 h-3.5 text-white" />
             </div>
             Notes
           </h2>
@@ -1833,14 +1987,18 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
             Click to add notes...
           </div>
         )}
+        </div>
       </div>
 
       {/* ============================
           Footer info
           ============================ */}
-      <div className="animate-fade-in text-center text-xs text-gray-400 space-x-3 py-2">
-        <span>Created {formatShortDate(contact.created_at)}</span>
-        <span className="text-gray-300">&middot;</span>
+      <div className="animate-fade-in text-center text-xs text-gray-400 py-3 flex items-center justify-center gap-3">
+        <span className="flex items-center gap-1.5">
+          <Clock className="w-3 h-3" />
+          Created {formatShortDate(contact.created_at)}
+        </span>
+        <span className="w-1 h-1 rounded-full bg-gray-300" />
         <span>Updated {formatRelativeDate(contact.updated_at)}</span>
       </div>
     </div>

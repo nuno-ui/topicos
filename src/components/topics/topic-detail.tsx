@@ -1,13 +1,13 @@
 'use client';
-import { useState, useCallback, useEffect } from 'react';
-import { sourceLabel, formatRelativeDate } from '@/lib/utils';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { sourceLabel, formatRelativeDate, sourceBorderClass, sourceIconBgClass } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { NoteEditor } from './note-editor';
 import { NoteCard } from './note-card';
-import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp, Eye, EyeOff, Pin, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Layers, GitBranch, Compass, Award, Target, MoreHorizontal, ChevronRight, Info, Calendar, FolderOpen } from 'lucide-react';
+import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp, Eye, EyeOff, Pin, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Layers, GitBranch, Compass, Award, Target, MoreHorizontal, ChevronRight, Info, Calendar, FolderOpen, Check, CircleDot } from 'lucide-react';
 
 interface TopicItem {
   id: string;
@@ -105,6 +105,9 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   // Notes state
   const [notes, setNotes] = useState(topic.notes || '');
   const [notesSaving, setNotesSaving] = useState(false);
+  const [notesSaved, setNotesSaved] = useState(false);
+  const [notesFocused, setNotesFocused] = useState(false);
+  const notesAutoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Linking state
   const [linkingItems, setLinkingItems] = useState(false);
@@ -446,8 +449,9 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   };
 
   // --- SAVE NOTES ---
-  const saveNotes = async () => {
+  const saveNotes = useCallback(async () => {
     setNotesSaving(true);
+    setNotesSaved(false);
     try {
       const res = await fetch(`/api/topics/${topic.id}`, {
         method: 'PATCH',
@@ -455,12 +459,33 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         body: JSON.stringify({ notes: notes || null }),
       });
       if (!res.ok) throw new Error('Failed to save notes');
-      toast.success('Notes saved');
+      setNotesSaved(true);
+      setTimeout(() => setNotesSaved(false), 2500);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Save failed');
     }
     setNotesSaving(false);
+  }, [topic.id, notes]);
+
+  // Auto-save notes after 2 seconds of inactivity
+  const handleNotesChange = (value: string) => {
+    setNotes(value);
+    setNotesSaved(false);
+    if (notesAutoSaveRef.current) clearTimeout(notesAutoSaveRef.current);
+    notesAutoSaveRef.current = setTimeout(() => {
+      saveNotes();
+    }, 2000);
   };
+
+  // Cleanup auto-save on unmount
+  useEffect(() => {
+    return () => {
+      if (notesAutoSaveRef.current) clearTimeout(notesAutoSaveRef.current);
+    };
+  }, []);
+
+  // Word count helper
+  const noteWordCount = notes.trim() ? notes.trim().split(/\s+/).length : 0;
 
   // --- FETCH ITEM CONTENT ---
   const fetchItemContent = async (itemId: string) => {
@@ -624,6 +649,14 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     return acc;
   }, {} as Record<string, number>);
 
+  // Helper: check if item was added in last 24 hours
+  const isNewItem = (occurredAt: string) => {
+    return (Date.now() - new Date(occurredAt).getTime()) < 24 * 60 * 60 * 1000;
+  };
+
+  // Area badge gradient class
+  const areaBadgeClass = topic.area === 'work' ? 'area-badge-work' : topic.area === 'personal' ? 'area-badge-personal' : 'area-badge-career';
+
   const toggleSource = (source: string) => {
     setSearchSources(prev => {
       const next = new Set(prev);
@@ -652,153 +685,199 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <Link href="/topics" className="text-xs text-gray-400 hover:text-gray-600 mb-3 inline-flex items-center gap-1 transition-colors">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back
+    <div className="space-y-6 md:space-y-8 animate-fade-in p-4 md:p-8">
+      {/* Header with gradient strip */}
+      <div className="topic-header-strip -mx-4 md:-mx-8 -mt-4 md:-mt-8 px-4 md:px-8 pt-5 pb-6 mb-2 rounded-b-2xl relative overflow-hidden">
+        {/* Decorative dots */}
+        <div className="absolute inset-0 dot-pattern opacity-30 pointer-events-none" />
+        <div className="relative">
+          {/* Breadcrumb */}
+          <Link href="/topics" className="text-xs text-gray-400 hover:text-blue-600 mb-4 inline-flex items-center gap-1.5 transition-all duration-200 group">
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+            <span className="group-hover:underline underline-offset-2">Topics</span>
+            <ChevronRight className="w-3 h-3 text-gray-300" />
+            <span className="text-gray-500 font-medium truncate max-w-[200px]">{topic.title}</span>
           </Link>
-          {editing ? (
-            <div className="space-y-3 mt-2">
-              <input value={editTitle} onChange={e => setEditTitle(e.target.value)}
-                className="text-2xl font-bold text-gray-900 w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
-              <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)}
-                placeholder="Description..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" rows={2} />
-              <div className="flex gap-3">
-                <select value={editArea} onChange={e => setEditArea(e.target.value)}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="work">Work</option>
-                  <option value="personal">Personal</option>
-                  <option value="career">Career</option>
-                </select>
-                <select value={editStatus} onChange={e => setEditStatus(e.target.value)}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="active">Active</option>
-                  <option value="completed">Completed</option>
-                  <option value="archived">Archived</option>
-                </select>
-                <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div className="flex gap-2">
-                <button onClick={saveTopic} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors">
-                  <Save className="w-4 h-4" /> Save
-                </button>
-                <button onClick={() => setEditing(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 flex items-center gap-2 transition-colors">
-                  <X className="w-4 h-4" /> Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <h1 className="text-2xl font-bold text-gray-900 mt-1 leading-tight">{topic.title}</h1>
-              <div className="flex items-center gap-2 mt-3 flex-wrap">
-                <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                  topic.status === 'active' ? 'bg-emerald-100 text-emerald-700' :
-                  topic.status === 'completed' ? 'bg-gray-100 text-gray-600' :
-                  'bg-amber-100 text-amber-700'
-                }`}>{topic.status}</span>
-                <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                  topic.area === 'work' ? 'bg-blue-100 text-blue-700' :
-                  topic.area === 'personal' ? 'bg-green-100 text-green-700' :
-                  'bg-purple-100 text-purple-700'
-                }`}>{topic.area}</span>
-                {topic.priority > 0 && (
-                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                    topic.priority >= 3 ? 'bg-red-100 text-red-700' :
-                    topic.priority === 2 ? 'bg-amber-100 text-amber-700' :
-                    'bg-gray-100 text-gray-600'
-                  }`}>P{topic.priority}</span>
-                )}
-                {topic.due_date && (() => {
-                  const daysLeft = Math.ceil((new Date(topic.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                  const isOverdue = daysLeft < 0;
-                  const isUrgent = daysLeft >= 0 && daysLeft <= 3;
-                  const isSoon = daysLeft > 3 && daysLeft <= 7;
-                  const colorClass = isOverdue ? 'bg-red-100 text-red-700 font-medium' : isUrgent ? 'bg-amber-100 text-amber-700 font-medium' : isSoon ? 'bg-yellow-50 text-yellow-700' : 'bg-gray-100 text-gray-600';
-                  const label = isOverdue ? `Overdue by ${Math.abs(daysLeft)}d` : daysLeft === 0 ? 'Due today' : daysLeft === 1 ? 'Due tomorrow' : `${daysLeft}d left`;
-                  return (
-                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${colorClass}`}>
-                      {label}
-                    </span>
-                  );
-                })()}
-              </div>
-              {/* Compact dates row */}
-              <div className="flex items-center gap-4 mt-2.5 text-xs text-gray-400">
-                <span className="inline-flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> Created {formatRelativeDate(topic.created_at)}
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <RefreshCw className="w-3 h-3" /> Updated {formatRelativeDate(topic.updated_at)}
-                </span>
-                {topic.due_date && (
-                  <span className="inline-flex items-center gap-1">
-                    <Calendar className="w-3 h-3" /> Due {new Date(topic.due_date).toLocaleDateString()}
-                  </span>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-        {!editing && (
-          <div className="flex gap-1 items-center flex-shrink-0">
-            <button onClick={() => { setEditing(true); setEditTitle(topic.title); setEditDescription(topic.description || ''); setEditArea(topic.area); setEditStatus(topic.status); setEditDueDate(topic.due_date || ''); }}
-              className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors" title="Edit">
-              <Edit3 className="w-3.5 h-3.5" /> Edit
-            </button>
-            <div className="relative">
-              <button onClick={() => setShowMoreMenu(!showMoreMenu)}
-                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="More actions">
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
-              {showMoreMenu && (
+
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              {editing ? (
+                <div className="space-y-3 mt-2">
+                  <input value={editTitle} onChange={e => setEditTitle(e.target.value)}
+                    className="text-2xl font-bold text-gray-900 w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/80" />
+                  <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)}
+                    placeholder="Description..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/80" rows={2} />
+                  <div className="flex gap-3 flex-wrap">
+                    <select value={editArea} onChange={e => setEditArea(e.target.value)}
+                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                      <option value="work">Work</option>
+                      <option value="personal">Personal</option>
+                      <option value="career">Career</option>
+                    </select>
+                    <select value={editStatus} onChange={e => setEditStatus(e.target.value)}
+                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                      <option value="active">Active</option>
+                      <option value="completed">Completed</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)}
+                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={saveTopic} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors shadow-sm">
+                      <Save className="w-4 h-4" /> Save
+                    </button>
+                    <button onClick={() => setEditing(false)} className="px-4 py-2 bg-white text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors border border-gray-200">
+                      <X className="w-4 h-4" /> Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-white rounded-xl border border-gray-200 shadow-lg py-1">
-                    <button onClick={() => { setShowNoteEditor(true); setShowMoreMenu(false); }}
-                      className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                      <StickyNote className="w-3.5 h-3.5 text-green-500" /> Add Note
-                    </button>
-                    <button onClick={() => { navigator.clipboard.writeText(window.location.href); toast.success('Link copied to clipboard'); setShowMoreMenu(false); }}
-                      className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                      <Link2 className="w-3.5 h-3.5 text-blue-500" /> Copy Link
-                    </button>
-                    <button onClick={() => { archiveTopic(); setShowMoreMenu(false); }}
-                      className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                      <Archive className="w-3.5 h-3.5 text-amber-500" /> {topic.status === 'archived' ? 'Reactivate' : 'Archive'}
-                    </button>
-                    <div className="border-t border-gray-100 my-1" />
-                    <button onClick={() => { deleteTopic(); setShowMoreMenu(false); }}
-                      className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
-                      <Trash2 className="w-3.5 h-3.5" /> Delete
-                    </button>
+                  <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mt-1 leading-tight tracking-tight">{topic.title}</h1>
+
+                  {/* Badges row */}
+                  <div className="flex items-center gap-2 mt-3 flex-wrap">
+                    {/* Status badge with colored dot */}
+                    <span className={`text-xs font-semibold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 ${
+                      topic.status === 'active' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' :
+                      topic.status === 'completed' ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200' :
+                      'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
+                    }`}>
+                      <CircleDot className="w-3 h-3" />
+                      {topic.status.charAt(0).toUpperCase() + topic.status.slice(1)}
+                    </span>
+
+                    {/* Area badge with gradient */}
+                    <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${areaBadgeClass}`}>
+                      {topic.area.charAt(0).toUpperCase() + topic.area.slice(1)}
+                    </span>
+
+                    {/* Priority badge */}
+                    {topic.priority > 0 && (
+                      <span className={`text-xs font-semibold px-3 py-1.5 rounded-full inline-flex items-center gap-1 ${
+                        topic.priority >= 4 ? 'bg-red-50 text-red-700 ring-1 ring-red-200' :
+                        topic.priority === 3 ? 'bg-orange-50 text-orange-700 ring-1 ring-orange-200' :
+                        topic.priority === 2 ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' :
+                        'bg-gray-50 text-gray-600 ring-1 ring-gray-200'
+                      }`}>
+                        <AlertTriangle className="w-3 h-3" />
+                        P{topic.priority}
+                      </span>
+                    )}
+
+                    {/* Due date with color coding */}
+                    {topic.due_date && (() => {
+                      const daysLeft = Math.ceil((new Date(topic.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                      const isOverdue = daysLeft < 0;
+                      const isUrgent = daysLeft >= 0 && daysLeft <= 3;
+                      const isSoon = daysLeft > 3 && daysLeft <= 7;
+                      const colorClass = isOverdue
+                        ? 'bg-red-50 text-red-700 ring-1 ring-red-300'
+                        : isUrgent
+                        ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-300'
+                        : isSoon
+                        ? 'bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200'
+                        : 'bg-green-50 text-green-700 ring-1 ring-green-200';
+                      const label = isOverdue ? `Overdue by ${Math.abs(daysLeft)}d` : daysLeft === 0 ? 'Due today' : daysLeft === 1 ? 'Due tomorrow' : `${daysLeft}d left`;
+                      return (
+                        <span className={`text-xs font-semibold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 ${colorClass}`}>
+                          <Calendar className="w-3 h-3" />
+                          {label}
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Progress bar (if progress_percent is set) */}
+                  {topic.progress_percent != null && topic.progress_percent > 0 && (
+                    <div className="mt-4 max-w-md">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-medium text-gray-500">Progress</span>
+                        <span className="text-xs font-bold text-gray-700">{topic.progress_percent}%</span>
+                      </div>
+                      <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden shadow-inner">
+                        <div className="progress-bar-gradient h-full" style={{ width: `${topic.progress_percent}%` }} />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Compact dates row */}
+                  <div className="flex items-center gap-4 mt-3 text-xs text-gray-400">
+                    <span className="inline-flex items-center gap-1 hover:text-gray-600 transition-colors">
+                      <Clock className="w-3 h-3" /> Created {formatRelativeDate(topic.created_at)}
+                    </span>
+                    <span className="inline-flex items-center gap-1 hover:text-gray-600 transition-colors">
+                      <RefreshCw className="w-3 h-3" /> Updated {formatRelativeDate(topic.updated_at)}
+                    </span>
+                    {topic.due_date && (
+                      <span className="inline-flex items-center gap-1 hover:text-gray-600 transition-colors">
+                        <Calendar className="w-3 h-3" /> Due {new Date(topic.due_date).toLocaleDateString()}
+                      </span>
+                    )}
                   </div>
                 </>
               )}
             </div>
+            {!editing && (
+              <div className="flex gap-1 items-center flex-shrink-0">
+                <button onClick={() => { setEditing(true); setEditTitle(topic.title); setEditDescription(topic.description || ''); setEditArea(topic.area); setEditStatus(topic.status); setEditDueDate(topic.due_date || ''); }}
+                  className="px-3 py-1.5 text-gray-500 hover:text-blue-600 hover:bg-white/80 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-transparent hover:border-gray-200 hover:shadow-sm" title="Edit">
+                  <Edit3 className="w-3.5 h-3.5" /> Edit
+                </button>
+                <div className="relative">
+                  <button onClick={() => setShowMoreMenu(!showMoreMenu)}
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-lg transition-all hover:shadow-sm" title="More actions">
+                    <MoreHorizontal className="w-4 h-4" />
+                  </button>
+                  {showMoreMenu && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
+                      <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-white rounded-xl border border-gray-200 shadow-xl py-1 animate-scale-in">
+                        <button onClick={() => { setShowNoteEditor(true); setShowMoreMenu(false); }}
+                          className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors">
+                          <StickyNote className="w-3.5 h-3.5 text-green-500" /> Add Note
+                        </button>
+                        <button onClick={() => { navigator.clipboard.writeText(window.location.href); toast.success('Link copied to clipboard'); setShowMoreMenu(false); }}
+                          className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors">
+                          <Link2 className="w-3.5 h-3.5 text-blue-500" /> Copy Link
+                        </button>
+                        <button onClick={() => { archiveTopic(); setShowMoreMenu(false); }}
+                          className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors">
+                          <Archive className="w-3.5 h-3.5 text-amber-500" /> {topic.status === 'archived' ? 'Reactivate' : 'Archive'}
+                        </button>
+                        <div className="border-t border-gray-100 my-1" />
+                        <button onClick={() => { deleteTopic(); setShowMoreMenu(false); }}
+                          className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" /> Delete
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* Topic Info Card - description, tags */}
       {(topic.description || (topic.tags && topic.tags.length > 0) || topic.goal) && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-3 hover-lift">
           {topic.description && (
             <p className="text-sm text-gray-600 leading-relaxed">{topic.description}</p>
           )}
           {topic.goal && (
-            <div className="flex items-start gap-2">
-              <Target className="w-3.5 h-3.5 text-blue-500 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-gray-600"><span className="font-medium text-gray-700">Goal:</span> {topic.goal}</p>
+            <div className="flex items-start gap-2.5 p-3 bg-blue-50/50 rounded-lg border border-blue-100/50">
+              <Target className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-gray-700"><span className="font-semibold text-gray-800">Goal:</span> {topic.goal}</p>
             </div>
           )}
           {topic.tags && topic.tags.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
               <Tag className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
               {topic.tags.map((tag, i) => (
-                <span key={i} className="text-xs px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">{tag}</span>
+                <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-gradient-to-r from-gray-50 to-gray-100 text-gray-600 font-medium border border-gray-200/60">{tag}</span>
               ))}
             </div>
           )}
@@ -807,9 +886,11 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
       {/* Topic Info Dashboard - collapsible */}
       <button onClick={() => setShowInfoDashboard(!showInfoDashboard)}
-        className="w-full flex items-center justify-between px-4 py-2.5 bg-white rounded-xl border border-gray-100 shadow-sm hover:bg-gray-50/80 transition-colors">
-        <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
-          <Info className="w-4 h-4 text-blue-500" />
+        className="w-full flex items-center justify-between px-5 py-3 bg-white rounded-xl border border-gray-100 shadow-sm hover:bg-gray-50/50 hover:shadow-md transition-all">
+        <div className="flex items-center gap-2.5 text-sm font-medium text-gray-600">
+          <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+            <Info className="w-3.5 h-3.5 text-blue-600" />
+          </span>
           Topic Details
           <span className="text-xs text-gray-400 font-normal">
             {items.length} items &middot; {Object.keys(sourceCounts).length} sources
@@ -817,7 +898,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         </div>
         {showInfoDashboard ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
       </button>
-      {showInfoDashboard && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {showInfoDashboard && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-slide-up">
         {/* Key Metrics */}
         <div className="bg-gradient-to-br from-white to-blue-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Overview</h3>
@@ -999,26 +1080,28 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>}
 
       {/* Search Panel */}
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm">
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover-lift">
         <button onClick={() => setShowSearch(!showSearch)}
-          className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50/80 transition-colors">
-          <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-            <Search className="w-4 h-4 text-gray-400" />
-            Search &amp; link content
+          className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50/80 transition-colors">
+          <div className="flex items-center gap-2.5 text-sm font-medium text-gray-700">
+            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
+              <Search className="w-3.5 h-3.5 text-white" />
+            </span>
+            Search &amp; Link Content
           </div>
           {showSearch ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </button>
         {showSearch && (
-          <div className="px-4 pb-4 space-y-3 border-t border-gray-100">
+          <div className="px-5 pb-5 space-y-3 border-t border-gray-100">
             <div className="flex gap-2 mt-3">
               <div className="flex-1 relative">
-                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Search className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleSearch()}
                   placeholder="Search emails, messages, events, files..."
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl text-sm bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 />
               </div>
               <button onClick={handleSearch} disabled={searchLoading}
@@ -1052,15 +1135,17 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
       {/* Search Results */}
       {searchResults.length > 0 && (
-        <div className="bg-white rounded-xl border border-blue-200">
-          <div className="px-4 py-3 border-b border-blue-100 flex items-center justify-between">
+        <div className="bg-white rounded-xl border border-blue-200 shadow-sm overflow-hidden animate-slide-up">
+          <div className="px-5 py-3 border-b border-blue-100 flex items-center justify-between bg-blue-50/30">
             <div className="flex items-center gap-3">
-              <h3 className="text-sm font-semibold text-gray-700">
-                Search Results ({searchResults.length})
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Search className="w-3.5 h-3.5 text-blue-500" />
+                Search Results
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">{searchResults.length}</span>
               </h3>
               {searchResults.filter(r => !r.already_linked).length > 0 && (
                 <button onClick={selectAllSearch}
-                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors">
                   {selectedResults.size === searchResults.filter(r => !r.already_linked).length
                     ? <><CheckSquare className="w-3 h-3" /> Deselect All</>
                     : <><Square className="w-3 h-3" /> Select All</>}
@@ -1069,36 +1154,42 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             </div>
             {selectedResults.size > 0 && (
               <button onClick={linkSelectedSearch} disabled={linkingItems}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
+                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 shadow-sm transition-colors">
                 {linkingItems ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
                 Link {selectedResults.size} Selected
               </button>
             )}
           </div>
-          <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+          <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto thin-scrollbar">
             {searchResults.map((item) => {
               const key = item.source + ':' + item.external_id;
               return (
-                <div key={key} className={`px-4 py-3 flex items-start gap-3 ${item.already_linked ? 'opacity-50 bg-gray-50' : 'hover:bg-gray-50'}`}>
+                <div key={key} className={`px-5 py-3.5 flex items-start gap-3 transition-colors ${item.already_linked ? 'opacity-50 bg-gray-50' : 'hover:bg-blue-50/30'}`}>
                   {!item.already_linked && (
                     <input type="checkbox" checked={selectedResults.has(key)}
                       onChange={() => toggleSearchResult(key)}
-                      className="mt-1 rounded border-gray-300" />
+                      className="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                   )}
                   {item.already_linked && (
-                    <span className="mt-1 text-green-500 text-xs font-medium">Linked</span>
+                    <span className="mt-1 text-green-500 text-xs font-semibold flex items-center gap-0.5">
+                      <Check className="w-3 h-3" /> Linked
+                    </span>
                   )}
-                  <span className="mt-0.5"><SourceIcon source={item.source} className="w-4 h-4" /></span>
+                  <span className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${sourceIconBgClass(item.source)}`}>
+                    <SourceIcon source={item.source} className="w-3.5 h-3.5" />
+                  </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
-                    <p className="text-xs text-gray-500 truncate">{item.snippet}</p>
-                    <div className="flex gap-2 mt-1 text-xs text-gray-400">
-                      <span>{sourceLabel(item.source)}</span>
+                    <p className="text-xs text-gray-500 truncate mt-0.5">{item.snippet}</p>
+                    <div className="flex gap-2 mt-1.5 text-xs text-gray-400">
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
+                        {sourceLabel(item.source)}
+                      </span>
                       <span>{formatRelativeDate(item.occurred_at)}</span>
                     </div>
                   </div>
                   <a href={item.url} target="_blank" rel="noopener noreferrer"
-                    className="p-1 text-gray-400 hover:text-blue-600" title="Open in source">
+                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 </div>
@@ -1110,17 +1201,19 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
       {/* AI Find Results */}
       {showAiResults && (
-        <div className="bg-white rounded-xl border border-purple-200">
-          <div className="px-4 py-3 border-b border-purple-100 flex items-center justify-between">
+        <div className="bg-white rounded-xl border border-purple-200 shadow-sm overflow-hidden animate-slide-up">
+          <div className="px-5 py-3 border-b border-purple-100 flex items-center justify-between bg-gradient-to-r from-purple-50/50 to-pink-50/30">
             <div className="flex items-center gap-3">
               <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-purple-500" />
+                <span className="w-6 h-6 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                  <Sparkles className="w-3.5 h-3.5 text-white" />
+                </span>
                 AI Find Results
                 {aiFindLoading && <Loader2 className="w-4 h-4 animate-spin text-purple-500" />}
               </h3>
               {aiFindResults.filter(r => !r.already_linked).length > 0 && !aiFindLoading && (
                 <button onClick={selectAllAi}
-                  className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1">
+                  className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 transition-colors">
                   {selectedAiResults.size === aiFindResults.filter(r => !r.already_linked).length
                     ? <><CheckSquare className="w-3 h-3" /> Deselect All</>
                     : <><Square className="w-3 h-3" /> Select All</>}
@@ -1129,47 +1222,60 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             </div>
             {selectedAiResults.size > 0 && (
               <button onClick={linkSelectedAi} disabled={linkingItems}
-                className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5">
+                className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg text-xs font-medium hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 flex items-center gap-1.5 shadow-sm transition-all">
                 {linkingItems ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
                 Link {selectedAiResults.size} Selected
               </button>
             )}
           </div>
           {aiFindResults.length === 0 && !aiFindLoading ? (
-            <p className="px-4 py-6 text-center text-sm text-gray-500">No results found. Try adding a more detailed description to your topic.</p>
+            <p className="px-5 py-8 text-center text-sm text-gray-500">No results found. Try adding a more detailed description to your topic.</p>
           ) : (
-            <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+            <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto thin-scrollbar">
               {aiFindResults.map((item) => {
                 const key = item.source + ':' + item.external_id;
+                const confidencePercent = item.ai_confidence != null ? Math.round(item.ai_confidence * 100) : null;
                 return (
-                  <div key={key} className={`px-4 py-3 flex items-start gap-3 ${item.already_linked ? 'opacity-50 bg-gray-50' : 'hover:bg-gray-50'}`}>
+                  <div key={key} className={`px-5 py-3.5 flex items-start gap-3 transition-colors ${item.already_linked ? 'opacity-50 bg-gray-50' : 'hover:bg-purple-50/20'}`}>
                     {!item.already_linked && (
                       <input type="checkbox" checked={selectedAiResults.has(key)}
                         onChange={() => toggleAiResult(key)}
-                        className="mt-1 rounded border-gray-300" />
+                        className="mt-1 rounded border-gray-300 text-purple-600 focus:ring-purple-500" />
                     )}
                     {item.already_linked && (
-                      <span className="mt-1 text-green-500 text-xs font-medium">Linked</span>
+                      <span className="mt-1 text-green-500 text-xs font-semibold flex items-center gap-0.5">
+                        <Check className="w-3 h-3" /> Linked
+                      </span>
                     )}
-                    <span className="mt-0.5"><SourceIcon source={item.source} className="w-4 h-4" /></span>
+                    <span className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${sourceIconBgClass(item.source)}`}>
+                      <SourceIcon source={item.source} className="w-3.5 h-3.5" />
+                    </span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
-                      <p className="text-xs text-gray-500 truncate">{item.snippet}</p>
-                      <div className="flex gap-2 mt-1 text-xs text-gray-400">
-                        <span>{sourceLabel(item.source)}</span>
+                      <p className="text-xs text-gray-500 truncate mt-0.5">{item.snippet}</p>
+                      <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-400">
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
+                          {sourceLabel(item.source)}
+                        </span>
                         <span>{formatRelativeDate(item.occurred_at)}</span>
-                        {item.ai_confidence != null && (
-                          <span className="text-purple-500">
-                            {Math.round(item.ai_confidence * 100)}% match
+                        {/* AI confidence indicator */}
+                        {confidencePercent != null && (
+                          <span className="flex items-center gap-1.5">
+                            <span className={`text-[10px] font-bold ${confidencePercent >= 80 ? 'text-green-600' : confidencePercent >= 50 ? 'text-amber-600' : 'text-gray-500'}`}>
+                              {confidencePercent}%
+                            </span>
+                            <span className="confidence-meter w-12">
+                              <span className={`confidence-meter-fill ${confidencePercent >= 80 ? 'bg-green-500' : confidencePercent >= 50 ? 'bg-amber-500' : 'bg-gray-400'}`} style={{ width: `${confidencePercent}%` }} />
+                            </span>
                           </span>
                         )}
                       </div>
                       {item.ai_reason && (
-                        <p className="text-xs text-purple-600 mt-1 italic">{item.ai_reason}</p>
+                        <p className="text-xs text-purple-600 mt-1.5 italic bg-purple-50/50 px-2 py-1 rounded">{item.ai_reason}</p>
                       )}
                     </div>
                     <a href={item.url} target="_blank" rel="noopener noreferrer"
-                      className="p-1 text-gray-400 hover:text-blue-600" title="Open in source">
+                      className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Open in source">
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                   </div>
@@ -1183,10 +1289,12 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       {/* Linked Items */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-            <Layers className="w-4 h-4 text-gray-400" />
+          <h2 className="text-base font-bold text-gray-900 flex items-center gap-2.5">
+            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
+              <Layers className="w-3.5 h-3.5 text-white" />
+            </span>
             Linked Items
-            <span className="text-xs font-normal text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{items.length}</span>
+            <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{items.length}</span>
           </h2>
           <div className="flex items-center gap-1.5">
             <button onClick={() => { setShowLinkForm(v => !v); setShowNoteEditor(false); }}
@@ -1238,35 +1346,42 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             </div>
           </div>
         )}
-        {/* Source tabs */}
-        <div className="flex gap-1.5 mb-4 flex-wrap">
+        {/* Source tabs - polished with active indicator */}
+        <div className="flex gap-1 mb-4 border-b border-gray-100 -mx-1 px-1 overflow-x-auto">
           <button onClick={() => setActiveTab('all')}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
-              activeTab === 'all' ? 'bg-gray-900 text-white border-gray-900 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+            className={`px-4 py-2.5 text-xs font-medium transition-all relative whitespace-nowrap ${
+              activeTab === 'all' ? 'text-gray-900 tab-active' : 'text-gray-500 hover:text-gray-700'
             }`}>
-            All ({items.length})
+            All
+            <span className={`ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+              activeTab === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
+            }`}>{items.length}</span>
           </button>
           {Object.entries(sourceCounts).map(([src, count]) => (
             <button key={src} onClick={() => setActiveTab(src)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
-                activeTab === src ? 'bg-gray-900 text-white border-gray-900 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-all relative whitespace-nowrap ${
+                activeTab === src ? 'text-gray-900 tab-active' : 'text-gray-500 hover:text-gray-700'
               }`}>
-              <SourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)} ({count})
+              <SourceIcon source={src} className="w-3.5 h-3.5" />
+              {sourceLabel(src)}
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                activeTab === src ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
+              }`}>{count}</span>
             </button>
           ))}
         </div>
         {filteredItems.length === 0 ? (
-          <div className="text-center py-16 bg-white rounded-xl border border-dashed border-gray-200">
-            <FolderOpen className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+          <div className="text-center py-16 bg-gradient-to-b from-white to-gray-50/50 rounded-xl border border-dashed border-gray-200">
+            <FolderOpen className="w-12 h-12 text-gray-200 mx-auto mb-3" />
             <p className="text-gray-500 text-sm font-medium">No items linked yet</p>
             <p className="text-gray-400 text-xs mt-1.5 max-w-xs mx-auto">Search and link content above to start building this topic.</p>
             <button onClick={() => setShowSearch(true)}
-              className="mt-4 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 inline-flex items-center gap-2 transition-colors">
+              className="mt-4 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-sm font-medium hover:from-blue-700 hover:to-purple-700 inline-flex items-center gap-2 transition-all shadow-sm">
               <Search className="w-4 h-4" /> Search Content
             </button>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 animate-stagger">
             {filteredItems.map((item) => (
               item.source === 'manual' ? (
                 <NoteCard
@@ -1276,11 +1391,14 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                   onDelete={(itemId) => unlinkItem(itemId)}
                 />
               ) : (
-                <div key={item.id} className={`p-3.5 bg-white rounded-xl border transition-all group card-hover ${
-                  item.metadata?.pinned ? 'border-amber-300 bg-amber-50/30' : 'border-gray-100'
+                <div key={item.id} className={`p-3.5 bg-white rounded-xl border-l-[3px] border border-gray-100 transition-all group item-card-hover ${sourceBorderClass(item.source)} ${
+                  item.metadata?.pinned ? 'ring-1 ring-amber-200 bg-amber-50/20' : ''
                 }`}>
                   <div className="flex items-start gap-3">
-                    <span className="mt-0.5 flex-shrink-0"><SourceIcon source={item.source} className="w-4.5 h-4.5" /></span>
+                    {/* Source icon with colored background circle */}
+                    <span className={`mt-0.5 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${sourceIconBgClass(item.source)}`}>
+                      <SourceIcon source={item.source} className="w-4 h-4" />
+                    </span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         {!!item.metadata?.pinned && <Pin className="w-3 h-3 text-amber-500 flex-shrink-0" />}
@@ -1288,6 +1406,12 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                           className="font-semibold text-gray-900 hover:text-blue-600 text-sm truncate block transition-colors">
                           {item.title}
                         </a>
+                        {/* New badge for items added in last 24h */}
+                        {isNewItem(item.occurred_at) && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white new-badge flex-shrink-0">
+                            NEW
+                          </span>
+                        )}
                         {/* Sent/Received indicator for emails */}
                         {item.source === 'gmail' && (
                           item.metadata?.is_sent
@@ -1327,38 +1451,41 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                       )}
                       {/* Expanded content */}
                       {expandedContent[item.id] && (
-                        <div className="mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-700 max-h-80 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed">
+                        <div className="mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-700 max-h-80 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed thin-scrollbar">
                           {expandedContent[item.id]}
                         </div>
                       )}
-                      <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-400">
+                      <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
                         <span className="inline-flex items-center gap-1">
                           <Clock className="w-3 h-3" />
                           {formatRelativeDate(item.occurred_at)}
                         </span>
-                        <span>{sourceLabel(item.source)}</span>
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sourceIconBgClass(item.source)}`}>
+                          <SourceIcon source={item.source} className="w-2.5 h-2.5" />
+                          {sourceLabel(item.source)}
+                        </span>
                         {item.linked_by === 'ai' && (
-                          <span className="text-purple-500 flex items-center gap-0.5">
+                          <span className="text-purple-500 flex items-center gap-0.5 bg-purple-50 px-1.5 py-0.5 rounded text-[10px] font-medium">
                             <Sparkles className="w-3 h-3" /> AI linked
                           </span>
                         )}
                       </div>
                     </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                       <button onClick={() => toggleContent(item.id)}
-                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={expandedContent[item.id] ? 'Hide content' : 'View full content'}>
+                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title={expandedContent[item.id] ? 'Hide content' : 'View full content'}>
                         {loadingContent.has(item.id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : expandedContent[item.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                       </button>
                       <button onClick={() => togglePinItem(item.id)}
-                        className={`p-1.5 rounded transition-colors ${item.metadata?.pinned ? 'text-amber-500 bg-amber-50' : 'text-gray-400 hover:text-amber-500 hover:bg-amber-50'}`} title={item.metadata?.pinned ? 'Unpin' : 'Pin to top'}>
+                        className={`p-1.5 rounded-lg transition-colors ${item.metadata?.pinned ? 'text-amber-500 bg-amber-50' : 'text-gray-400 hover:text-amber-500 hover:bg-amber-50'}`} title={item.metadata?.pinned ? 'Unpin' : 'Pin to top'}>
                         <Pin className="w-3.5 h-3.5" />
                       </button>
                       <a href={item.url} target="_blank" rel="noopener noreferrer"
-                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Open in source">
+                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>
                       <button onClick={() => unlinkItem(item.id)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Unlink from topic">
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Unlink from topic">
                         <Unlink className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -1371,18 +1498,25 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* AI Analysis */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift bg-gradient-to-br from-white via-white to-purple-50/20">
         <button onClick={() => setShowAnalysis(!showAnalysis)}
-          className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50/80 transition-colors">
+          className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-gray-50/50 transition-colors bg-gradient-to-r from-purple-50/30 to-blue-50/30">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <Bot className="w-4 h-4 text-purple-500" />
+            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
+              <Bot className="w-4 h-4 text-white" />
+            </span>
             Topic Intelligence
-            {analysis && <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />}
+            {analysis && !analysisLoading && (
+              <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/><path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="ai-success-check"/></svg>
+                Ready
+              </span>
+            )}
             {analysisLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" />}
           </h2>
           <div className="flex items-center gap-2">
             <span onClick={(e) => { e.stopPropagation(); runAnalysis(); }}
-              className="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-medium hover:bg-purple-100 flex items-center gap-1.5 transition-colors cursor-pointer">
+              className="px-3 py-1.5 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg text-xs font-medium hover:from-purple-600 hover:to-blue-600 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm">
               {analysisLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
               {analysis ? 'Refresh' : 'Run'}
             </span>
@@ -1390,41 +1524,54 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
           </div>
         </button>
         {showAnalysis && (
-        <div className="px-5 py-5 border-t border-gray-100">
+        <div className="px-5 py-5 border-t border-purple-100/50">
           {analysisLoading ? (
-            <div className="flex flex-col items-center gap-3 py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
-              <span className="text-sm text-gray-500">
+            <div className="space-y-3 py-4">
+              {/* Shimmer loading effect */}
+              <div className="ai-shimmer h-5 w-3/4" />
+              <div className="ai-shimmer h-4 w-full" />
+              <div className="ai-shimmer h-4 w-5/6" />
+              <div className="ai-shimmer h-4 w-2/3" />
+              <div className="ai-shimmer h-5 w-1/2 mt-4" />
+              <div className="ai-shimmer h-4 w-full" />
+              <div className="ai-shimmer h-4 w-4/5" />
+              <p className="text-center text-xs text-purple-400 mt-4 flex items-center justify-center gap-2">
+                <Loader2 className="w-3 h-3 animate-spin" />
                 {aiQuestion ? 'Answering your question...' : 'Analyzing linked items...'}
-              </span>
+              </p>
             </div>
           ) : analysis ? (
-            <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
-              {analysis.split('\n').map((line, i) => {
-                if (line.startsWith('## ')) {
-                  return <h3 key={i} className="font-bold text-gray-900 mt-5 mb-2 text-base border-b border-gray-100 pb-1">{line.replace('## ', '')}</h3>;
-                }
-                if (line.startsWith('# ')) {
-                  return <h2 key={i} className="font-bold text-gray-900 mt-4 mb-2 text-lg">{line.replace('# ', '')}</h2>;
-                }
-                if (line.startsWith('- ') || line.startsWith('* ')) {
-                  return <li key={i} className="ml-4 text-sm text-gray-700 mt-1 leading-relaxed">{line.slice(2)}</li>;
-                }
-                if (line.startsWith('**') && line.endsWith('**')) {
-                  return <p key={i} className="font-semibold text-gray-800 mt-3">{line.replace(/\*\*/g, '')}</p>;
-                }
-                if (line.trim() === '') return <br key={i} />;
-                return <p key={i} className="text-sm text-gray-700 mt-1.5 leading-relaxed">{line}</p>;
-              })}
+            <div className="ai-glass-card rounded-xl p-5">
+              <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
+                {analysis.split('\n').map((line, i) => {
+                  if (line.startsWith('## ')) {
+                    return <h3 key={i} className="font-bold text-gray-900 mt-5 mb-2 text-base border-b border-purple-100/50 pb-1.5">{line.replace('## ', '')}</h3>;
+                  }
+                  if (line.startsWith('# ')) {
+                    return <h2 key={i} className="font-bold text-gray-900 mt-4 mb-2 text-lg">{line.replace('# ', '')}</h2>;
+                  }
+                  if (line.startsWith('- ') || line.startsWith('* ')) {
+                    return <li key={i} className="ml-4 text-sm text-gray-700 mt-1 leading-relaxed">{line.slice(2)}</li>;
+                  }
+                  if (line.startsWith('**') && line.endsWith('**')) {
+                    return <p key={i} className="font-semibold text-gray-800 mt-3">{line.replace(/\*\*/g, '')}</p>;
+                  }
+                  if (line.trim() === '') return <br key={i} />;
+                  return <p key={i} className="text-sm text-gray-700 mt-1.5 leading-relaxed">{line}</p>;
+                })}
+              </div>
             </div>
           ) : (
-            <div className="text-center py-6">
-              <Brain className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-              <p className="text-sm text-gray-400">
+            <div className="text-center py-8">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-100 to-blue-100 flex items-center justify-center mx-auto mb-3">
+                <Brain className="w-7 h-7 text-purple-400" />
+              </div>
+              <p className="text-sm text-gray-500 font-medium">
                 {items.length > 0
-                  ? 'Click "Run" to get AI-powered insights about this topic'
+                  ? 'Click "Run" to get AI-powered insights'
                   : 'Link some items first, then run AI analysis'}
               </p>
+              <p className="text-xs text-gray-400 mt-1">Powered by AI topic intelligence</p>
             </div>
           )}
 
@@ -1459,10 +1606,12 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* AI Agents */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-50/40 to-purple-50/40">
+      <div className="rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift bg-gradient-to-br from-white via-white to-blue-50/20">
+        <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-50/40 to-purple-50/40">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <Zap className="w-4 h-4 text-purple-500" />
+            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
+              <Zap className="w-3.5 h-3.5 text-white" />
+            </span>
             AI Agents
             {agentLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" />}
           </h2>
@@ -1772,25 +1921,46 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* Notes */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift">
+        <div className="px-5 py-3 flex items-center justify-between border-b border-gray-100">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <StickyNote className="w-4 h-4 text-amber-500" />
             Quick Notes
             <span className="text-xs text-gray-400 font-normal">&middot; included in AI analysis</span>
           </h2>
-          <button onClick={saveNotes} disabled={notesSaving}
-            className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1.5 transition-colors">
-            {notesSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-            Save
-          </button>
+          <div className="flex items-center gap-3">
+            {/* Auto-save indicator */}
+            {notesSaving && (
+              <span className="text-xs text-gray-400 flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" /> Saving...
+              </span>
+            )}
+            {notesSaved && !notesSaving && (
+              <span className="text-xs text-green-500 flex items-center gap-1 saved-indicator">
+                <Check className="w-3 h-3" /> Saved
+              </span>
+            )}
+            {/* Word count */}
+            <span className="text-[10px] text-gray-300 font-mono tabular-nums">
+              {noteWordCount} {noteWordCount === 1 ? 'word' : 'words'}
+            </span>
+            <button onClick={saveNotes} disabled={notesSaving}
+              className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1.5 transition-colors">
+              {notesSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+              Save
+            </button>
+          </div>
         </div>
         <div className="p-4">
           <textarea
             value={notes}
-            onChange={e => setNotes(e.target.value)}
-            placeholder="Add notes about this topic..."
-            className="w-full min-h-[100px] px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y transition-all leading-relaxed"
+            onChange={e => handleNotesChange(e.target.value)}
+            onFocus={() => setNotesFocused(true)}
+            onBlur={() => setNotesFocused(false)}
+            placeholder="Add notes about this topic... (auto-saves after 2s)"
+            className={`w-full min-h-[120px] px-4 py-3 border rounded-lg text-sm text-gray-700 bg-gray-50/30 focus:bg-white focus:outline-none resize-y transition-all leading-relaxed font-[system-ui] ${
+              notesFocused ? 'notes-textarea border-blue-300' : 'border-gray-200'
+            }`}
           />
         </div>
       </div>

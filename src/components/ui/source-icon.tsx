@@ -63,3 +63,55 @@ export function SourceBadge({ source, className = '' }: { source: string; classN
 export function getSourceColor(source: string) {
   return colorMap[source] || 'text-gray-400';
 }
+
+const circleBgMap: Record<string, string> = {
+  gmail: 'bg-red-100',
+  calendar: 'bg-blue-100',
+  drive: 'bg-amber-100',
+  slack: 'bg-purple-100',
+  notion: 'bg-gray-100',
+  manual: 'bg-green-100',
+  link: 'bg-cyan-100',
+};
+
+/** Source icon with a colored circular background */
+export function SourceIconCircle({ source, size = 'md' }: { source: string; size?: 'sm' | 'md' | 'lg' }) {
+  const Icon = iconMap[source] || File;
+  const color = colorMap[source] || 'text-gray-400';
+  const bg = circleBgMap[source] || 'bg-gray-100';
+  const sizeClasses = {
+    sm: 'w-6 h-6',
+    md: 'w-8 h-8',
+    lg: 'w-10 h-10',
+  };
+  const iconSizes = {
+    sm: 'w-3 h-3',
+    md: 'w-4 h-4',
+    lg: 'w-5 h-5',
+  };
+
+  return (
+    <div className={`${sizeClasses[size]} rounded-lg ${bg} flex items-center justify-center flex-shrink-0`}>
+      <Icon className={`${iconSizes[size]} ${color}`} />
+    </div>
+  );
+}
+
+/** Get the left border color class for a source type */
+export function getSourceBorderColor(source: string): string {
+  const borders: Record<string, string> = {
+    gmail: 'border-l-red-400',
+    calendar: 'border-l-blue-400',
+    drive: 'border-l-amber-400',
+    slack: 'border-l-purple-400',
+    notion: 'border-l-gray-400',
+    manual: 'border-l-green-400',
+    link: 'border-l-cyan-400',
+  };
+  return borders[source] || 'border-l-gray-300';
+}
+
+/** Get the source label */
+export function getSourceLabel(source: string): string {
+  return labelMap[source] || source;
+}

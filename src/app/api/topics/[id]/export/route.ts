@@ -22,10 +22,10 @@ export async function GET(
     .single();
   if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
 
-  // Get items
+  // Get items including body content
   const { data: items } = await supabase
     .from('topic_items')
-    .select('*')
+    .select('*, body')
     .eq('topic_id', id)
     .order('occurred_at', { ascending: false });
 
@@ -70,7 +70,7 @@ export async function GET(
           source: item.source,
           title: item.title,
           snippet: item.snippet || null,
-          body: (meta.content as string) || (meta.body as string) || item.snippet || null,
+          body: item.body || (meta.content as string) || (meta.body as string) || item.snippet || null,
           url: item.url || null,
           occurred_at: item.occurred_at,
           metadata: meta,
@@ -150,7 +150,7 @@ export async function GET(
         lines.push(details);
         if (meta.from) lines.push(`  From: ${meta.from}`);
         // Include full body/content, falling back to snippet
-        const body = (meta.content as string) || (meta.body as string) || item.snippet || '';
+        const body = item.body || (meta.content as string) || (meta.body as string) || item.snippet || '';
         if (body) {
           lines.push('');
           lines.push(`  ${body}`);

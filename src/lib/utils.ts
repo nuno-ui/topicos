@@ -80,6 +80,45 @@ export function sourceColor(source: string) {
   }
 }
 
+export function sourceBorderClass(source: string) {
+  switch (source) {
+    case 'gmail': return 'border-l-gmail';
+    case 'calendar': return 'border-l-calendar';
+    case 'drive': return 'border-l-drive';
+    case 'slack': return 'border-l-slack';
+    case 'notion': return 'border-l-notion';
+    case 'manual': return 'border-l-manual';
+    case 'link': return 'border-l-link';
+    default: return '';
+  }
+}
+
+export function sourceToggleClass(source: string) {
+  switch (source) {
+    case 'gmail': return 'source-toggle-gmail';
+    case 'calendar': return 'source-toggle-calendar';
+    case 'drive': return 'source-toggle-drive';
+    case 'slack': return 'source-toggle-slack';
+    case 'notion': return 'source-toggle-notion';
+    case 'manual': return 'source-toggle-manual';
+    case 'link': return 'source-toggle-link';
+    default: return 'bg-gray-100 text-gray-600';
+  }
+}
+
+export function sourceIconBgClass(source: string) {
+  switch (source) {
+    case 'gmail': return 'bg-red-100';
+    case 'calendar': return 'bg-blue-100';
+    case 'drive': return 'bg-amber-100';
+    case 'slack': return 'bg-purple-100';
+    case 'notion': return 'bg-gray-200';
+    case 'manual': return 'bg-green-100';
+    case 'link': return 'bg-cyan-100';
+    default: return 'bg-gray-100';
+  }
+}
+
 export function truncateText(text: string, maxLength: number = 100): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength).trim() + '...';

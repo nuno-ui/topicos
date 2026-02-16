@@ -9,16 +9,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const body = await request.json();
 
+  // Validate name if provided
+  if (body.name !== undefined && (typeof body.name !== 'string' || body.name.trim().length === 0)) {
+    return NextResponse.json({ error: 'Folder name is required' }, { status: 400 });
+  }
+  if (body.name !== undefined && body.name.trim().length > 100) {
+    return NextResponse.json({ error: 'Folder name must be 100 characters or less' }, { status: 400 });
+  }
+
   // Validate area if provided
-  // NOTE: The 'area' column requires a database migration:
-  // ALTER TABLE folders ADD COLUMN IF NOT EXISTS area text CHECK (area IN ('work', 'personal', 'career'));
   if (body.area !== undefined && body.area !== null && !['work', 'personal', 'career'].includes(body.area)) {
     return NextResponse.json({ error: 'Area must be work, personal, or career' }, { status: 400 });
   }
 
   // Build safe update data — only allow known fields
   const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (body.name !== undefined) updateData.name = body.name;
+  if (body.name !== undefined) updateData.name = body.name.trim();
   if (body.parent_id !== undefined) updateData.parent_id = body.parent_id || null;
   if (body.color !== undefined) updateData.color = body.color || null;
   if (body.icon !== undefined) updateData.icon = body.icon || null;
