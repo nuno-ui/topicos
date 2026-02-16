@@ -799,6 +799,8 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       if (hasUnenriched) {
         try {
           await fetch(`/api/topics/${topic.id}/enrich`, { method: 'POST' });
+          // Refresh items so body fields are updated in React state — prevents re-enriching next time
+          await refreshItems();
         } catch { /* non-blocking — continue with analysis even if enrich fails */ }
       }
 

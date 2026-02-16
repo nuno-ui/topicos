@@ -151,7 +151,10 @@ export async function enrichAndCacheItemContent(
 ): Promise<EnrichedContent> {
   const result = await enrichItemContent(userId, item);
 
-  if (result.body) {
+  // Only write to DB if we got new content that differs from what's already cached
+  const isNewContent = result.body && result.body !== (item.body || '');
+
+  if (isNewContent) {
     const supabase = createServiceClient();
     const updateData: Record<string, unknown> = { body: result.body };
 
@@ -170,7 +173,7 @@ export async function enrichAndCacheItemContent(
     } else {
       console.log(`[Content Enrichment] ✓ Saved ${result.body.length} chars for ${item.source} item ${item.id}`);
     }
-  } else {
+  } else if (!result.body) {
     console.warn(`[Content Enrichment] No content returned for ${item.source} item ${item.id} (external_id: ${item.external_id})`);
   }
 
@@ -207,7 +210,8 @@ export async function enrichTopicItems(
         try {
           const result = await enrichAndCacheItemContent(userId, item);
           if (result.body) {
-            enriched++;
+            // Only count as newly enriched if body actually changed (not cached)
+            if (result.body !== (item.body || '')) enriched++;
             return { id: item.id, body: result.body };
           } else {
             return { id: item.id, body: item.body || '' };
