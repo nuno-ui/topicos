@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { enrichAndCacheItemContent } from '@/lib/search/content';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -97,6 +98,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   // Update topic updated_at
   await supabase.from('topics').update({ updated_at: new Date().toISOString() }).eq('id', id);
+
+  // Auto-enrich content for sources that have fetchable content (notion, gmail, drive, slack, link)
+  // This runs in the background so the response is fast, but content is available for AI agents
+  if (data && ['notion', 'gmail', 'drive', 'slack', 'link'].includes(source)) {
+    enrichAndCacheItemContent(user.id, {
+      id: data.id,
+      topic_id: id,
+      source: data.source,
+      source_account_id: data.source_account_id,
+      external_id: data.external_id,
+      body: null,
+      metadata: data.metadata as Record<string, unknown>,
+    }).catch(err => console.error(`Auto-enrich failed for ${source}/${external_id}:`, err));
+  }
 
   return NextResponse.json({ item: data }, { status: 201 });
 }

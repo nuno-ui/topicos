@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { NoteEditor } from './note-editor';
 import { NoteCard } from './note-card';
-import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp, Eye, EyeOff, Pin, ArrowUp, ArrowDown, ArrowRight, Layers, GitBranch, Compass, Award, Target } from 'lucide-react';
+import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp, Eye, EyeOff, Pin, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Layers, GitBranch, Compass, Award, Target, MoreHorizontal, ChevronRight, Info, Calendar, FolderOpen } from 'lucide-react';
 
 interface TopicItem {
   id: string;
@@ -127,6 +127,12 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   const [showNoteEditor, setShowNoteEditor] = useState(false);
   const [editingNote, setEditingNote] = useState<Record<string, unknown> | null>(null);
 
+  // Link form state
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkTitle, setLinkTitle] = useState('');
+  const [linkSaving, setLinkSaving] = useState(false);
+
   // Content expand state
   const [expandedContent, setExpandedContent] = useState<Record<string, string>>({});
   const [loadingContent, setLoadingContent] = useState<Set<string>>(new Set());
@@ -142,6 +148,11 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   const [showRelatedTopics, setShowRelatedTopics] = useState(false);
   const [completenessScore, setCompletenessScore] = useState<Record<string, unknown> | null>(null);
   const [showCompleteness, setShowCompleteness] = useState(false);
+
+  // UX improvement state
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showInfoDashboard, setShowInfoDashboard] = useState(false);
+  const [showAgentMenu, setShowAgentMenu] = useState(false);
 
   // Listen for command palette "add note" event
   useEffect(() => {
@@ -484,6 +495,57 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     }
   };
 
+  // --- ADD LINK ---
+  const addLink = async () => {
+    const trimmed = linkUrl.trim();
+    if (!trimmed) {
+      toast.error('Please enter a URL');
+      return;
+    }
+    // Basic URL validation
+    let finalUrl = trimmed;
+    if (!/^https?:\/\//i.test(finalUrl)) {
+      finalUrl = 'https://' + finalUrl;
+    }
+    try {
+      new URL(finalUrl);
+    } catch {
+      toast.error('Please enter a valid URL');
+      return;
+    }
+    setLinkSaving(true);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          external_id: finalUrl,
+          source: 'link',
+          source_account_id: '',
+          title: linkTitle.trim() || finalUrl,
+          snippet: '',
+          url: finalUrl,
+          occurred_at: new Date().toISOString(),
+          metadata: {},
+          linked_by: 'user',
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to add link');
+      }
+      const data = await res.json();
+      setItems(prev => [data.item, ...prev]);
+      setLinkUrl('');
+      setLinkTitle('');
+      setShowLinkForm(false);
+      toast.success('Link added');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add link');
+    }
+    setLinkSaving(false);
+  };
+
   // --- PIN ITEM ---
   const togglePinItem = async (itemId: string) => {
     const item = items.find(i => i.id === itemId);
@@ -590,59 +652,65 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <Link href="/topics" className="text-sm text-blue-600 hover:text-blue-800 mb-2 inline-flex items-center gap-1.5 font-medium transition-colors">
-            <span>&larr;</span> Back to Topics
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <Link href="/topics" className="text-xs text-gray-400 hover:text-gray-600 mb-3 inline-flex items-center gap-1 transition-colors">
+            <ArrowLeft className="w-3.5 h-3.5" /> Back
           </Link>
           {editing ? (
             <div className="space-y-3 mt-2">
               <input value={editTitle} onChange={e => setEditTitle(e.target.value)}
-                className="text-2xl font-bold text-gray-900 w-full px-3 py-2 border rounded-lg" />
+                className="text-2xl font-bold text-gray-900 w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
               <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)}
-                placeholder="Description..." className="w-full px-3 py-2 border rounded-lg text-gray-600" rows={2} />
+                placeholder="Description..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" rows={2} />
               <div className="flex gap-3">
                 <select value={editArea} onChange={e => setEditArea(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm">
+                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="work">Work</option>
                   <option value="personal">Personal</option>
                   <option value="career">Career</option>
                 </select>
                 <select value={editStatus} onChange={e => setEditStatus(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm">
+                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="active">Active</option>
                   <option value="completed">Completed</option>
                   <option value="archived">Archived</option>
                 </select>
                 <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm" />
+                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="flex gap-2">
-                <button onClick={saveTopic} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
+                <button onClick={saveTopic} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors">
                   <Save className="w-4 h-4" /> Save
                 </button>
-                <button onClick={() => setEditing(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 flex items-center gap-2">
+                <button onClick={() => setEditing(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 flex items-center gap-2 transition-colors">
                   <X className="w-4 h-4" /> Cancel
                 </button>
               </div>
             </div>
           ) : (
             <>
-              <h1 className="text-2xl font-bold text-gray-900 mt-2">{topic.title}</h1>
-              {topic.description && <p className="text-gray-500 mt-1">{topic.description}</p>}
-              <div className="flex gap-2 mt-2 flex-wrap">
-                <span className={`text-xs px-2 py-1 rounded-full ${
-                  topic.area === 'work' ? 'bg-blue-100 text-blue-700' :
-                  topic.area === 'personal' ? 'bg-green-100 text-green-700' :
-                  'bg-purple-100 text-purple-700'
-                }`}>{topic.area}</span>
-                <span className={`text-xs px-2 py-1 rounded-full ${
+              <h1 className="text-2xl font-bold text-gray-900 mt-1 leading-tight">{topic.title}</h1>
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
+                <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
                   topic.status === 'active' ? 'bg-emerald-100 text-emerald-700' :
                   topic.status === 'completed' ? 'bg-gray-100 text-gray-600' :
                   'bg-amber-100 text-amber-700'
                 }`}>{topic.status}</span>
+                <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                  topic.area === 'work' ? 'bg-blue-100 text-blue-700' :
+                  topic.area === 'personal' ? 'bg-green-100 text-green-700' :
+                  'bg-purple-100 text-purple-700'
+                }`}>{topic.area}</span>
+                {topic.priority > 0 && (
+                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                    topic.priority >= 3 ? 'bg-red-100 text-red-700' :
+                    topic.priority === 2 ? 'bg-amber-100 text-amber-700' :
+                    'bg-gray-100 text-gray-600'
+                  }`}>P{topic.priority}</span>
+                )}
                 {topic.due_date && (() => {
                   const daysLeft = Math.ceil((new Date(topic.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
                   const isOverdue = daysLeft < 0;
@@ -651,49 +719,105 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                   const colorClass = isOverdue ? 'bg-red-100 text-red-700 font-medium' : isUrgent ? 'bg-amber-100 text-amber-700 font-medium' : isSoon ? 'bg-yellow-50 text-yellow-700' : 'bg-gray-100 text-gray-600';
                   const label = isOverdue ? `Overdue by ${Math.abs(daysLeft)}d` : daysLeft === 0 ? 'Due today' : daysLeft === 1 ? 'Due tomorrow' : `${daysLeft}d left`;
                   return (
-                    <span className={`text-xs px-2 py-1 rounded-full ${colorClass}`}>
+                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${colorClass}`}>
                       {label}
                     </span>
                   );
                 })()}
-                {/* Source counts */}
-                {Object.entries(sourceCounts).map(([src, count]) => (
-                  <span key={src} className="text-xs px-2 py-1 rounded-full bg-gray-50 text-gray-500 inline-flex items-center gap-1">
-                    <SourceIcon source={src} className="w-3.5 h-3.5" /> {count}
+              </div>
+              {/* Compact dates row */}
+              <div className="flex items-center gap-4 mt-2.5 text-xs text-gray-400">
+                <span className="inline-flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Created {formatRelativeDate(topic.created_at)}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3" /> Updated {formatRelativeDate(topic.updated_at)}
+                </span>
+                {topic.due_date && (
+                  <span className="inline-flex items-center gap-1">
+                    <Calendar className="w-3 h-3" /> Due {new Date(topic.due_date).toLocaleDateString()}
                   </span>
-                ))}
+                )}
               </div>
             </>
           )}
         </div>
         {!editing && (
-          <div className="flex gap-2">
-            <button onClick={() => setShowNoteEditor(true)}
-              className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Add Note">
-              <StickyNote className="w-4 h-4" />
-            </button>
-            <button onClick={() => { navigator.clipboard.writeText(window.location.href); toast.success('Link copied to clipboard'); }}
-              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Copy link">
-              <Link2 className="w-4 h-4" />
-            </button>
+          <div className="flex gap-1 items-center flex-shrink-0">
             <button onClick={() => { setEditing(true); setEditTitle(topic.title); setEditDescription(topic.description || ''); setEditArea(topic.area); setEditStatus(topic.status); setEditDueDate(topic.due_date || ''); }}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Edit">
-              <Edit3 className="w-4 h-4" />
+              className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors" title="Edit">
+              <Edit3 className="w-3.5 h-3.5" /> Edit
             </button>
-            <button onClick={archiveTopic}
-              className="p-2 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title={topic.status === 'archived' ? 'Reactivate' : 'Archive'}>
-              <Archive className="w-4 h-4" />
-            </button>
-            <button onClick={deleteTopic}
-              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
-              <Trash2 className="w-4 h-4" />
-            </button>
+            <div className="relative">
+              <button onClick={() => setShowMoreMenu(!showMoreMenu)}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="More actions">
+                <MoreHorizontal className="w-4 h-4" />
+              </button>
+              {showMoreMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-white rounded-xl border border-gray-200 shadow-lg py-1">
+                    <button onClick={() => { setShowNoteEditor(true); setShowMoreMenu(false); }}
+                      className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <StickyNote className="w-3.5 h-3.5 text-green-500" /> Add Note
+                    </button>
+                    <button onClick={() => { navigator.clipboard.writeText(window.location.href); toast.success('Link copied to clipboard'); setShowMoreMenu(false); }}
+                      className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Link2 className="w-3.5 h-3.5 text-blue-500" /> Copy Link
+                    </button>
+                    <button onClick={() => { archiveTopic(); setShowMoreMenu(false); }}
+                      className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Archive className="w-3.5 h-3.5 text-amber-500" /> {topic.status === 'archived' ? 'Reactivate' : 'Archive'}
+                    </button>
+                    <div className="border-t border-gray-100 my-1" />
+                    <button onClick={() => { deleteTopic(); setShowMoreMenu(false); }}
+                      className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Topic Info Dashboard */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* Topic Info Card - description, tags */}
+      {(topic.description || (topic.tags && topic.tags.length > 0) || topic.goal) && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+          {topic.description && (
+            <p className="text-sm text-gray-600 leading-relaxed">{topic.description}</p>
+          )}
+          {topic.goal && (
+            <div className="flex items-start gap-2">
+              <Target className="w-3.5 h-3.5 text-blue-500 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-gray-600"><span className="font-medium text-gray-700">Goal:</span> {topic.goal}</p>
+            </div>
+          )}
+          {topic.tags && topic.tags.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Tag className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              {topic.tags.map((tag, i) => (
+                <span key={i} className="text-xs px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">{tag}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Topic Info Dashboard - collapsible */}
+      <button onClick={() => setShowInfoDashboard(!showInfoDashboard)}
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-white rounded-xl border border-gray-100 shadow-sm hover:bg-gray-50/80 transition-colors">
+        <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
+          <Info className="w-4 h-4 text-blue-500" />
+          Topic Details
+          <span className="text-xs text-gray-400 font-normal">
+            {items.length} items &middot; {Object.keys(sourceCounts).length} sources
+          </span>
+        </div>
+        {showInfoDashboard ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+      </button>
+      {showInfoDashboard && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Key Metrics */}
         <div className="bg-gradient-to-br from-white to-blue-50/30 rounded-xl border border-gray-100 p-4 shadow-sm">
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Overview</h3>
@@ -872,48 +996,51 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Search Panel */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm">
         <button onClick={() => setShowSearch(!showSearch)}
-          className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50">
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50/80 transition-colors">
           <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-            <Search className="w-4 h-4" />
-            Search sources for this topic
+            <Search className="w-4 h-4 text-gray-400" />
+            Search &amp; link content
           </div>
           {showSearch ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </button>
         {showSearch && (
           <div className="px-4 pb-4 space-y-3 border-t border-gray-100">
             <div className="flex gap-2 mt-3">
-              <input
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                placeholder="Search emails, messages, events, files..."
-                className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <div className="flex-1 relative">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                  placeholder="Search emails, messages, events, files..."
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                />
+              </div>
               <button onClick={handleSearch} disabled={searchLoading}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition-colors">
                 {searchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                 Search
               </button>
               <button onClick={handleAiFind} disabled={aiFindLoading}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2">
+                className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-sm font-medium hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-2 transition-all">
                 {aiFindLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                 AI Find
               </button>
             </div>
-            {/* Source filters */}
-            <div className="flex gap-2 text-xs">
-              <span className="text-gray-500 py-1">Sources:</span>
+            {/* Source filter pills */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-gray-400 mr-1">Sources:</span>
               {SOURCES.map(src => (
                 <button key={src} onClick={() => toggleSource(src)}
-                  className={`px-2 py-1 rounded-full transition-colors ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
                     searchSources.has(src)
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-gray-100 text-gray-400'
+                      ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-sm'
+                      : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'
                   }`}>
                   <SourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)}
                 </button>
@@ -1055,38 +1182,87 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
 
       {/* Linked Items */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-900">Linked Items ({items.length})</h2>
-          <button onClick={() => setShowNoteEditor(true)}
-            className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors flex items-center gap-1.5">
-            <StickyNote className="w-3.5 h-3.5" /> Add Note
-          </button>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+            <Layers className="w-4 h-4 text-gray-400" />
+            Linked Items
+            <span className="text-xs font-normal text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{items.length}</span>
+          </h2>
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => { setShowLinkForm(v => !v); setShowNoteEditor(false); }}
+              className="px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border border-transparent hover:border-blue-200">
+              <Link2 className="w-3.5 h-3.5" /> Add Link
+            </button>
+            <button onClick={() => { setShowNoteEditor(true); setShowLinkForm(false); }}
+              className="px-3 py-1.5 text-green-600 hover:bg-green-50 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border border-transparent hover:border-green-200">
+              <StickyNote className="w-3.5 h-3.5" /> Add Note
+            </button>
+          </div>
         </div>
+        {/* Add Link Form */}
+        {showLinkForm && (
+          <div className="mb-4 p-4 bg-blue-50/50 border border-blue-200 rounded-xl space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">URL <span className="text-red-500">*</span></label>
+              <input
+                type="url"
+                value={linkUrl}
+                onChange={e => setLinkUrl(e.target.value)}
+                placeholder="https://example.com/article"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addLink(); } }}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Title <span className="text-gray-400">(optional)</span></label>
+              <input
+                type="text"
+                value={linkTitle}
+                onChange={e => setLinkTitle(e.target.value)}
+                placeholder="Will use URL if left empty"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addLink(); } }}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={addLink} disabled={linkSaving || !linkUrl.trim()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">
+                {linkSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                {linkSaving ? 'Adding...' : 'Add Link'}
+              </button>
+              <button onClick={() => { setShowLinkForm(false); setLinkUrl(''); setLinkTitle(''); }}
+                className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         {/* Source tabs */}
-        <div className="flex gap-1 mb-4 flex-wrap">
+        <div className="flex gap-1.5 mb-4 flex-wrap">
           <button onClick={() => setActiveTab('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              activeTab === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
+              activeTab === 'all' ? 'bg-gray-900 text-white border-gray-900 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
             }`}>
             All ({items.length})
           </button>
           {Object.entries(sourceCounts).map(([src, count]) => (
             <button key={src} onClick={() => setActiveTab(src)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                activeTab === src ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
+                activeTab === src ? 'bg-gray-900 text-white border-gray-900 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
               }`}>
               <SourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)} ({count})
             </button>
           ))}
         </div>
         {filteredItems.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-xl border border-gray-100 shadow-sm">
-            <Search className="w-8 h-8 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 text-sm">No items linked yet</p>
-            <p className="text-gray-400 text-xs mt-1">Use the search panel above to find and link items from your sources</p>
+          <div className="text-center py-16 bg-white rounded-xl border border-dashed border-gray-200">
+            <FolderOpen className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500 text-sm font-medium">No items linked yet</p>
+            <p className="text-gray-400 text-xs mt-1.5 max-w-xs mx-auto">Search and link content above to start building this topic.</p>
             <button onClick={() => setShowSearch(true)}
-              className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-2">
-              <Search className="w-4 h-4" /> Open Search
+              className="mt-4 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 inline-flex items-center gap-2 transition-colors">
+              <Search className="w-4 h-4" /> Search Content
             </button>
           </div>
         ) : (
@@ -1100,16 +1276,16 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                   onDelete={(itemId) => unlinkItem(itemId)}
                 />
               ) : (
-                <div key={item.id} className={`p-3 bg-white rounded-xl border shadow-sm transition-all group ${
-                  item.metadata?.pinned ? 'border-amber-300 bg-amber-50/30' : 'border-gray-100 hover:border-blue-200 hover:shadow-sm'
+                <div key={item.id} className={`p-3.5 bg-white rounded-xl border transition-all group card-hover ${
+                  item.metadata?.pinned ? 'border-amber-300 bg-amber-50/30' : 'border-gray-100'
                 }`}>
                   <div className="flex items-start gap-3">
-                    <span className="mt-0.5"><SourceIcon source={item.source} className="w-4 h-4" /></span>
+                    <span className="mt-0.5 flex-shrink-0"><SourceIcon source={item.source} className="w-4.5 h-4.5" /></span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         {!!item.metadata?.pinned && <Pin className="w-3 h-3 text-amber-500 flex-shrink-0" />}
                         <a href={item.url} target="_blank" rel="noopener noreferrer"
-                          className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate block">
+                          className="font-semibold text-gray-900 hover:text-blue-600 text-sm truncate block transition-colors">
                           {item.title}
                         </a>
                         {/* Sent/Received indicator for emails */}
@@ -1147,7 +1323,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                         </div>
                       )}
                       {item.snippet && !expandedContent[item.id] && (
-                        <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.snippet}</p>
+                        <p className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">{item.snippet}</p>
                       )}
                       {/* Expanded content */}
                       {expandedContent[item.id] && (
@@ -1155,9 +1331,12 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
                           {expandedContent[item.id]}
                         </div>
                       )}
-                      <div className="flex gap-2 mt-1 text-xs text-gray-400">
+                      <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-400">
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {formatRelativeDate(item.occurred_at)}
+                        </span>
                         <span>{sourceLabel(item.source)}</span>
-                        <span>{formatRelativeDate(item.occurred_at)}</span>
                         {item.linked_by === 'ai' && (
                           <span className="text-purple-500 flex items-center gap-0.5">
                             <Sparkles className="w-3 h-3" /> AI linked
@@ -1192,72 +1371,82 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* AI Analysis */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
-        <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <button onClick={() => setShowAnalysis(!showAnalysis)}
+          className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50/80 transition-colors">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <Bot className="w-4 h-4 text-purple-500" />
             Topic Intelligence
+            {analysis && <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />}
+            {analysisLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" />}
           </h2>
-          <button onClick={() => runAnalysis()} disabled={analysisLoading}
-            className="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 flex items-center gap-1.5">
-            {analysisLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            {analysis ? 'Refresh' : 'Run'} Analysis
-          </button>
-        </div>
-        <div className="px-4 py-4">
+          <div className="flex items-center gap-2">
+            <span onClick={(e) => { e.stopPropagation(); runAnalysis(); }}
+              className="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-medium hover:bg-purple-100 flex items-center gap-1.5 transition-colors cursor-pointer">
+              {analysisLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              {analysis ? 'Refresh' : 'Run'}
+            </span>
+            {showAnalysis ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+          </div>
+        </button>
+        {showAnalysis && (
+        <div className="px-5 py-5 border-t border-gray-100">
           {analysisLoading ? (
-            <div className="flex items-center gap-3 py-6 justify-center">
-              <Loader2 className="w-5 h-5 animate-spin text-purple-500" />
+            <div className="flex flex-col items-center gap-3 py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
               <span className="text-sm text-gray-500">
                 {aiQuestion ? 'Answering your question...' : 'Analyzing linked items...'}
               </span>
             </div>
           ) : analysis ? (
-            <div className="prose prose-sm max-w-none text-gray-700">
+            <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
               {analysis.split('\n').map((line, i) => {
                 if (line.startsWith('## ')) {
-                  return <h3 key={i} className="font-bold text-gray-900 mt-4 mb-2 text-base">{line.replace('## ', '')}</h3>;
+                  return <h3 key={i} className="font-bold text-gray-900 mt-5 mb-2 text-base border-b border-gray-100 pb-1">{line.replace('## ', '')}</h3>;
                 }
                 if (line.startsWith('# ')) {
-                  return <h2 key={i} className="font-bold text-gray-900 mt-3 mb-2 text-lg">{line.replace('# ', '')}</h2>;
+                  return <h2 key={i} className="font-bold text-gray-900 mt-4 mb-2 text-lg">{line.replace('# ', '')}</h2>;
                 }
                 if (line.startsWith('- ') || line.startsWith('* ')) {
-                  return <li key={i} className="ml-4 text-sm text-gray-700 mt-0.5">{line.slice(2)}</li>;
+                  return <li key={i} className="ml-4 text-sm text-gray-700 mt-1 leading-relaxed">{line.slice(2)}</li>;
                 }
                 if (line.startsWith('**') && line.endsWith('**')) {
-                  return <p key={i} className="font-semibold text-gray-800 mt-2">{line.replace(/\*\*/g, '')}</p>;
+                  return <p key={i} className="font-semibold text-gray-800 mt-3">{line.replace(/\*\*/g, '')}</p>;
                 }
                 if (line.trim() === '') return <br key={i} />;
-                return <p key={i} className="text-sm text-gray-700 mt-1">{line}</p>;
+                return <p key={i} className="text-sm text-gray-700 mt-1.5 leading-relaxed">{line}</p>;
               })}
             </div>
           ) : (
-            <p className="text-sm text-gray-400 text-center py-4">
-              {items.length > 0
-                ? 'Click "Run Analysis" to get AI-powered insights about this topic'
-                : 'Link some items first, then run AI analysis for insights'}
-            </p>
+            <div className="text-center py-6">
+              <Brain className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+              <p className="text-sm text-gray-400">
+                {items.length > 0
+                  ? 'Click "Run" to get AI-powered insights about this topic'
+                  : 'Link some items first, then run AI analysis'}
+              </p>
+            </div>
           )}
 
           {/* Ask AI a question */}
           {items.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-gray-100">
+            <div className="mt-5 pt-4 border-t border-gray-100">
               <div className="flex gap-2">
                 <div className="flex-1 relative">
-                  <MessageSquare className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <MessageSquare className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     value={aiQuestion}
                     onChange={e => setAiQuestion(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && aiQuestion.trim() && runAnalysis(aiQuestion)}
                     placeholder="Ask AI a question about this topic..."
-                    className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
                     disabled={analysisLoading}
                   />
                 </div>
                 <button
                   onClick={() => aiQuestion.trim() && runAnalysis(aiQuestion)}
                   disabled={analysisLoading || !aiQuestion.trim()}
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5"
+                  className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-xs font-medium hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-1.5 transition-all"
                 >
                   {analysisLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                   Ask
@@ -1266,71 +1455,80 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* AI Agents */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
-        <div className="px-4 py-3 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
-            <Zap className="w-4 h-4 text-amber-500" />
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-50/40 to-purple-50/40">
+          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <Zap className="w-4 h-4 text-purple-500" />
             AI Agents
+            {agentLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" />}
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <button onClick={() => runAgent('auto_tag')} disabled={!!agentLoading}
-              className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'auto_tag' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Tag className="w-3 h-3" />}
-              Auto-Tag
+          <div className="relative">
+            <button onClick={() => setShowAgentMenu(!showAgentMenu)} disabled={!!agentLoading}
+              className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-xs font-medium hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-1.5 transition-all shadow-sm">
+              {agentLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+              Run Agent
+              <ChevronDown className="w-3 h-3" />
             </button>
-            <button onClick={() => runAgent('suggest_title')} disabled={!!agentLoading}
-              className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'suggest_title' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-              Suggest Title
-            </button>
-            <button onClick={() => runAgent('generate_description')} disabled={!!agentLoading}
-              className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'generate_description' ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
-              Generate Description
-            </button>
-            <button onClick={() => runAgent('extract_action_items')} disabled={!!agentLoading || items.length === 0}
-              className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'extract_action_items' ? <Loader2 className="w-3 h-3 animate-spin" /> : <ListChecks className="w-3 h-3" />}
-              Extract Actions
-            </button>
-            <button onClick={() => runAgent('summarize_thread')} disabled={!!agentLoading || items.length === 0}
-              className="px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-medium hover:bg-indigo-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'summarize_thread' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
-              Summarize Thread
-            </button>
-            <button onClick={() => runAgent('find_contacts')} disabled={!!agentLoading || items.length === 0}
-              className="px-3 py-1.5 bg-teal-50 text-teal-700 border border-teal-200 rounded-lg text-xs font-medium hover:bg-teal-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'find_contacts' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Users className="w-3 h-3" />}
-              Find Contacts
-            </button>
-            <button onClick={() => runAgent('deep_dive')} disabled={!!agentLoading || items.length === 0}
-              className="px-3 py-1.5 bg-gradient-to-r from-purple-50 to-pink-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:from-purple-100 hover:to-pink-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'deep_dive' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
-              Deep Dive
-            </button>
-            <button onClick={() => runAgent('recommend_content')} disabled={!!agentLoading || items.length === 0}
-              className="px-3 py-1.5 bg-gradient-to-r from-blue-50 to-cyan-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:from-blue-100 hover:to-cyan-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'recommend_content' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Compass className="w-3 h-3" />}
-              Find More Content
-            </button>
-            <button onClick={() => runAgent('extract_entities')} disabled={!!agentLoading || items.length === 0}
-              className="px-3 py-1.5 bg-gradient-to-r from-emerald-50 to-green-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:from-emerald-100 hover:to-green-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'extract_entities' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Target className="w-3 h-3" />}
-              Extract Entities
-            </button>
-            <button onClick={() => runAgent('cross_topic_links')} disabled={!!agentLoading}
-              className="px-3 py-1.5 bg-gradient-to-r from-orange-50 to-amber-50 text-orange-700 border border-orange-200 rounded-lg text-xs font-medium hover:from-orange-100 hover:to-amber-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'cross_topic_links' ? <Loader2 className="w-3 h-3 animate-spin" /> : <GitBranch className="w-3 h-3" />}
-              Related Topics
-            </button>
-            <button onClick={() => runAgent('completeness_check')} disabled={!!agentLoading}
-              className="px-3 py-1.5 bg-gradient-to-r from-rose-50 to-pink-50 text-rose-700 border border-rose-200 rounded-lg text-xs font-medium hover:from-rose-100 hover:to-pink-100 disabled:opacity-50 flex items-center gap-1.5">
-              {agentLoading === 'completeness_check' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Award className="w-3 h-3" />}
-              Completeness Check
-            </button>
+            {showAgentMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowAgentMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 z-50 w-60 bg-white rounded-xl border border-gray-200 shadow-xl py-1.5 max-h-80 overflow-y-auto">
+                  <p className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">General</p>
+                  <button onClick={() => { runAgent('auto_tag'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'auto_tag' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <Tag className="w-3.5 h-3.5 text-blue-500" />} Auto-Tag
+                  </button>
+                  <button onClick={() => { runAgent('suggest_title'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-purple-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'suggest_title' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" /> : <Wand2 className="w-3.5 h-3.5 text-purple-500" />} Suggest Title
+                  </button>
+                  <button onClick={() => { runAgent('generate_description'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-green-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'generate_description' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-green-500" /> : <FileText className="w-3.5 h-3.5 text-green-500" />} Generate Description
+                  </button>
+                  <div className="border-t border-gray-100 my-1.5" />
+                  <p className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Requires linked items</p>
+                  <button onClick={() => { runAgent('extract_action_items'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'extract_action_items' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" /> : <ListChecks className="w-3.5 h-3.5 text-amber-500" />} Extract Actions
+                  </button>
+                  <button onClick={() => { runAgent('summarize_thread'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'summarize_thread' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" /> : <Brain className="w-3.5 h-3.5 text-indigo-500" />} Summarize Thread
+                  </button>
+                  <button onClick={() => { runAgent('find_contacts'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-teal-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'find_contacts' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-500" /> : <Users className="w-3.5 h-3.5 text-teal-500" />} Find Contacts
+                  </button>
+                  <button onClick={() => { runAgent('deep_dive'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-purple-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'deep_dive' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-500" /> : <Eye className="w-3.5 h-3.5 text-purple-500" />} Deep Dive
+                  </button>
+                  <button onClick={() => { runAgent('recommend_content'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'recommend_content' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <Compass className="w-3.5 h-3.5 text-blue-500" />} Find More Content
+                  </button>
+                  <button onClick={() => { runAgent('extract_entities'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'extract_entities' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" /> : <Target className="w-3.5 h-3.5 text-emerald-500" />} Extract Entities
+                  </button>
+                  <div className="border-t border-gray-100 my-1.5" />
+                  <p className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Cross-topic</p>
+                  <button onClick={() => { runAgent('cross_topic_links'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-orange-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'cross_topic_links' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-500" /> : <GitBranch className="w-3.5 h-3.5 text-orange-500" />} Related Topics
+                  </button>
+                  <button onClick={() => { runAgent('completeness_check'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-rose-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                    {agentLoading === 'completeness_check' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-500" /> : <Award className="w-3.5 h-3.5 text-rose-500" />} Completeness Check
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -1574,15 +1772,15 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
       </div>
 
       {/* Notes */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <StickyNote className="w-4 h-4 text-amber-500" />
             Quick Notes
-            <span className="text-xs text-gray-400 font-normal ml-1">(included in AI analysis)</span>
+            <span className="text-xs text-gray-400 font-normal">&middot; included in AI analysis</span>
           </h2>
           <button onClick={saveNotes} disabled={notesSaving}
-            className="px-3 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-100 disabled:opacity-50 flex items-center gap-1.5">
+            className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1.5 transition-colors">
             {notesSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
             Save
           </button>
@@ -1592,7 +1790,7 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
             value={notes}
             onChange={e => setNotes(e.target.value)}
             placeholder="Add notes about this topic..."
-            className="w-full min-h-[100px] px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+            className="w-full min-h-[100px] px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y transition-all leading-relaxed"
           />
         </div>
       </div>

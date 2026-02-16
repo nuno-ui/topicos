@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import { X, Save, StickyNote, Loader2 } from 'lucide-react';
 
@@ -27,6 +27,26 @@ export function NoteEditor({ topicId, note, onSave, onClose }: NoteEditorProps) 
     (note?.metadata?.content as string) || note?.snippet || ''
   );
   const [saving, setSaving] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const autoGrow = useCallback(() => {
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = 'auto';
+      el.style.height = `${Math.max(200, el.scrollHeight)}px`;
+    }
+  }, []);
+
+  useEffect(() => {
+    autoGrow();
+  }, [content, autoGrow]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (title.trim() && !saving) handleSave();
+    }
+  };
 
   const handleSave = async () => {
     if (!title.trim()) { toast.error('Title is required'); return; }
@@ -104,12 +124,18 @@ export function NoteEditor({ topicId, note, onSave, onClose }: NoteEditorProps) 
               Content <span className="text-gray-400 font-normal">(supports basic markdown: # headers, - lists, **bold**)</span>
             </label>
             <textarea
+              ref={textareaRef}
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => { setContent(e.target.value); autoGrow(); }}
+              onKeyDown={handleKeyDown}
               placeholder="Write your note here..."
               rows={8}
-              className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-y min-h-[200px] font-mono text-[13px] leading-relaxed"
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none min-h-[200px] font-mono text-[13px] leading-relaxed bg-gray-50/50 transition-colors focus:bg-white"
             />
+            <div className="flex items-center justify-between mt-1.5 px-1">
+              <span className="text-[11px] text-gray-400">{content.length.toLocaleString()} character{content.length !== 1 ? 's' : ''}</span>
+              <span className="text-[11px] text-gray-400">Ctrl+Enter to save</span>
+            </div>
           </div>
         </div>
         <div className="flex items-center justify-between p-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl">

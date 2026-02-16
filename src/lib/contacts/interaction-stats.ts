@@ -26,6 +26,11 @@ function itemMentionsContact(item: Record<string, unknown>, contact: ContactBasi
     if (contactName && contactName.length > 2 && str.includes(contactName)) return true;
   }
 
+  // Also check title, snippet, and body content for mentions
+  const fullText = `${(item.title as string || '')} ${(item.snippet as string || '')} ${(item.body as string || '')}`.toLowerCase();
+  if (contactEmail && contactEmail.length > 3 && fullText.includes(contactEmail)) return true;
+  if (contactName && contactName.length > 3 && fullText.includes(contactName)) return true;
+
   return false;
 }
 
@@ -39,7 +44,7 @@ export async function computeContactStats(
 ): Promise<{ count: number; lastAt: string | null; topicIds: string[] }> {
   const { data: items } = await supabase
     .from('topic_items')
-    .select('occurred_at, topic_id, metadata')
+    .select('occurred_at, topic_id, title, snippet, body, metadata')
     .eq('user_id', userId)
     .order('occurred_at', { ascending: false })
     .limit(500);
@@ -96,7 +101,7 @@ export async function getContactItems(
 ): Promise<Array<Record<string, unknown>>> {
   const { data: items } = await supabase
     .from('topic_items')
-    .select('*, topics(title)')
+    .select('id, title, snippet, body, source, source_account_id, external_id, url, occurred_at, topic_id, metadata, topics(title)')
     .eq('user_id', userId)
     .order('occurred_at', { ascending: false })
     .limit(500);

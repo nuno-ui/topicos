@@ -61,16 +61,25 @@ export async function enrichItemContent(
       }
 
       case 'notion': {
-        if (!item.source_account_id) return { body: '' };
-        const supabase = createServiceClient();
-        const { data: account } = await supabase
+        if (!item.source_account_id) {
+          console.warn(`[Content Enrichment] Notion item ${item.id} missing source_account_id — cannot fetch page content`);
+          return { body: '' };
+        }
+        const notionSupabase = createServiceClient();
+        const { data: notionAccount } = await notionSupabase
           .from('notion_accounts')
           .select('access_token')
           .eq('id', item.source_account_id)
           .single();
-        if (!account) return { body: '' };
-        const content = await getNotionPageContent(account.access_token, item.external_id, 100);
-        return { body: content };
+        if (!notionAccount) {
+          console.warn(`[Content Enrichment] Notion account ${item.source_account_id} not found for item ${item.id}`);
+          return { body: '' };
+        }
+        const notionContent = await getNotionPageContent(notionAccount.access_token, item.external_id, 100);
+        if (!notionContent) {
+          console.warn(`[Content Enrichment] Notion page ${item.external_id} returned empty content`);
+        }
+        return { body: notionContent };
       }
 
       case 'slack': {

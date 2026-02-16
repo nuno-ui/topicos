@@ -22,17 +22,24 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json();
-  const { name, email, organization, role, notes } = body;
+  const { name, email, organization, role, notes, area, metadata } = body;
   if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
-  const { data, error } = await supabase.from('contacts').upsert({
+  const insertData: Record<string, unknown> = {
     name,
     email: email || null,
     organization: organization || null,
     role: role || null,
     notes: notes || null,
     user_id: user.id,
-  }, { onConflict: 'user_id, email' }).select().single();
+  };
+  if (area) insertData.area = area;
+  if (metadata) insertData.metadata = metadata;
+
+  const { data, error } = await supabase.from('contacts').upsert(
+    insertData,
+    { onConflict: 'user_id, email' }
+  ).select().single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ contact: data }, { status: 201 });

@@ -6,6 +6,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const url = new URL(request.url);
+  const format = url.searchParams.get('format') || 'markdown';
+
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -32,7 +35,61 @@ export async function GET(
     .select('role, contacts(name, email, organization)')
     .eq('topic_id', id);
 
-  // Build markdown report
+  // --- JSON export ---
+  if (format === 'json') {
+    const contacts = (contactLinks || []).map(cl => {
+      const contact = cl.contacts as unknown as { name: string; email: string; organization: string } | null;
+      return {
+        name: contact?.name || null,
+        email: contact?.email || null,
+        organization: contact?.organization || null,
+        role: cl.role || null,
+      };
+    });
+
+    const jsonExport = {
+      topic: {
+        id: topic.id,
+        title: topic.title,
+        description: topic.description || null,
+        status: topic.status,
+        area: topic.area,
+        priority: topic.priority || null,
+        due_date: topic.due_date || null,
+        tags: topic.tags || [],
+        notes: topic.notes || null,
+        summary: topic.summary || null,
+        created_at: topic.created_at,
+        updated_at: topic.updated_at,
+      },
+      contacts,
+      items: (items || []).map(item => {
+        const meta = (item.metadata as Record<string, unknown>) || {};
+        return {
+          id: item.id,
+          source: item.source,
+          title: item.title,
+          snippet: item.snippet || null,
+          body: (meta.content as string) || (meta.body as string) || item.snippet || null,
+          url: item.url || null,
+          occurred_at: item.occurred_at,
+          metadata: meta,
+        };
+      }),
+      exported_at: new Date().toISOString(),
+    };
+
+    const filename = `${topic.title.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50)}_export.json`;
+
+    return new Response(JSON.stringify(jsonExport, null, 2), {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    });
+  }
+
+  // --- Markdown export ---
   const lines: string[] = [];
 
   lines.push(`# ${topic.title}`);
@@ -92,7 +149,12 @@ export async function GET(
         if (item.url) details += ` — [Open](${item.url})`;
         lines.push(details);
         if (meta.from) lines.push(`  From: ${meta.from}`);
-        if (item.snippet) lines.push(`  > ${item.snippet.substring(0, 200)}`);
+        // Include full body/content, falling back to snippet
+        const body = (meta.content as string) || (meta.body as string) || item.snippet || '';
+        if (body) {
+          lines.push('');
+          lines.push(`  ${body}`);
+        }
       }
       lines.push('');
     }

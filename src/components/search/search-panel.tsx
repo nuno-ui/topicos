@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { sourceLabel, formatRelativeDate } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
-import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, ChevronUp, Clock, ArrowUpDown, Calendar, X, Sparkles, Brain, Tags, Wand2, Bookmark, BookmarkCheck, Eye, Mail, Filter } from 'lucide-react';
+import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, ChevronUp, ChevronRight, Clock, ArrowUpDown, Calendar, X, Sparkles, Brain, Tags, Wand2, Bookmark, BookmarkCheck, Eye, Mail, Filter, RotateCcw, ChevronsUpDown } from 'lucide-react';
 
 interface SearchResult {
   external_id: string;
@@ -103,6 +103,12 @@ export function SearchPanel() {
   const [batchLinking, setBatchLinking] = useState(false);
   const [batchTopicId, setBatchTopicId] = useState<string | null>(null);
 
+  // Collapse/expand groups state
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  // Search error state
+  const [searchError, setSearchError] = useState<string | null>(null);
+
   useEffect(() => {
     fetch('/api/topics').then(r => r.json()).then(data => {
       setTopics(data.topics || []);
@@ -152,6 +158,7 @@ export function SearchPanel() {
   const handleSearch = async () => {
     if (!query.trim()) return;
     setLoading(true);
+    setSearchError(null);
     saveRecentSearch(query.trim());
     try {
       const accountIds = selectedAccounts.size > 0 ? Array.from(selectedAccounts) : undefined;
@@ -186,11 +193,14 @@ export function SearchPanel() {
       setCategorized([]);
       setShowCategorized(false);
       setSearchSummary(null);
+      setCollapsedGroups(new Set());
       if (allItems.length === 0) {
         toast.info('No results found. Try different keywords or date range.');
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Search failed');
+      const message = err instanceof Error ? err.message : 'Search failed';
+      setSearchError(message);
+      toast.error(message);
     }
     setLoading(false);
   };
@@ -456,13 +466,42 @@ export function SearchPanel() {
     return categorized.find(c => c.result_index === index);
   };
 
+  // Group results by source
+  const groupedResults = sortedResults.reduce<Record<string, { results: SearchResult[]; indices: number[] }>>((acc, item, index) => {
+    if (!acc[item.source]) acc[item.source] = { results: [], indices: [] };
+    acc[item.source].results.push(item);
+    acc[item.source].indices.push(index);
+    return acc;
+  }, {});
+
+  const sourceGroups = Object.keys(groupedResults);
+
+  const toggleGroup = (source: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(source)) next.delete(source);
+      else next.add(source);
+      return next;
+    });
+  };
+
+  const collapseAllGroups = () => setCollapsedGroups(new Set(sourceGroups));
+  const expandAllGroups = () => setCollapsedGroups(new Set());
+
+  const allGroupsCollapsed = sourceGroups.length > 0 && collapsedGroups.size === sourceGroups.length;
+
+  // Active source filter count
+  const activeFilterCount = sources.size;
+
   return (
     <div>
       {/* Search Input */}
       <div className="space-y-3 mb-6">
+        <label htmlFor="search-input" className="sr-only">Search across all connected sources</label>
         <div className="flex gap-2">
           <div className="flex-1 relative">
             <input
+              id="search-input"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -470,8 +509,10 @@ export function SearchPanel() {
               className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
             />
             {query && (
-              <button onClick={() => { setQuery(''); setResults([]); }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <button onClick={() => { setQuery(''); setResults([]); setSearchError(null); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                aria-label="Clear search"
+                title="Clear search">
                 <X className="w-4 h-4" />
               </button>
             )}
@@ -492,9 +533,25 @@ export function SearchPanel() {
           )}
         </div>
 
+        {/* Search result count */}
+        {sortedResults.length > 0 && (
+          <p className="text-xs text-gray-500">Showing {sortedResults.length} result{sortedResults.length !== 1 ? 's' : ''}</p>
+        )}
+
         {/* Source filters + date + sort */}
         <div className="flex gap-2 text-xs items-center flex-wrap">
-          <span className="text-gray-500 py-1.5">Sources:</span>
+          <span className="text-gray-500 py-1.5">Sources ({activeFilterCount}/{SOURCES.length}):</span>
+          {sources.size === SOURCES.length ? (
+            <button onClick={() => setSources(new Set())}
+              className="px-2.5 py-1.5 rounded-full bg-gray-200 text-gray-600 font-medium hover:bg-gray-300 transition-colors">
+              Deselect All
+            </button>
+          ) : (
+            <button onClick={() => setSources(new Set(SOURCES))}
+              className="px-2.5 py-1.5 rounded-full bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors">
+              Select All
+            </button>
+          )}
           {SOURCES.map(src => (
             <button key={src} onClick={() => toggleSource(src)}
               className={`px-3 py-1.5 rounded-full transition-colors ${
@@ -612,15 +669,17 @@ export function SearchPanel() {
           </div>
         )}
 
-        {/* Recent searches */}
-        {!query && !loading && results.length === 0 && recentSearches.length > 0 && (
+        {/* Recent searches — always visible when there are recent searches */}
+        {recentSearches.length > 0 && (
           <div className="flex gap-2 items-center flex-wrap">
-            <Clock className="w-3 h-3 text-gray-400" />
-            <span className="text-xs text-gray-400">Recent:</span>
-            {recentSearches.map((s, i) => (
+            <Clock className="w-3 h-3 text-gray-400 flex-shrink-0" />
+            <span className="text-xs text-gray-400 flex-shrink-0">Recent:</span>
+            {recentSearches.slice(0, 5).map((s, i) => (
               <button key={i} onClick={() => { setQuery(s); }}
-                className="text-xs px-2 py-1 bg-gray-50 text-gray-600 rounded-full hover:bg-gray-100 transition-colors">
-                {s}
+                className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-gray-50 text-gray-600 rounded-full hover:bg-gray-100 border border-gray-200 transition-colors"
+                title={`Search for "${s}"`}>
+                <Search className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                <span className="truncate max-w-[150px]">&ldquo;{s}&rdquo;</span>
               </button>
             ))}
           </div>
@@ -791,24 +850,256 @@ export function SearchPanel() {
       {sortedResults.length > 0 && (
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-700">{sortedResults.length} results found</h2>
-          <div className="flex gap-2 text-xs text-gray-400">
-            {[...new Set(sortedResults.map(r => r.source))].map(src => (
-              <span key={src} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
-                <SourceIcon source={src} className="w-3.5 h-3.5" /> {sortedResults.filter(r => r.source === src).length}
-              </span>
-            ))}
+          <div className="flex gap-2 items-center">
+            {sourceGroups.length > 1 && (
+              <button
+                onClick={allGroupsCollapsed ? expandAllGroups : collapseAllGroups}
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <ChevronsUpDown className="w-3.5 h-3.5" />
+                {allGroupsCollapsed ? 'Expand All' : 'Collapse All'}
+              </button>
+            )}
+            <div className="flex gap-2 text-xs text-gray-400">
+              {sourceGroups.map(src => (
+                <span key={src} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
+                  <SourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)} ({groupedResults[src].results.length})
+                </span>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
+      {/* Grouped results by source */}
+      <div className="space-y-4">
+        {sourceGroups.map(src => {
+          const group = groupedResults[src];
+          const isCollapsed = collapsedGroups.has(src);
+          return (
+            <div key={src} className="space-y-2">
+              {/* Group header */}
+              {sourceGroups.length > 1 && (
+                <button
+                  onClick={() => toggleGroup(src)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors group"
+                >
+                  {isCollapsed ? <ChevronRight className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                  <SourceIcon source={src} className="w-4 h-4" />
+                  <span className="text-sm font-semibold text-gray-700">{sourceLabel(src)}</span>
+                  <span className="text-xs text-gray-400 font-normal">({group.results.length})</span>
+                </button>
+              )}
+              {/* Group items */}
+              {!isCollapsed && (
+                <div className="space-y-2">
+                  {group.results.map((item, groupIdx) => {
+                    const key = item.source + ':' + item.external_id;
+                    const globalIndex = group.indices[groupIdx];
+                    const cat = getCategoryForResult(globalIndex);
+                    return (
+                      <div key={key} className={`p-4 bg-white rounded-xl border transition-all ${
+                        item.already_linked
+                          ? 'border-green-200 bg-green-50/50'
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50/50 hover:shadow-sm'
+                      }`}>
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedResults.has(key)}
+                            onChange={() => toggleResultSelection(key)}
+                            className="mt-1.5 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
+                            aria-label={`Select ${item.title}`}
+                          />
+                          {/* Source icon + label — more prominent */}
+                          <div className="flex flex-col items-center gap-0.5 flex-shrink-0 mt-0.5 w-12">
+                            <SourceIcon source={item.source} className="w-5 h-5" />
+                            <span className="text-[10px] text-gray-400 font-medium leading-tight text-center">{sourceLabel(item.source)}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              {item.source === 'manual' ? (
+                                <span onClick={() => window.location.href = item.url}
+                                  className="font-medium text-gray-900 hover:text-green-600 text-sm truncate cursor-pointer">
+                                  {item.title}
+                                </span>
+                              ) : (
+                                <a href={item.url} target="_blank" rel="noopener noreferrer"
+                                  className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate">
+                                  {item.title}
+                                </a>
+                              )}
+                              {item.already_linked && (
+                                <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium flex-shrink-0">Linked</span>
+                              )}
+                            </div>
+                            <p className={`text-xs text-gray-500 mt-0.5 ${expandedResult === key ? '' : 'line-clamp-2'}`}>{item.snippet}</p>
+                            {item.snippet && item.snippet.length > 100 && (
+                              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpandedResult(expandedResult === key ? null : key); }}
+                                className="text-xs text-blue-500 hover:text-blue-700 mt-0.5 flex items-center gap-0.5">
+                                {expandedResult === key ? <><ChevronUp className="w-3 h-3" /> Less</> : <><Eye className="w-3 h-3" /> More</>}
+                              </button>
+                            )}
+                            <div className="flex gap-2 mt-1.5 text-xs text-gray-400">
+                              <span className="font-medium text-gray-500">{formatRelativeDate(item.occurred_at)}</span>
+                              {item.account_email && connectedAccounts.google.length > 1 && (
+                                <span className="flex items-center gap-0.5 text-gray-400">
+                                  <Mail className="w-2.5 h-2.5" /> {item.account_email}
+                                </span>
+                              )}
+                              {item.metadata?.from ? (
+                                <span>from: {String(item.metadata.from).split('<')[0].trim()}</span>
+                              ) : null}
+                              {item.metadata?.channel_name ? (
+                                <span>#{String(item.metadata.channel_name)}</span>
+                              ) : null}
+                              {item.metadata?.attendees ? (
+                                <span>{(item.metadata.attendees as string[]).length} attendees</span>
+                              ) : null}
+                            </div>
+                            {/* AI Category suggestion */}
+                            {cat && (
+                              <div className="mt-2 flex items-center gap-2">
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 flex items-center gap-1">
+                                  <Tags className="w-3 h-3" />
+                                  {cat.suggested_topic_name}
+                                  <span className="text-blue-400">({Math.round(cat.confidence * 100)}%)</span>
+                                </span>
+                                {cat.suggested_topic_id && !item.already_linked && (
+                                  <button onClick={() => linkToTopic(item, cat.suggested_topic_id!)}
+                                    className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+                                    Quick Link
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex gap-1.5 items-center flex-shrink-0">
+                            {item.source !== 'manual' && (
+                              <a href={item.url} target="_blank" rel="noopener noreferrer"
+                                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
+                                <ExternalLink className="w-4 h-4" />
+                              </a>
+                            )}
+                            {!item.already_linked && (
+                              <div className="relative">
+                                <button
+                                  onClick={() => setShowTopicDropdown(showTopicDropdown === key ? null : key)}
+                                  className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg flex items-center gap-1 transition-colors"
+                                  title="Link to topic"
+                                >
+                                  <Link2 className="w-4 h-4" />
+                                  <ChevronDown className="w-3 h-3" />
+                                </button>
+                                {showTopicDropdown === key && (
+                                  <div className="absolute right-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 max-h-80 overflow-y-auto">
+                                    <div className="px-3 py-2 text-xs font-semibold text-gray-500 border-b border-gray-100">
+                                      Link to Topic
+                                    </div>
+                                    {topics.length === 0 && (
+                                      <p className="px-3 py-2 text-xs text-gray-400">No topics yet. Create one below.</p>
+                                    )}
+                                    {topics.map(topic => (
+                                      <button
+                                        key={topic.id}
+                                        onClick={() => linkToTopic(item, topic.id)}
+                                        disabled={linkingResult === key}
+                                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between disabled:opacity-50 transition-colors"
+                                      >
+                                        <span className="truncate">{topic.title}</span>
+                                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                                          topic.area === 'work' ? 'bg-blue-50 text-blue-600' :
+                                          topic.area === 'personal' ? 'bg-green-50 text-green-600' :
+                                          'bg-purple-50 text-purple-600'
+                                        }`}>{topic.area}</span>
+                                      </button>
+                                    ))}
+                                    <div className="border-t border-gray-100 px-3 py-2">
+                                      <div className="flex gap-1.5">
+                                        <input
+                                          value={newTopicTitle}
+                                          onChange={e => setNewTopicTitle(e.target.value)}
+                                          placeholder={item.title}
+                                          className="flex-1 px-2 py-1.5 text-xs border rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"
+                                          onKeyDown={e => e.key === 'Enter' && createTopicAndLink(item)}
+                                        />
+                                        <button
+                                          onClick={() => createTopicAndLink(item)}
+                                          disabled={creatingTopic}
+                                          className="px-2 py-1.5 bg-green-600 text-white rounded-md text-xs font-medium hover:bg-green-700 disabled:opacity-50 flex items-center gap-1 transition-colors"
+                                        >
+                                          {creatingTopic ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                                          New
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Empty states — context-dependent */}
+      {!loading && results.length === 0 && query && searchError && (
+        <div className="text-center py-12">
+          <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-3">
+            <X className="w-6 h-6 text-red-500" />
+          </div>
+          <p className="text-gray-700 text-sm font-medium">Search failed</p>
+          <p className="text-red-500 text-xs mt-1">{searchError}</p>
+          <button onClick={handleSearch}
+            className="mt-4 px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 flex items-center gap-2 mx-auto transition-colors">
+            <RotateCcw className="w-4 h-4" /> Retry Search
+          </button>
+        </div>
+      )}
+
+      {!loading && results.length === 0 && query && !searchError && (
+        <div className="text-center py-12">
+          <Search className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+          <p className="text-gray-500 text-sm">No results found for &ldquo;{query}&rdquo;</p>
+          <p className="text-gray-400 text-xs mt-1">Try different keywords or enable more sources</p>
+          <div className="flex gap-2 justify-center mt-4">
+            <button onClick={handleSearch}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 flex items-center gap-2 transition-colors">
+              <RotateCcw className="w-4 h-4" /> Retry
+            </button>
+            <button onClick={runSmartSearch} disabled={!!agentLoading}
+              className="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-200 flex items-center gap-2 transition-colors">
+              <Wand2 className="w-4 h-4" /> Try AI Smart Search
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!loading && results.length === 0 && !query && (
+        <div className="text-center py-16">
+          <Search className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+          <p className="text-gray-500 text-sm font-medium">Search across all your connected sources</p>
+          <p className="text-gray-400 text-xs mt-1">Find emails, events, files, messages, and Notion pages — then link them to your topics</p>
+        </div>
+      )}
+
+      {/* Floating action bar at bottom when items are selected */}
       {selectedResults.size > 0 && (
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-3 animate-slide-up">
-          <span className="text-sm font-medium text-blue-700">{selectedResults.size} selected</span>
-          <div className="flex-1 flex items-center gap-2">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 p-3 bg-blue-600 border border-blue-700 rounded-2xl shadow-2xl flex items-center gap-3 animate-slide-up max-w-xl">
+          <span className="text-sm font-semibold text-white whitespace-nowrap">{selectedResults.size} selected</span>
+          <div className="w-px h-6 bg-blue-400" />
+          <div className="flex items-center gap-2">
             <select
               value={batchTopicId || ''}
               onChange={(e) => setBatchTopicId(e.target.value || null)}
-              className="px-3 py-1.5 border border-blue-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[250px]"
+              className="px-3 py-1.5 border border-blue-400 rounded-lg text-sm bg-blue-500 text-white focus:outline-none focus:ring-2 focus:ring-white/50 max-w-[200px] placeholder:text-blue-200"
             >
               <option value="">Select topic...</option>
               {topics.map(t => (
@@ -818,183 +1109,18 @@ export function SearchPanel() {
             <button
               onClick={() => batchTopicId && batchLinkToTopic(batchTopicId)}
               disabled={!batchTopicId || batchLinking}
-              className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+              className="px-4 py-1.5 bg-white text-blue-700 rounded-lg text-sm font-semibold hover:bg-blue-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors whitespace-nowrap"
             >
               {batchLinking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
-              Link Selected
+              Link {selectedResults.size} item{selectedResults.size !== 1 ? 's' : ''} to topic
             </button>
           </div>
+          <div className="w-px h-6 bg-blue-400" />
           <div className="flex gap-1">
-            <button onClick={selectAllResults} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Select all</button>
-            <span className="text-blue-300">|</span>
-            <button onClick={clearSelection} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Clear</button>
+            <button onClick={selectAllResults} className="text-xs text-blue-200 hover:text-white font-medium whitespace-nowrap">Select all</button>
+            <span className="text-blue-400">|</span>
+            <button onClick={clearSelection} className="text-xs text-blue-200 hover:text-white font-medium">Clear</button>
           </div>
-        </div>
-      )}
-
-      <div className="space-y-2">
-        {sortedResults.map((item, index) => {
-          const key = item.source + ':' + item.external_id;
-          const cat = getCategoryForResult(index);
-          return (
-            <div key={key} className={`p-4 bg-white rounded-xl border transition-colors ${
-              item.already_linked ? 'border-green-200 bg-green-50/50' : 'border-gray-200 hover:border-gray-300'
-            }`}>
-              <div className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={selectedResults.has(key)}
-                  onChange={() => toggleResultSelection(key)}
-                  className="mt-1.5 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
-                />
-                <span className="mt-0.5"><SourceIcon source={item.source} className="w-4 h-4" /></span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    {item.source === 'manual' ? (
-                      <span onClick={() => window.location.href = item.url}
-                        className="font-medium text-gray-900 hover:text-green-600 text-sm truncate cursor-pointer">
-                        {item.title}
-                      </span>
-                    ) : (
-                      <a href={item.url} target="_blank" rel="noopener noreferrer"
-                        className="font-medium text-gray-900 hover:text-blue-600 text-sm truncate">
-                        {item.title}
-                      </a>
-                    )}
-                    {item.already_linked && (
-                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium flex-shrink-0">Linked</span>
-                    )}
-                  </div>
-                  <p className={`text-xs text-gray-500 mt-0.5 ${expandedResult === key ? '' : 'line-clamp-2'}`}>{item.snippet}</p>
-                  {item.snippet && item.snippet.length > 100 && (
-                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpandedResult(expandedResult === key ? null : key); }}
-                      className="text-xs text-blue-500 hover:text-blue-700 mt-0.5 flex items-center gap-0.5">
-                      {expandedResult === key ? <><ChevronUp className="w-3 h-3" /> Less</> : <><Eye className="w-3 h-3" /> More</>}
-                    </button>
-                  )}
-                  <div className="flex gap-2 mt-1.5 text-xs text-gray-400">
-                    <span>{sourceLabel(item.source)}</span>
-                    <span>{formatRelativeDate(item.occurred_at)}</span>
-                    {item.account_email && connectedAccounts.google.length > 1 && (
-                      <span className="flex items-center gap-0.5 text-gray-400">
-                        <Mail className="w-2.5 h-2.5" /> {item.account_email}
-                      </span>
-                    )}
-                    {item.metadata?.from ? (
-                      <span>from: {String(item.metadata.from).split('<')[0].trim()}</span>
-                    ) : null}
-                    {item.metadata?.channel_name ? (
-                      <span>#{String(item.metadata.channel_name)}</span>
-                    ) : null}
-                    {item.metadata?.attendees ? (
-                      <span>{(item.metadata.attendees as string[]).length} attendees</span>
-                    ) : null}
-                  </div>
-                  {/* AI Category suggestion */}
-                  {cat && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 flex items-center gap-1">
-                        <Tags className="w-3 h-3" />
-                        {cat.suggested_topic_name}
-                        <span className="text-blue-400">({Math.round(cat.confidence * 100)}%)</span>
-                      </span>
-                      {cat.suggested_topic_id && !item.already_linked && (
-                        <button onClick={() => linkToTopic(item, cat.suggested_topic_id!)}
-                          className="text-xs text-blue-600 hover:text-blue-800 font-medium">
-                          Quick Link
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="flex gap-1.5 items-center flex-shrink-0">
-                  {item.source !== 'manual' && (
-                    <a href={item.url} target="_blank" rel="noopener noreferrer"
-                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
-                      <ExternalLink className="w-4 h-4" />
-                    </a>
-                  )}
-                  {!item.already_linked && (
-                    <div className="relative">
-                      <button
-                        onClick={() => setShowTopicDropdown(showTopicDropdown === key ? null : key)}
-                        className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg flex items-center gap-1 transition-colors"
-                        title="Link to topic"
-                      >
-                        <Link2 className="w-4 h-4" />
-                        <ChevronDown className="w-3 h-3" />
-                      </button>
-                      {showTopicDropdown === key && (
-                        <div className="absolute right-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 max-h-80 overflow-y-auto">
-                          <div className="px-3 py-2 text-xs font-semibold text-gray-500 border-b border-gray-100">
-                            Link to Topic
-                          </div>
-                          {topics.length === 0 && (
-                            <p className="px-3 py-2 text-xs text-gray-400">No topics yet. Create one below.</p>
-                          )}
-                          {topics.map(topic => (
-                            <button
-                              key={topic.id}
-                              onClick={() => linkToTopic(item, topic.id)}
-                              disabled={linkingResult === key}
-                              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between disabled:opacity-50 transition-colors"
-                            >
-                              <span className="truncate">{topic.title}</span>
-                              <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                                topic.area === 'work' ? 'bg-blue-50 text-blue-600' :
-                                topic.area === 'personal' ? 'bg-green-50 text-green-600' :
-                                'bg-purple-50 text-purple-600'
-                              }`}>{topic.area}</span>
-                            </button>
-                          ))}
-                          <div className="border-t border-gray-100 px-3 py-2">
-                            <div className="flex gap-1.5">
-                              <input
-                                value={newTopicTitle}
-                                onChange={e => setNewTopicTitle(e.target.value)}
-                                placeholder={item.title}
-                                className="flex-1 px-2 py-1.5 text-xs border rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"
-                                onKeyDown={e => e.key === 'Enter' && createTopicAndLink(item)}
-                              />
-                              <button
-                                onClick={() => createTopicAndLink(item)}
-                                disabled={creatingTopic}
-                                className="px-2 py-1.5 bg-green-600 text-white rounded-md text-xs font-medium hover:bg-green-700 disabled:opacity-50 flex items-center gap-1 transition-colors"
-                              >
-                                {creatingTopic ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                                New
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Empty states */}
-      {!loading && results.length === 0 && query && (
-        <div className="text-center py-12">
-          <Search className="w-8 h-8 text-gray-300 mx-auto mb-3" />
-          <p className="text-gray-500 text-sm">No results found for &ldquo;{query}&rdquo;</p>
-          <p className="text-gray-400 text-xs mt-1">Try different keywords, broaden your date range, or check your source connections in Settings</p>
-          <button onClick={runSmartSearch} disabled={!!agentLoading}
-            className="mt-3 px-4 py-2 bg-purple-100 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-200 flex items-center gap-2 mx-auto transition-colors">
-            <Wand2 className="w-4 h-4" /> Try AI Smart Search
-          </button>
-        </div>
-      )}
-
-      {!loading && results.length === 0 && !query && (
-        <div className="text-center py-16">
-          <Search className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500 text-sm">Search across your connected sources</p>
-          <p className="text-gray-400 text-xs mt-1">Find emails, events, files, messages, and Notion pages — then link them to your topics</p>
         </div>
       )}
     </div>

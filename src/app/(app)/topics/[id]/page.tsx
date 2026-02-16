@@ -10,7 +10,7 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
   if (!topic) notFound();
   const { data: items } = await supabase.from('topic_items').select('*').eq('topic_id', id).order('occurred_at', { ascending: false });
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-8 max-w-5xl animate-fade-in">
       <TopicDetail topic={topic} initialItems={items ?? []} />
     </div>
   );

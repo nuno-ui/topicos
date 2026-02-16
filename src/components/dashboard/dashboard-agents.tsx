@@ -1,7 +1,17 @@
 'use client';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Brain, Sparkles, BarChart3, Loader2, X } from 'lucide-react';
+import { Brain, Sparkles, BarChart3, Loader2, X, Clock } from 'lucide-react';
+
+function timeAgo(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min${minutes !== 1 ? 's' : ''} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+  return `${Math.floor(hours / 24)} day${Math.floor(hours / 24) !== 1 ? 's' : ''} ago`;
+}
 
 export function DashboardAgents() {
   const [loading, setLoading] = useState<string | null>(null);
@@ -11,6 +21,7 @@ export function DashboardAgents() {
   const [showReview, setShowReview] = useState(false);
   const [suggestions, setSuggestions] = useState<Array<{ title: string; description: string; area: string; reason: string }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [lastRun, setLastRun] = useState<Record<string, Date>>({});
 
   const runAgent = async (agent: string) => {
     setLoading(agent);
@@ -40,6 +51,7 @@ export function DashboardAgents() {
           toast.success('Weekly review generated');
           break;
       }
+      setLastRun(prev => ({ ...prev, [agent]: new Date() }));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Agent failed');
     }
@@ -100,21 +112,34 @@ export function DashboardAgents() {
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-fade-in">
       {/* Agent Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {agents.map((agent) => (
-          <button key={agent.id} onClick={() => runAgent(agent.id)} disabled={!!loading}
-            className={`p-4 rounded-xl border text-left transition-all disabled:opacity-50 shadow-sm ${agent.colors}`}>
-            <div className="flex items-center gap-3 mb-2">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${agent.iconBg}`}>
-                {loading === agent.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <agent.icon className="w-4 h-4" />}
+        {agents.map((agent) => {
+          const isRunning = loading === agent.id;
+          const isDisabled = !!loading && !isRunning;
+          const ran = lastRun[agent.id];
+          return (
+            <button key={agent.id} onClick={() => runAgent(agent.id)} disabled={!!loading}
+              className={`relative p-5 rounded-xl border bg-white text-left transition-all shadow-sm hover:shadow-md ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''} ${isRunning ? 'ring-2 ring-offset-1 ring-blue-300' : ''}`}>
+              <div className="flex items-center gap-3 mb-2">
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${agent.iconBg}`}>
+                  {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <agent.icon className="w-4 h-4" />}
+                </div>
+                <div>
+                  <span className="font-semibold text-sm text-gray-900">{agent.label}</span>
+                </div>
               </div>
-              <span className="font-semibold text-sm">{agent.label}</span>
-            </div>
-            <p className="text-xs opacity-70">{agent.desc}</p>
-          </button>
-        ))}
+              <p className="text-xs text-gray-500 mb-2">{agent.desc}</p>
+              {ran && (
+                <div className="flex items-center gap-1 text-[11px] text-gray-400">
+                  <Clock className="w-3 h-3" />
+                  <span>Last run: {timeAgo(ran)}</span>
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Daily Briefing */}

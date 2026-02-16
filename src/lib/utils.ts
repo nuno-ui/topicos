@@ -101,6 +101,37 @@ export function getDaysUntil(date: string | Date): number {
   return Math.ceil((new Date(date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 }
 
+// Constants for consistency across the app
+export const AREA_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  work: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' },
+  personal: { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200' },
+  career: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200' },
+};
+
+export const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
+  active: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-400' },
+  paused: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-400' },
+  completed: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-400' },
+  archived: { bg: 'bg-gray-50', text: 'text-gray-500', dot: 'bg-gray-400' },
+};
+
+export const PRIORITY_LABELS: Record<number, { label: string; color: string }> = {
+  1: { label: 'Low', color: 'text-gray-400' },
+  2: { label: 'Medium-Low', color: 'text-blue-400' },
+  3: { label: 'Medium', color: 'text-amber-500' },
+  4: { label: 'High', color: 'text-orange-500' },
+  5: { label: 'Critical', color: 'text-red-600' },
+};
+
+export function getActivityLevel(lastInteractionAt: string | null): { label: string; color: string; dotColor: string } {
+  if (!lastInteractionAt) return { label: 'New', color: 'text-gray-400', dotColor: 'bg-gray-300' };
+  const days = Math.floor((Date.now() - new Date(lastInteractionAt).getTime()) / (1000 * 60 * 60 * 24));
+  if (days <= 7) return { label: 'Active', color: 'text-emerald-600', dotColor: 'bg-emerald-400' };
+  if (days <= 30) return { label: 'Recent', color: 'text-blue-600', dotColor: 'bg-blue-400' };
+  if (days <= 90) return { label: 'Idle', color: 'text-amber-600', dotColor: 'bg-amber-400' };
+  return { label: 'Cold', color: 'text-red-600', dotColor: 'bg-red-400' };
+}
+
 export function getTopicHealthScore(topic: {
   updated_at: string;
   description: string | null;

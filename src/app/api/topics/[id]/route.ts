@@ -25,9 +25,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json();
+
+  // Only allow known fields to be updated (prevent arbitrary field injection)
+  const allowedFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'summary', 'notes', 'progress_percent', 'updated_at'];
+  const updateData: Record<string, unknown> = {};
+  for (const key of allowedFields) {
+    if (key in body) updateData[key] = body[key];
+  }
+  // Always update timestamp
+  updateData.updated_at = new Date().toISOString();
+
   const { data, error } = await supabase
     .from('topics')
-    .update(body)
+    .update(updateData)
     .eq('id', id)
     .eq('user_id', user.id)
     .select()

@@ -25,14 +25,20 @@ export function CommandPalette() {
   const router = useRouter();
 
   const commands: CommandItem[] = [
+    // Navigation
     { id: 'dashboard', label: 'Go to Dashboard', description: 'View overview and stats', icon: LayoutDashboard, category: 'navigation', shortcut: '1', action: () => router.push('/dashboard') },
     { id: 'topics', label: 'Go to Topics', description: 'Manage your topics and folders', icon: FolderKanban, category: 'navigation', shortcut: '2', action: () => router.push('/topics') },
     { id: 'search', label: 'Go to Search', description: 'Search across all sources', icon: Search, category: 'navigation', shortcut: '3', action: () => router.push('/search') },
     { id: 'contacts', label: 'Go to Contacts', description: 'View and manage contacts', icon: Users, category: 'navigation', shortcut: '4', action: () => router.push('/contacts') },
     { id: 'settings', label: 'Go to Settings', description: 'Manage accounts and preferences', icon: Settings, category: 'navigation', shortcut: '5', action: () => router.push('/settings') },
-    { id: 'briefing', label: 'Generate Daily Briefing', description: 'AI-powered summary of your day', icon: Brain, category: 'ai', action: () => runAiAgent('daily_briefing') },
-    { id: 'suggest', label: 'AI Suggest Topics', description: 'Get AI-generated topic ideas', icon: Sparkles, category: 'ai', action: () => runAiAgent('suggest_topics') },
-    { id: 'review', label: 'Weekly Review', description: 'Reflect on your productivity', icon: Zap, category: 'ai', action: () => runAiAgent('weekly_review') },
+    // AI
+    { id: 'briefing', label: 'Daily Briefing', description: 'AI-powered summary of your day', icon: Brain, category: 'ai', action: () => runAiAgent('daily_briefing') },
+    { id: 'suggest', label: 'Suggest Topics', description: 'AI-generated topic ideas from recent activity', icon: Sparkles, category: 'ai', action: () => runAiAgent('suggest_topics') },
+    { id: 'review', label: 'Weekly Review', description: 'AI review of your productivity this week', icon: Zap, category: 'ai', action: () => runAiAgent('weekly_review') },
+    { id: 'health', label: 'Health Check', description: 'Check platform connectivity and data freshness', icon: RefreshCw, category: 'ai', action: () => runAiAgent('health_check') },
+    { id: 'optimize', label: 'Optimization Suggestions', description: 'AI tips to improve your workflow', icon: Sparkles, category: 'ai', action: () => runAiAgent('optimization_suggestions') },
+    { id: 'reorganize', label: 'Reorganize Folders', description: 'AI-suggested folder restructuring', icon: FolderKanban, category: 'ai', action: () => runAiAgent('reorganize_folders') },
+    // Actions
     { id: 'sync', label: 'Sync All Sources', description: 'Pull latest from Gmail, Slack, etc.', icon: RefreshCw, category: 'action', action: () => runSync() },
     {
       id: 'add_note',
@@ -42,6 +48,17 @@ export function CommandPalette() {
       category: 'action',
       action: () => {
         window.dispatchEvent(new CustomEvent('topicos:add-note'));
+      },
+    },
+    {
+      id: 'new_topic',
+      label: 'Create New Topic',
+      description: 'Start a new topic to track',
+      icon: FolderKanban,
+      category: 'action',
+      action: () => {
+        router.push('/topics');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('topicos:new-topic')), 500);
       },
     },
   ];

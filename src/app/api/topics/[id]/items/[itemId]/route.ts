@@ -38,7 +38,7 @@ export async function PATCH(
   if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
 
   const body = await request.json();
-  const allowedFields = ['title', 'snippet', 'metadata', 'occurred_at'];
+  const allowedFields = ['title', 'snippet', 'body', 'metadata', 'occurred_at', 'url'];
   const updateData: Record<string, unknown> = {};
   for (const field of allowedFields) {
     if (body[field] !== undefined) updateData[field] = body[field];

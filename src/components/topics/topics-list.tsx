@@ -1,10 +1,10 @@
 'use client';
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { formatRelativeDate } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot } from 'lucide-react';
 import Link from 'next/link';
 
 interface Topic {
@@ -79,6 +79,12 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   const [reorgSuggestions, setReorgSuggestions] = useState<string | null>(null);
   const [showReorg, setShowReorg] = useState(false);
   const [reorgLoading, setReorgLoading] = useState(false);
+
+  // Stats filter state
+  const [statsFilter, setStatsFilter] = useState<string | null>(null);
+
+  // Refs
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const supabase = createClient();
 
@@ -294,6 +300,13 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     }
     if (filterArea !== 'all') result = result.filter(t => t.area === filterArea);
     if (filterStatus !== 'all') result = result.filter(t => t.status === filterStatus);
+    // Stats filter
+    if (statsFilter === 'overdue') {
+      result = result.filter(t => t.due_date && new Date(t.due_date).getTime() < Date.now() && t.status === 'active');
+    } else if (statsFilter === 'recent') {
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      result = result.filter(t => new Date(t.updated_at).getTime() >= sevenDaysAgo);
+    }
     result.sort((a, b) => {
       switch (sortBy) {
         case 'updated_at': return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
@@ -309,7 +322,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
       }
     });
     return result;
-  }, [topics, searchQuery, filterArea, filterStatus, sortBy]);
+  }, [topics, searchQuery, filterArea, filterStatus, sortBy, statsFilter]);
 
   const areaColors: Record<string, string> = {
     work: 'bg-blue-100 text-blue-700',
@@ -324,6 +337,65 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   };
 
   const areaCounts = useMemo(() => topics.reduce((acc, t) => { acc[t.area] = (acc[t.area] || 0) + 1; return acc; }, {} as Record<string, number>), [topics]);
+
+  // Dashboard stats computation
+  const dashboardStats = useMemo(() => {
+    const now = Date.now();
+    const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const activeTopics = topics.filter(t => t.status === 'active');
+    const overdueTopics = topics.filter(t => t.due_date && new Date(t.due_date).getTime() < now && t.status === 'active');
+    const updatedThisWeek = topics.filter(t => new Date(t.updated_at).getTime() >= sevenDaysAgo);
+    const totalItems = topics.reduce((sum, t) => sum + (t.topic_items?.[0]?.count || 0), 0);
+    const avgItems = topics.length > 0 ? Math.round((totalItems / topics.length) * 10) / 10 : 0;
+
+    return {
+      active: activeTopics.length,
+      overdue: overdueTopics.length,
+      updatedThisWeek: updatedThisWeek.length,
+      avgItems,
+    };
+  }, [topics]);
+
+  // Helper: check if any filter is active
+  const hasActiveFilters = searchQuery.trim() !== '' || filterArea !== 'all' || filterStatus !== 'active' || statsFilter !== null;
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setFilterArea('all');
+    setFilterStatus('active');
+    setStatsFilter(null);
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable;
+
+      if (e.key === 'Escape') {
+        if (hasActiveFilters) {
+          clearAllFilters();
+          e.preventDefault();
+        }
+        return;
+      }
+
+      if (isInput) return;
+
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        setShowCreate(true);
+        return;
+      }
+      if (e.key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [hasActiveFilters]);
 
   // Topic health score calculation
   const getTopicHealth = useCallback((t: Topic) => {
@@ -359,165 +431,144 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     return { score, issues, color, bgColor, label };
   }, []);
 
-  // Render a topic card (enhanced)
+  // Freshness health dot helper
+  const getFreshnessDot = (updatedAt: string) => {
+    const daysSince = Math.floor((Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24));
+    if (daysSince < 7) return { color: 'bg-green-500', ring: 'ring-green-500/20', label: 'Fresh' };
+    if (daysSince < 30) return { color: 'bg-amber-500', ring: 'ring-amber-500/20', label: 'Stale' };
+    return { color: 'bg-red-500', ring: 'ring-red-500/20', label: 'Very stale' };
+  };
+
+  // Priority stars helper
+  const renderPriorityStars = (priority: number) => {
+    if (priority <= 0) return null;
+    const stars = Math.min(priority, 5);
+    return (
+      <span className="inline-flex items-center gap-0.5" title={`Priority ${priority}`}>
+        {Array.from({ length: stars }).map((_, i) => (
+          <Star key={i} className={`w-3 h-3 ${i < 3 ? 'fill-amber-400 text-amber-400' : i < 4 ? 'fill-amber-300 text-amber-300' : 'fill-amber-200 text-amber-200'}`} />
+        ))}
+      </span>
+    );
+  };
+
+  // Render a topic card (enhanced - compact design)
   const renderTopicCard = (t: Topic) => {
     const itemCount = t.topic_items?.[0]?.count || 0;
     const overdue = t.due_date && new Date(t.due_date) < new Date();
     const daysUntilDue = t.due_date ? Math.ceil((new Date(t.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+    const freshness = getFreshnessDot(t.updated_at);
+    const contactCount = (t.stakeholders || []).length;
 
     return (
       <div key={t.id} className="group relative">
-        <div className="absolute top-4 left-4 z-10">
+        {/* Checkbox */}
+        <div className="absolute top-3 left-3 z-10">
           <input type="checkbox" checked={selectedTopics.has(t.id)}
             onChange={(e) => { e.stopPropagation(); toggleTopicSelection(t.id); }}
             onClick={(e) => e.stopPropagation()}
             className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 opacity-0 group-hover:opacity-100 checked:opacity-100 transition-opacity cursor-pointer" />
         </div>
         <Link href={`/topics/${t.id}`}
-          className="block p-4 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-semibold text-gray-900 truncate">{t.title}</h3>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[t.status] || 'bg-gray-100 text-gray-600'}`}>
-                  {t.status}
-                </span>
-              </div>
-              {t.description && (
-                <p className="text-sm text-gray-500 line-clamp-2 mb-2">{t.description}</p>
-              )}
-              {/* Tags row */}
-              <div className="flex gap-1.5 flex-wrap mb-2">
-                <span className={`text-xs px-2 py-0.5 rounded-full ${areaColors[t.area] || 'bg-gray-100 text-gray-600'}`}>
-                  {t.area}
-                </span>
-                {(t.tags || []).slice(0, 3).map(tag => (
-                  <span key={tag} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                    {tag}
-                  </span>
-                ))}
-                {(t.tags || []).length > 3 && (
-                  <span className="text-xs text-gray-400">+{t.tags.length - 3}</span>
-                )}
-              </div>
-              {/* Source diversity badges */}
-              {t.source_counts && Object.keys(t.source_counts).length > 0 && (
-                <div className="flex gap-1.5 flex-wrap mb-2">
-                  {Object.entries(t.source_counts).map(([src, count]) => {
-                    const icons: Record<string, typeof Mail> = { gmail: Mail, calendar: Calendar, drive: FileText, slack: MessageSquare, notion: BookOpen, manual: StickyNote };
-                    const colors: Record<string, string> = { gmail: 'text-red-500 bg-red-50', calendar: 'text-blue-500 bg-blue-50', drive: 'text-yellow-600 bg-yellow-50', slack: 'text-purple-500 bg-purple-50', notion: 'text-gray-700 bg-gray-100', manual: 'text-green-600 bg-green-50' };
-                    const Icon = icons[src] || Paperclip;
-                    return (
-                      <span key={src} className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full ${colors[src] || 'text-gray-500 bg-gray-50'}`}>
-                        <Icon className="w-3 h-3" /> {count as number}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-              {/* Recent items preview */}
-              {t.recent_items && t.recent_items.length > 0 && (
-                <div className="mb-2 space-y-0.5">
-                  {t.recent_items.slice(0, 2).map((item, idx) => (
-                    <p key={idx} className="text-xs text-gray-400 truncate flex items-center gap-1">
-                      <SourceIcon source={item.source} className="w-3 h-3" />
-                      <span className="truncate">{item.title}</span>
-                    </p>
-                  ))}
-                  {t.recent_items.length > 2 && (
-                    <p className="text-xs text-gray-300">+{t.recent_items.length - 2} more</p>
-                  )}
-                </div>
-              )}
-              {/* Stats row */}
-              <div className="flex gap-3 items-center text-xs text-gray-400">
-                {t.due_date && (
-                  <span className={`flex items-center gap-1 ${overdue ? 'text-red-500 font-medium' : daysUntilDue !== null && daysUntilDue <= 3 ? 'text-amber-500' : ''}`}>
-                    <Clock className="w-3 h-3" />
-                    {overdue ? `Overdue ${Math.abs(daysUntilDue!)}d` : daysUntilDue === 0 ? 'Due today' : `${daysUntilDue}d left`}
-                  </span>
-                )}
-                {itemCount > 0 && (
-                  <span className="flex items-center gap-1">
-                    <Paperclip className="w-3 h-3" /> {itemCount}
-                  </span>
-                )}
-                {(t.stakeholders || []).length > 0 && (
-                  <span className="flex items-center gap-1">
-                    <Users className="w-3 h-3" /> {t.stakeholders!.length}
-                  </span>
-                )}
-                {t.summary && (
-                  <span className="flex items-center gap-1 text-purple-500">
-                    <Sparkles className="w-3 h-3" /> Analyzed
-                  </span>
-                )}
-                {t.notes && (
-                  <span className="text-xs text-green-500 flex items-center gap-1">
-                    <StickyNote className="w-3 h-3" /> Notes
-                  </span>
-                )}
-                {t.progress_percent != null && (
-                  <span className="flex items-center gap-1">
-                    <div className="w-12 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${t.progress_percent}%` }} />
-                    </div>
-                    {t.progress_percent}%
-                  </span>
-                )}
-                <span className="ml-auto">{formatRelativeDate(t.updated_at)}</span>
-              </div>
-            </div>
-            {/* Priority indicator */}
-            {t.priority > 0 && (
-              <div className={`w-2 h-8 rounded-full flex-shrink-0 ${
-                t.priority >= 4 ? 'bg-red-400' : t.priority >= 3 ? 'bg-amber-400' : t.priority >= 2 ? 'bg-blue-400' : 'bg-gray-300'
-              }`} title={`Priority ${t.priority}`} />
+          className="block px-4 py-3 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-lg transition-all shadow-sm group-hover:bg-gray-50/30">
+          {/* Row 1: Health dot + Title + Status + Area + Priority */}
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ring-2 ${freshness.color} ${freshness.ring}`} title={freshness.label} />
+            <h3 className="font-semibold text-gray-900 truncate text-sm">{t.title}</h3>
+            <span className={`text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 font-medium ${statusColors[t.status] || 'bg-gray-100 text-gray-600'}`}>
+              {t.status}
+            </span>
+            <span className={`text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 font-medium ${areaColors[t.area] || 'bg-gray-100 text-gray-600'}`}>
+              {t.area}
+            </span>
+            {renderPriorityStars(t.priority)}
+            {overdue && (
+              <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium flex-shrink-0 flex items-center gap-0.5">
+                <AlertTriangle className="w-3 h-3" /> Overdue
+              </span>
+            )}
+            {/* Tags inline */}
+            {(t.tags || []).slice(0, 2).map(tag => (
+              <span key={tag} className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0 hidden lg:inline-block">
+                {tag}
+              </span>
+            ))}
+            {(t.tags || []).length > 2 && (
+              <span className="text-[11px] text-gray-400 flex-shrink-0 hidden lg:inline-block">+{t.tags.length - 2}</span>
             )}
           </div>
-          {/* Topic health indicator + stale warning */}
-          {(() => {
-            const health = getTopicHealth(t);
-            const daysSinceUpdate = Math.floor((Date.now() - new Date(t.updated_at).getTime()) / (1000 * 60 * 60 * 24));
-            const isStale = daysSinceUpdate > 14 && t.status === 'active';
-
-            if (isStale) {
-              return (
-                <div className="mt-2 pt-2 border-t border-amber-200 bg-amber-50/50 -mx-4 -mb-4 px-4 pb-3 pt-2 rounded-b-xl">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs text-amber-700">
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      <span className="font-medium">Needs attention — {daysSinceUpdate} days since last update</span>
-                    </div>
-                    <span className="text-xs text-amber-500 flex items-center gap-1">
-                      <Zap className="w-3 h-3" /> Try AI Find
-                    </span>
-                  </div>
+          {/* Row 2: Meta stats */}
+          <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 pl-4">
+            {itemCount > 0 && (
+              <span className="flex items-center gap-1">
+                <Paperclip className="w-3 h-3" /> {itemCount} item{itemCount !== 1 ? 's' : ''}
+              </span>
+            )}
+            {contactCount > 0 && (
+              <span className="flex items-center gap-1">
+                <Users className="w-3 h-3" /> {contactCount} contact{contactCount !== 1 ? 's' : ''}
+              </span>
+            )}
+            {t.due_date && !overdue && (
+              <span className={`flex items-center gap-1 ${daysUntilDue !== null && daysUntilDue <= 3 ? 'text-amber-500' : ''}`}>
+                <Clock className="w-3 h-3" />
+                {daysUntilDue === 0 ? 'Due today' : `${daysUntilDue}d left`}
+              </span>
+            )}
+            {t.progress_percent != null && (
+              <span className="flex items-center gap-1">
+                <div className="w-10 h-1 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${t.progress_percent}%` }} />
                 </div>
-              );
-            }
-            if (health.score < 80) {
-              return (
-                <div className={`mt-2 pt-2 border-t border-gray-100 flex items-center gap-2 text-xs ${health.color}`}>
-                  <Heart className="w-3 h-3" />
-                  <span className="font-medium">{health.label}</span>
-                  <span className="text-gray-400">— {health.issues.slice(0, 2).join(', ')}</span>
-                </div>
-              );
-            }
-            return null;
-          })()}
+                {t.progress_percent}%
+              </span>
+            )}
+            {t.summary && (
+              <span className="flex items-center gap-1 text-purple-400">
+                <Sparkles className="w-3 h-3" /> AI
+              </span>
+            )}
+            {/* Source badges */}
+            {t.source_counts && Object.keys(t.source_counts).length > 0 && (
+              Object.entries(t.source_counts).slice(0, 3).map(([src, count]) => {
+                const icons: Record<string, typeof Mail> = { gmail: Mail, calendar: Calendar, drive: FileText, slack: MessageSquare, notion: BookOpen, manual: StickyNote };
+                const Icon = icons[src] || Paperclip;
+                return (
+                  <span key={src} className="flex items-center gap-0.5 text-gray-400">
+                    <Icon className="w-3 h-3" /> {count as number}
+                  </span>
+                );
+              })
+            )}
+            <span className="ml-auto text-gray-400">{formatRelativeDate(t.updated_at)}</span>
+          </div>
         </Link>
-        {/* Quick action buttons on hover */}
-        <div className="absolute top-3 right-12 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        {/* Quick action buttons on hover - Edit, Move, Pin, Archive */}
+        <div className="absolute top-2 right-12 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-all z-10">
           <Link href={`/topics/${t.id}`} onClick={(e) => e.stopPropagation()}
-            className="p-1.5 bg-white/90 border border-gray-200 text-gray-500 hover:text-purple-600 hover:bg-purple-50 hover:border-purple-200 rounded-lg shadow-sm transition-colors" title="View details">
-            <Eye className="w-3.5 h-3.5" />
+            className="p-1.5 bg-white border border-gray-200 text-gray-400 hover:text-blue-600 hover:bg-blue-50 hover:border-blue-200 rounded-lg shadow-sm transition-colors" title="Edit">
+            <Edit3 className="w-3 h-3" />
           </Link>
+          <button onClick={(e) => { e.preventDefault(); setMovingTopic(t.id); }}
+            className="p-1.5 bg-white border border-gray-200 text-gray-400 hover:text-amber-600 hover:bg-amber-50 hover:border-amber-200 rounded-lg shadow-sm transition-colors" title="Move to folder">
+            <Folder className="w-3 h-3" />
+          </button>
+          <button onClick={(e) => { e.preventDefault(); /* pin/priority toggle placeholder */ }}
+            className="p-1.5 bg-white border border-gray-200 text-gray-400 hover:text-purple-600 hover:bg-purple-50 hover:border-purple-200 rounded-lg shadow-sm transition-colors" title="Pin / Priority">
+            <Pin className="w-3 h-3" />
+          </button>
+          <button onClick={async (e) => {
+              e.preventDefault();
+              const res = await fetch(`/api/topics/${t.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'archived' }) });
+              if (res.ok) { setTopics(prev => prev.map(x => x.id === t.id ? { ...x, status: 'archived' } : x)); toast.success('Topic archived'); }
+            }}
+            className="p-1.5 bg-white border border-gray-200 text-gray-400 hover:text-red-600 hover:bg-red-50 hover:border-red-200 rounded-lg shadow-sm transition-colors" title="Archive">
+            <Archive className="w-3 h-3" />
+          </button>
         </div>
-        {/* Move to folder button */}
-        {movingTopic === t.id ? (
-          <div className="absolute top-2 right-2 z-10 bg-white border rounded-lg shadow-lg p-2 text-xs space-y-1 min-w-[160px]">
+        {/* Move to folder dropdown */}
+        {movingTopic === t.id && (
+          <div className="absolute top-2 right-2 z-20 bg-white border rounded-lg shadow-lg p-2 text-xs space-y-1 min-w-[160px]">
             <button onClick={() => moveTopicToFolder(t.id, null)} className="w-full text-left px-2 py-1.5 hover:bg-gray-100 rounded flex items-center gap-2">
               <X className="w-3 h-3" /> No folder
             </button>
@@ -528,33 +579,45 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             ))}
             <button onClick={() => setMovingTopic(null)} className="w-full text-left px-2 py-1.5 hover:bg-red-50 text-red-600 rounded">Cancel</button>
           </div>
-        ) : (
-          <button onClick={(e) => { e.preventDefault(); setMovingTopic(t.id); }}
-            className="absolute top-3 right-3 p-1.5 text-gray-300 hover:text-gray-600 hover:bg-gray-100 rounded opacity-0 group-hover:opacity-100 transition-opacity" title="Move to folder">
-            <MoveRight className="w-3.5 h-3.5" />
-          </button>
         )}
       </div>
     );
   };
 
-  // Render folder tree node
+  // Render folder tree node (improved with indentation guides and drag indicator)
   const renderFolderNode = (node: { folder: FolderType; children: any[]; depth: number }) => {
     const folderTopics = filteredTopics.filter(t => t.folder_id === node.folder.id);
     const isExpanded = expandedFolders.has(node.folder.id);
-    const totalCount = folderTopics.length + node.children.reduce((sum: number, c: any) => sum + filteredTopics.filter(t => t.folder_id === c.folder.id).length, 0);
+    // Recursively count all topics in this folder and subfolders
+    const countDeep = (n: { folder: FolderType; children: any[] }): number => {
+      const direct = filteredTopics.filter(t => t.folder_id === n.folder.id).length;
+      return direct + n.children.reduce((sum: number, c: any) => sum + countDeep(c), 0);
+    };
+    const totalCount = countDeep(node);
 
     return (
-      <div key={node.folder.id} className="mb-1">
-        <div className={`flex items-center gap-1 py-1.5 px-2 rounded-lg hover:bg-gray-100 group/folder ${node.depth > 0 ? '' : ''}`}
-          style={{ marginLeft: `${node.depth * 16}px` }}>
-          <button onClick={() => toggleFolder(node.folder.id)} className="p-0.5 text-gray-400 hover:text-gray-600">
-            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+      <div key={node.folder.id} className="mb-0.5">
+        <div className={`flex items-center gap-1 py-2 px-2 rounded-lg hover:bg-gray-50 group/folder relative transition-colors`}
+          style={{ marginLeft: `${node.depth * 20}px` }}>
+          {/* Indentation guide lines */}
+          {node.depth > 0 && (
+            <div className="absolute left-0 top-0 bottom-0" style={{ left: `${-4}px` }}>
+              <div className="w-px h-full bg-gray-200" />
+            </div>
+          )}
+          {/* Drag indicator on hover */}
+          <span className="opacity-0 group-hover/folder:opacity-40 transition-opacity cursor-grab text-gray-400 -ml-1 mr-0.5">
+            <GripVertical className="w-3.5 h-3.5" />
+          </span>
+          <button onClick={() => toggleFolder(node.folder.id)} className="p-0.5 text-gray-400 hover:text-gray-600 transition-transform">
+            <span className={`block transition-transform duration-200 ${isExpanded ? 'rotate-0' : '-rotate-90'}`}>
+              <ChevronDown className="w-4 h-4" />
+            </span>
           </button>
           {isExpanded ? (
-            <FolderOpen className="w-4 h-4 text-amber-500" />
+            <FolderOpen className="w-4 h-4 text-amber-500 flex-shrink-0" />
           ) : (
-            <Folder className="w-4 h-4 text-amber-500" />
+            <Folder className="w-4 h-4 text-amber-500 flex-shrink-0" />
           )}
           {editingFolder === node.folder.id ? (
             <div className="flex items-center gap-1 flex-1">
@@ -567,11 +630,13 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             <span className="text-sm font-medium text-gray-700 flex-1 cursor-pointer flex items-center gap-1.5" onClick={() => toggleFolder(node.folder.id)}>
               {node.folder.name}
               {node.folder.area && (
-                <span className={`text-xs px-1.5 py-0 rounded-full ${areaColors[node.folder.area] || 'bg-gray-100 text-gray-600'}`}>
+                <span className={`text-[11px] px-1.5 py-0 rounded-full ${areaColors[node.folder.area] || 'bg-gray-100 text-gray-600'}`}>
                   {node.folder.area}
                 </span>
               )}
-              {totalCount > 0 && <span className="text-gray-400 text-xs">({totalCount})</span>}
+              <span className={`text-[11px] font-normal px-1.5 py-0.5 rounded-full flex-shrink-0 ${totalCount > 0 ? 'bg-gray-100 text-gray-600' : 'text-gray-300'}`}>
+                {totalCount}
+              </span>
             </span>
           )}
           <div className="flex gap-0.5 opacity-0 group-hover/folder:opacity-100 transition-opacity">
@@ -589,14 +654,19 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             </button>
           </div>
         </div>
-        {isExpanded && (
-          <div className="ml-4">
+        {/* Collapsible content with animation */}
+        <div className={`overflow-hidden transition-all duration-200 ${isExpanded ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+          <div className="relative" style={{ marginLeft: `${node.depth * 20 + 10}px` }}>
+            {/* Vertical indentation guide for children */}
+            {(node.children.length > 0 || folderTopics.length > 0) && (
+              <div className="absolute left-[6px] top-0 bottom-2 w-px bg-gray-200" />
+            )}
             {node.children.map((child: any) => renderFolderNode(child))}
-            <div className="space-y-2 mt-1 mb-2" style={{ marginLeft: `${node.depth * 16 + 8}px` }}>
+            <div className="space-y-1.5 mt-1 mb-2 ml-3">
               {folderTopics.map(t => renderTopicCard(t))}
             </div>
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -605,12 +675,52 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
   return (
     <div>
+      {/* Dashboard Stats Cards */}
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        <button onClick={() => { setStatsFilter(statsFilter === 'active' ? null : 'active'); setFilterStatus('active'); setFilterArea('all'); }}
+          className={`p-3 rounded-xl border text-left transition-all ${statsFilter === 'active' ? 'border-blue-300 bg-blue-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500 font-medium">Active Topics</span>
+            <CircleDot className="w-3.5 h-3.5 text-blue-500" />
+          </div>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.active}</p>
+        </button>
+        <button onClick={() => {
+            if (dashboardStats.overdue > 0) {
+              setStatsFilter(statsFilter === 'overdue' ? null : 'overdue');
+              setFilterStatus('active');
+            }
+          }}
+          className={`p-3 rounded-xl border text-left transition-all ${statsFilter === 'overdue' ? 'border-red-300 bg-red-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500 font-medium">Overdue</span>
+            <AlertTriangle className={`w-3.5 h-3.5 ${dashboardStats.overdue > 0 ? 'text-red-500' : 'text-gray-300'}`} />
+          </div>
+          <p className={`text-2xl font-bold mt-1 ${dashboardStats.overdue > 0 ? 'text-red-600' : 'text-gray-900'}`}>{dashboardStats.overdue}</p>
+        </button>
+        <button onClick={() => { setStatsFilter(statsFilter === 'recent' ? null : 'recent'); }}
+          className={`p-3 rounded-xl border text-left transition-all ${statsFilter === 'recent' ? 'border-green-300 bg-green-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500 font-medium">Updated This Week</span>
+            <TrendingUp className="w-3.5 h-3.5 text-green-500" />
+          </div>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.updatedThisWeek}</p>
+        </button>
+        <div className="p-3 rounded-xl border border-gray-100 bg-white text-left">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500 font-medium">Avg Items/Topic</span>
+            <BarChart3 className="w-3.5 h-3.5 text-purple-500" />
+          </div>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardStats.avgItems}</p>
+        </div>
+      </div>
+
       {/* Search + Actions bar */}
       <div className="flex items-center gap-3 mb-4">
         <div className="flex-1 relative">
           <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search topics..." className="w-full pl-10 pr-8 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input ref={searchInputRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search topics... (press / to focus)" className="w-full pl-10 pr-8 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           {searchQuery && (
             <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
               <X className="w-4 h-4" />
@@ -755,6 +865,40 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
         </div>
       )}
 
+      {/* Active filter chips */}
+      {hasActiveFilters && (
+        <div className="mb-4 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-500 font-medium">Active filters:</span>
+          {searchQuery.trim() && (
+            <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+              Search: &ldquo;{searchQuery}&rdquo;
+              <button onClick={() => setSearchQuery('')} className="ml-0.5 hover:text-blue-900"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filterArea !== 'all' && (
+            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border ${areaColors[filterArea] || 'bg-gray-50 text-gray-600'} border-current/20`}>
+              Area: {filterArea}
+              <button onClick={() => setFilterArea('all')} className="ml-0.5 hover:opacity-70"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filterStatus !== 'active' && (
+            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border ${statusColors[filterStatus] || 'bg-gray-50 text-gray-600'} border-current/20`}>
+              Status: {filterStatus}
+              <button onClick={() => setFilterStatus('active')} className="ml-0.5 hover:opacity-70"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {statsFilter && (
+            <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+              Dashboard: {statsFilter}
+              <button onClick={() => setStatsFilter(null)} className="ml-0.5 hover:text-purple-900"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          <button onClick={clearAllFilters} className="text-xs text-red-600 hover:text-red-800 hover:underline ml-1">
+            Clear all
+          </button>
+        </div>
+      )}
+
       {/* Create folder form */}
       {showCreateFolder && (
         <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex gap-2 items-center flex-wrap">
@@ -841,7 +985,12 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
       {/* Results count */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">{filteredTopics.length} topic{filteredTopics.length !== 1 ? 's' : ''}</span>
+          <span className="text-sm text-gray-500">
+            {filteredTopics.length === topics.length
+              ? `${filteredTopics.length} topic${filteredTopics.length !== 1 ? 's' : ''}`
+              : `Showing ${filteredTopics.length} of ${topics.length} topics`
+            }
+          </span>
           {filteredTopics.length > 0 && (
             <button onClick={() => {
               if (selectedTopics.size === filteredTopics.length) setSelectedTopics(new Set());
@@ -851,14 +1000,44 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             </button>
           )}
         </div>
+        <div className="text-[11px] text-gray-400 flex items-center gap-3">
+          <span title="New topic">N</span>
+          <span title="Focus search">/</span>
+          <span title="Clear filters">Esc</span>
+        </div>
       </div>
 
       {/* Topic list */}
       {filteredTopics.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-xl border border-gray-100 shadow-sm">
-          <p className="text-gray-500">{searchQuery ? `No topics match "${searchQuery}"` : 'No topics found'}</p>
-          <button onClick={() => { setShowCreate(true); setSearchQuery(''); }}
-            className="mt-3 text-blue-600 hover:underline text-sm">Create your first topic &rarr;</button>
+        <div className="text-center py-20 bg-white rounded-xl border border-gray-100 shadow-sm">
+          {/* Empty state illustration */}
+          <div className="mx-auto w-16 h-16 rounded-full bg-gray-50 flex items-center justify-center mb-4">
+            <Inbox className="w-8 h-8 text-gray-300" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-700 mb-1">
+            {hasActiveFilters ? 'No matching topics' : 'No topics yet'}
+          </h3>
+          <p className="text-sm text-gray-400 mb-6 max-w-sm mx-auto">
+            {hasActiveFilters
+              ? `No topics match your current filters.${searchQuery ? ` Try a different search term.` : ''}`
+              : 'Create your first topic to start organizing your items, or import from your connected sources.'}
+          </p>
+          <div className="flex items-center justify-center gap-3">
+            {hasActiveFilters && (
+              <button onClick={clearAllFilters}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
+                Clear Filters
+              </button>
+            )}
+            <button onClick={() => { setShowCreate(true); setSearchQuery(''); }}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Create Topic
+            </button>
+            <button onClick={handleSuggestTopics} disabled={!!aiLoading}
+              className="px-4 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-sm font-medium hover:bg-purple-100 transition-colors flex items-center gap-2 disabled:opacity-50">
+              <Brain className="w-4 h-4" /> Import from Sources
+            </button>
+          </div>
         </div>
       ) : viewMode === 'folders' && folders.length > 0 ? (
         <div>
@@ -871,14 +1050,14 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                 <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Unfiled</span>
                 <span className="text-xs text-gray-300">({unfolderedTopics.length})</span>
               </div>
-              <div className="grid gap-2">
+              <div className="grid gap-1.5">
                 {unfolderedTopics.map(t => renderTopicCard(t))}
               </div>
             </div>
           )}
         </div>
       ) : (
-        <div className="grid gap-2">
+        <div className="grid gap-1.5">
           {filteredTopics.map(t => renderTopicCard(t))}
         </div>
       )}

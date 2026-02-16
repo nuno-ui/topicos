@@ -22,17 +22,23 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json();
-  const { title, description, area = 'work', due_date } = body;
+  const { title, description, area = 'work', due_date, start_date, priority, tags, folder_id, status: topicStatus } = body;
   if (!title) return NextResponse.json({ error: 'Title is required' }, { status: 400 });
 
-  const { data, error } = await supabase.from('topics').insert({
+  const insertData: Record<string, unknown> = {
     title,
     description: description || null,
     area,
     due_date: due_date || null,
     user_id: user.id,
-    status: 'active',
-  }).select().single();
+    status: topicStatus || 'active',
+  };
+  if (start_date) insertData.start_date = start_date;
+  if (priority != null) insertData.priority = priority;
+  if (tags) insertData.tags = tags;
+  if (folder_id) insertData.folder_id = folder_id;
+
+  const { data, error } = await supabase.from('topics').insert(insertData).select().single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ topic: data }, { status: 201 });

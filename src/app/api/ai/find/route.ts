@@ -58,74 +58,41 @@ ${noteContext}`;
       notion_queries: string[];
     }>(system, context);
 
-    // 3. Execute searches in parallel for each query
+    // 3. Execute searches in PARALLEL for all sources (much faster than sequential)
     const allResults: Array<{ external_id: string; source: string; source_account_id: string; title: string; snippet: string; url: string; occurred_at: string; metadata: Record<string, unknown> }> = [];
     const queriesUsed: Array<{ source: string; queries: string[] }> = [];
 
-    // Search Gmail
-    if (queries.gmail_queries?.length) {
-      queriesUsed.push({ source: 'gmail', queries: queries.gmail_queries });
-      for (const q of queries.gmail_queries) {
-        try {
-          const results = await searchAllSources(user.id, { query: q, sources: ['gmail'], topic_id, max_results: 10 });
-          for (const r of results) {
-            allResults.push(...r.items);
-          }
-        } catch { /* continue */ }
+    const sourceQueryMap: Array<{ source: string; key: keyof typeof queries; searchSource: string }> = [
+      { source: 'gmail', key: 'gmail_queries', searchSource: 'gmail' },
+      { source: 'calendar', key: 'calendar_queries', searchSource: 'calendar' },
+      { source: 'drive', key: 'drive_queries', searchSource: 'drive' },
+      { source: 'slack', key: 'slack_queries', searchSource: 'slack' },
+      { source: 'notion', key: 'notion_queries', searchSource: 'notion' },
+    ];
+
+    // Build all search promises
+    const searchPromises: Promise<void>[] = [];
+
+    for (const { source, key, searchSource } of sourceQueryMap) {
+      const sourceQueries = queries[key];
+      if (sourceQueries?.length) {
+        queriesUsed.push({ source, queries: sourceQueries });
+        for (const q of sourceQueries) {
+          searchPromises.push(
+            searchAllSources(user.id, { query: q, sources: [searchSource], topic_id, max_results: 10 })
+              .then(results => {
+                for (const r of results) {
+                  allResults.push(...r.items);
+                }
+              })
+              .catch(() => { /* continue on error */ })
+          );
+        }
       }
     }
 
-    // Search Calendar
-    if (queries.calendar_queries?.length) {
-      queriesUsed.push({ source: 'calendar', queries: queries.calendar_queries });
-      for (const q of queries.calendar_queries) {
-        try {
-          const results = await searchAllSources(user.id, { query: q, sources: ['calendar'], topic_id, max_results: 10 });
-          for (const r of results) {
-            allResults.push(...r.items);
-          }
-        } catch { /* continue */ }
-      }
-    }
-
-    // Search Drive
-    if (queries.drive_queries?.length) {
-      queriesUsed.push({ source: 'drive', queries: queries.drive_queries });
-      for (const q of queries.drive_queries) {
-        try {
-          const results = await searchAllSources(user.id, { query: q, sources: ['drive'], topic_id, max_results: 10 });
-          for (const r of results) {
-            allResults.push(...r.items);
-          }
-        } catch { /* continue */ }
-      }
-    }
-
-    // Search Slack
-    if (queries.slack_queries?.length) {
-      queriesUsed.push({ source: 'slack', queries: queries.slack_queries });
-      for (const q of queries.slack_queries) {
-        try {
-          const results = await searchAllSources(user.id, { query: q, sources: ['slack'], topic_id, max_results: 10 });
-          for (const r of results) {
-            allResults.push(...r.items);
-          }
-        } catch { /* continue */ }
-      }
-    }
-
-    // Search Notion
-    if (queries.notion_queries?.length) {
-      queriesUsed.push({ source: 'notion', queries: queries.notion_queries });
-      for (const q of queries.notion_queries) {
-        try {
-          const results = await searchAllSources(user.id, { query: q, sources: ['notion'], topic_id, max_results: 10 });
-          for (const r of results) {
-            allResults.push(...r.items);
-          }
-        } catch { /* continue */ }
-      }
-    }
+    // Execute all searches in parallel
+    await Promise.all(searchPromises);
 
     // 4. Deduplicate
     const seen = new Set<string>();

@@ -23,7 +23,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="antialiased">
         {children}
-        <Toaster position="top-right" richColors closeButton />
+        <Toaster
+          position="top-right"
+          richColors
+          closeButton
+          toastOptions={{
+            style: {
+              borderRadius: '12px',
+              fontSize: '13px',
+            },
+            className: 'shadow-lg',
+          }}
+          gap={8}
+        />
       </body>
     </html>
   );

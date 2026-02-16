@@ -7,7 +7,7 @@ import {
   Edit3, Save, Trash2, Sparkles, Brain, UserPlus, Network, Wand2, ExternalLink,
   Clock, TrendingUp, TrendingDown, Activity,
   Upload, LayoutList, Building2, CheckSquare, Square, Filter, ArrowUpDown, ArrowRight,
-  ChevronDown
+  ChevronDown, Download, Hash
 } from 'lucide-react';
 
 interface Contact {
@@ -93,8 +93,19 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
   const [filterActivity, setFilterActivity] = useState<string>('');
   const [filterHasEmail, setFilterHasEmail] = useState(false);
 
-  // Improvement 28: Sort Options
-  const [sortBy, setSortBy] = useState<string>('name-asc');
+  // Improvement 28: Sort Options (persisted in localStorage)
+  const [sortBy, setSortByState] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('contacts-sort') || 'name-asc';
+    }
+    return 'name-asc';
+  });
+  const setSortBy = useCallback((value: string) => {
+    setSortByState(value);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('contacts-sort', value);
+    }
+  }, []);
 
   // Improvement 30: Import modal state
   const [showImport, setShowImport] = useState(false);
@@ -328,10 +339,12 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
         if (showCreate) setShowCreate(false);
         else if (editingContact) setEditingContact(null);
         else if (selectedContact) setSelectedContact(null);
+        else if (searchQuery) { setSearchQuery(''); searchInputRef.current?.blur(); }
+        else if (selectedIds.size > 0) { deselectAll(); setSelectMode(false); }
         else setSelectedIndex(-1);
         break;
     }
-  }, [selectedIndex, filteredContacts, showCreate, editingContact, selectedContact, router]);
+  }, [selectedIndex, filteredContacts, showCreate, editingContact, selectedContact, searchQuery, selectedIds, router]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -649,19 +662,35 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
   // ========== RENDER: Contact Card (Improvement 29) ==========
 
+  const isRecentActivity = (c: Contact) => {
+    if (!c.last_interaction_at) return false;
+    const daysSince = Math.floor((Date.now() - new Date(c.last_interaction_at).getTime()) / (1000 * 60 * 60 * 24));
+    return daysSince <= 7;
+  };
+
   const renderContactCard = (c: Contact, index: number = -1) => {
     const interaction = getInteractionScore(c);
     const isSelected = selectedIds.has(c.id);
     const isKeyboardSelected = index === selectedIndex && index >= 0;
+    const hasRecentActivity = isRecentActivity(c);
 
     return (
       <div key={c.id} id={`contact-card-${index}`}>
         <div
-          className={`w-full p-4 bg-white rounded-xl border transition-all shadow-sm text-left cursor-pointer group ${
-            isSelected ? 'border-blue-400 bg-blue-50/30' : isKeyboardSelected ? 'border-indigo-300 bg-indigo-50/20 shadow-md ring-1 ring-indigo-200' : 'border-gray-100 hover:border-blue-200 hover:shadow-md'
+          className={`w-full bg-white rounded-xl border transition-all text-left cursor-pointer group relative overflow-hidden ${
+            isSelected
+              ? 'border-blue-400 bg-blue-50/30 shadow-sm'
+              : isKeyboardSelected
+                ? 'border-indigo-300 bg-indigo-50/20 shadow-md ring-1 ring-indigo-200'
+                : 'border-gray-100 shadow-sm hover:shadow-md hover:border-blue-200 hover:-translate-y-px'
           }`}
         >
-          <div className="flex items-center gap-3">
+          {/* Gradient left border for recent activity */}
+          {hasRecentActivity && (
+            <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl bg-gradient-to-b from-green-400 via-emerald-500 to-teal-500" />
+          )}
+
+          <div className={`flex items-center gap-3 py-3 pr-4 ${hasRecentActivity ? 'pl-5' : 'pl-4'}`}>
             {/* Checkbox for bulk select */}
             {(selectMode || isSelected) && (
               <button
@@ -684,16 +713,18 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
             )}
 
             {/* Avatar */}
-            <div className={`w-10 h-10 rounded-full font-medium text-sm flex items-center justify-center flex-shrink-0 ${getAvatarColor(c.name)}`}>
+            <div className={`w-9 h-9 rounded-full font-semibold text-xs flex items-center justify-center flex-shrink-0 ${getAvatarColor(c.name)}`}>
               {initials(c.name)}
             </div>
 
-            {/* Row 1: Name + Area badge + Engagement */}
+            {/* Row 1: Name + Area badge + Activity trend arrow */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <p className="font-medium text-gray-900" onClick={() => router.push(`/contacts/${c.id}`)}>{c.name}</p>
+                <button className="font-semibold text-sm text-gray-900 hover:text-blue-700 transition-colors truncate" onClick={() => router.push(`/contacts/${c.id}`)}>
+                  {c.name}
+                </button>
                 {c.area && (
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide ${
                     c.area === 'work' ? 'bg-blue-100 text-blue-700' :
                     c.area === 'personal' ? 'bg-green-100 text-green-700' :
                     'bg-purple-100 text-purple-700'
@@ -701,50 +732,53 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                     {c.area}
                   </span>
                 )}
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-0.5 ${interaction.color}`}>
-                  {interaction.score >= 3 ? <TrendingUp className="w-3 h-3" /> : interaction.score >= 1 ? <ArrowRight className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                  {interaction.label}
-                </span>
+                {interaction.score >= 3
+                  ? <TrendingUp className="w-3.5 h-3.5 text-green-500" />
+                  : interaction.score >= 1
+                    ? <ArrowRight className="w-3.5 h-3.5 text-amber-400" />
+                    : <TrendingDown className="w-3.5 h-3.5 text-gray-300" />
+                }
               </div>
 
               {/* Row 2: Organization + Role + Topics count + Last interaction */}
-              <div className="flex gap-3 text-xs text-gray-500 mt-1 flex-wrap">
+              <div className="flex items-center gap-2.5 text-xs text-gray-500 mt-0.5 flex-wrap">
                 {c.organization && (
-                  <span className="flex items-center gap-1">
-                    <Building className="w-3 h-3" /> {c.organization}
+                  <span className="flex items-center gap-1 text-gray-600">
+                    <Building className="w-3 h-3 text-gray-400" /> {c.organization}
                   </span>
                 )}
                 {c.role && (
-                  <span className="text-gray-400">{c.role}</span>
+                  <span className="text-gray-400 italic">{c.role}</span>
                 )}
                 {c.contact_topic_links && c.contact_topic_links.length > 0 && (
-                  <span className="text-blue-600">
+                  <span className="flex items-center gap-0.5 text-blue-600 font-medium">
+                    <Hash className="w-3 h-3" />
                     {c.contact_topic_links.length} topic{c.contact_topic_links.length !== 1 ? 's' : ''}
                   </span>
                 )}
-                <span className="flex items-center gap-1 text-gray-400">
+                <span className="flex items-center gap-1 text-gray-400 ml-auto">
                   <Clock className="w-3 h-3" /> {getRelativeTime(c.last_interaction_at)}
                 </span>
               </div>
             </div>
 
             {/* Quick action icons on hover */}
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-0.5">
               {c.email && (
                 <a href={`mailto:${c.email}`} onClick={e => e.stopPropagation()}
-                  className="p-1.5 text-gray-300 hover:text-green-600 hover:bg-green-50 rounded transition-colors opacity-0 group-hover:opacity-100" title="Send email">
+                  className="p-1.5 text-gray-300 hover:text-green-600 hover:bg-green-50 rounded-lg transition-all opacity-0 group-hover:opacity-100" title="Send email">
                   <Mail className="w-3.5 h-3.5" />
                 </a>
               )}
               <button
                 onClick={(e) => { e.stopPropagation(); router.push(`/contacts/${c.id}`); }}
-                className="p-1.5 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors opacity-0 group-hover:opacity-100" title="View contact"
+                className="p-1.5 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100" title="View contact"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setSelectedContact(selectedContact === c.id ? null : c.id); }}
-                className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg transition-colors"
               >
                 <ChevronRight className={`w-4 h-4 transition-transform ${selectedContact === c.id ? 'rotate-90' : ''}`} />
               </button>
@@ -893,67 +927,39 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
   return (
     <div>
-      {/* ===== Improvement 38: Dashboard Summary Cards ===== */}
+      {/* ===== Dashboard Summary Cards ===== */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <button
-          onClick={() => setDashboardFilter(dashboardFilter === 'total' ? '' : 'total')}
-          className={`p-4 rounded-xl border transition-all text-left ${
-            dashboardFilter === 'total' ? 'border-blue-400 bg-blue-50 shadow-md' : 'border-gray-100 bg-white hover:border-blue-200 hover:shadow-sm'
-          }`}
-        >
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
-              <Users className="w-4 h-4 text-blue-600" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{dashboardStats.total}</p>
-          <p className="text-xs text-gray-500">Total Contacts</p>
-        </button>
-
-        <button
-          onClick={() => setDashboardFilter(dashboardFilter === 'organizations' ? '' : 'organizations')}
-          className={`p-4 rounded-xl border transition-all text-left ${
-            dashboardFilter === 'organizations' ? 'border-purple-400 bg-purple-50 shadow-md' : 'border-gray-100 bg-white hover:border-purple-200 hover:shadow-sm'
-          }`}
-        >
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
-              <Building2 className="w-4 h-4 text-purple-600" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{dashboardStats.organizations}</p>
-          <p className="text-xs text-gray-500">Organizations</p>
-        </button>
-
-        <button
-          onClick={() => setDashboardFilter(dashboardFilter === 'active30' ? '' : 'active30')}
-          className={`p-4 rounded-xl border transition-all text-left ${
-            dashboardFilter === 'active30' ? 'border-green-400 bg-green-50 shadow-md' : 'border-gray-100 bg-white hover:border-green-200 hover:shadow-sm'
-          }`}
-        >
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
-              <Activity className="w-4 h-4 text-green-600" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{dashboardStats.active30}</p>
-          <p className="text-xs text-gray-500">Active in 30d</p>
-        </button>
-
-        <button
-          onClick={() => setDashboardFilter(dashboardFilter === 'followup' ? '' : 'followup')}
-          className={`p-4 rounded-xl border transition-all text-left ${
-            dashboardFilter === 'followup' ? 'border-amber-400 bg-amber-50 shadow-md' : 'border-gray-100 bg-white hover:border-amber-200 hover:shadow-sm'
-          }`}
-        >
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
-              <Clock className="w-4 h-4 text-amber-600" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{dashboardStats.needsFollowup}</p>
-          <p className="text-xs text-gray-500">Needs Follow-up</p>
-        </button>
+        {([
+          { key: 'total', value: dashboardStats.total, label: 'Total Contacts', icon: Users, colors: { border: 'border-blue-400', bg: 'bg-blue-50', iconBg: 'bg-blue-100', iconText: 'text-blue-600', hoverBorder: 'hover:border-blue-200' } },
+          { key: 'organizations', value: dashboardStats.organizations, label: 'Organizations', icon: Building2, colors: { border: 'border-purple-400', bg: 'bg-purple-50', iconBg: 'bg-purple-100', iconText: 'text-purple-600', hoverBorder: 'hover:border-purple-200' } },
+          { key: 'active30', value: dashboardStats.active30, label: 'Active in 30d', icon: Activity, colors: { border: 'border-green-400', bg: 'bg-green-50', iconBg: 'bg-green-100', iconText: 'text-green-600', hoverBorder: 'hover:border-green-200' } },
+          { key: 'followup', value: dashboardStats.needsFollowup, label: 'Needs Follow-up', icon: Clock, colors: { border: 'border-amber-400', bg: 'bg-amber-50', iconBg: 'bg-amber-100', iconText: 'text-amber-600', hoverBorder: 'hover:border-amber-200' } },
+        ] as const).map(stat => {
+          const Icon = stat.icon;
+          const isActive = dashboardFilter === stat.key;
+          return (
+            <button
+              key={stat.key}
+              onClick={() => setDashboardFilter(isActive ? '' : stat.key)}
+              className={`p-4 rounded-xl border transition-all text-left group/stat ${
+                isActive
+                  ? `${stat.colors.border} ${stat.colors.bg} shadow-md ring-1 ring-inset ${stat.colors.border.replace('border-', 'ring-')}/30`
+                  : `border-gray-100 bg-white ${stat.colors.hoverBorder} hover:shadow-sm`
+              }`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className={`w-8 h-8 rounded-lg ${stat.colors.iconBg} flex items-center justify-center transition-transform group-hover/stat:scale-110`}>
+                  <Icon className={`w-4 h-4 ${stat.colors.iconText}`} />
+                </div>
+                {isActive && (
+                  <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wide">Filtered</span>
+                )}
+              </div>
+              <p className="text-2xl font-bold text-gray-900 tabular-nums">{stat.value}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{stat.label}</p>
+            </button>
+          );
+        })}
       </div>
 
       {/* AI Assistants Panel */}
@@ -987,14 +993,16 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
             ref={searchInputRef}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search contacts... (press / to focus)"
-            className="w-full pl-10 pr-8 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="Search contacts..."
+            className="w-full pl-10 pr-14 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 focus:bg-white transition-colors"
           />
-          {searchQuery && (
+          {searchQuery ? (
             <button onClick={() => setSearchQuery('')}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
               <X className="w-4 h-4" />
             </button>
+          ) : (
+            <kbd className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-gray-400 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5 pointer-events-none">/</kbd>
           )}
         </div>
 
@@ -1320,37 +1328,52 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
       {/* ===== MAIN CONTENT ===== */}
       {contacts.length === 0 && !searchQuery ? (
-        /* ===== Improvement 30: Empty State with Onboarding ===== */
-        <div className="text-center py-12">
-          <Users className="w-12 h-12 text-gray-200 mx-auto mb-4" />
-          <h2 className="text-lg font-semibold text-gray-700 mb-2">No contacts yet</h2>
-          <p className="text-sm text-gray-400 mb-8 max-w-md mx-auto">
-            Contacts help you track relationships across all your topics
+        /* ===== Empty State with Onboarding ===== */
+        <div className="text-center py-16">
+          {/* Illustration */}
+          <div className="relative w-24 h-24 mx-auto mb-6">
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-100 via-purple-50 to-green-100 rounded-3xl rotate-6" />
+            <div className="absolute inset-0 bg-white rounded-3xl shadow-sm flex items-center justify-center">
+              <Users className="w-10 h-10 text-blue-400" />
+            </div>
+            <div className="absolute -top-1 -right-1 w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center">
+              <Sparkles className="w-3 h-3 text-purple-500" />
+            </div>
+          </div>
+
+          <h2 className="text-xl font-bold text-gray-800 mb-2">No contacts yet</h2>
+          <p className="text-sm text-gray-500 mb-2 max-w-lg mx-auto">
+            Build your relationship network by adding contacts. Track interactions, link them to topics, and let AI help you stay on top of important connections.
           </p>
+          <p className="text-xs text-gray-400 mb-10">Choose how you want to get started:</p>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto">
-            {/* Card 1: Extract from Topics */}
+            {/* Card 1: Extract from Topics (AI) */}
             <button
               onClick={runExtractContacts}
               disabled={!!agentLoading}
-              className="p-6 bg-white rounded-xl border-2 border-purple-100 hover:border-purple-300 hover:shadow-lg transition-all text-left group"
+              className="p-6 bg-white rounded-xl border-2 border-purple-100 hover:border-purple-300 hover:shadow-lg transition-all text-left group relative overflow-hidden"
             >
-              <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center mb-3 group-hover:bg-purple-200 transition-colors">
-                <UserPlus className="w-5 h-5 text-purple-600" />
+              <div className="absolute top-2 right-2">
+                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded-full">AI</span>
               </div>
-              <h3 className="text-sm font-semibold text-gray-900 mb-1">Extract from Topics</h3>
-              <p className="text-xs text-gray-500">AI scans your linked items to discover contacts</p>
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-100 to-purple-50 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <UserPlus className="w-6 h-6 text-purple-600" />
+              </div>
+              <h3 className="text-sm font-bold text-gray-900 mb-1">Extract from Topics</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">AI scans your emails, docs, and linked items to automatically discover contacts</p>
             </button>
 
-            {/* Card 2: Import Contacts */}
+            {/* Card 2: Import Contacts (CSV) */}
             <button
               onClick={() => setShowImport(true)}
               className="p-6 bg-white rounded-xl border-2 border-blue-100 hover:border-blue-300 hover:shadow-lg transition-all text-left group"
             >
-              <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center mb-3 group-hover:bg-blue-200 transition-colors">
-                <Upload className="w-5 h-5 text-blue-600" />
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Upload className="w-6 h-6 text-blue-600" />
               </div>
-              <h3 className="text-sm font-semibold text-gray-900 mb-1">Import Contacts</h3>
-              <p className="text-xs text-gray-500">Upload a CSV or vCard file</p>
+              <h3 className="text-sm font-bold text-gray-900 mb-1">Import Contacts</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">Upload a CSV or vCard file from your existing address book or CRM</p>
             </button>
 
             {/* Card 3: Add Manually */}
@@ -1358,13 +1381,17 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
               onClick={() => setShowCreate(true)}
               className="p-6 bg-white rounded-xl border-2 border-green-100 hover:border-green-300 hover:shadow-lg transition-all text-left group"
             >
-              <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center mb-3 group-hover:bg-green-200 transition-colors">
-                <Plus className="w-5 h-5 text-green-600" />
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-100 to-green-50 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Plus className="w-6 h-6 text-green-600" />
               </div>
-              <h3 className="text-sm font-semibold text-gray-900 mb-1">Add Manually</h3>
-              <p className="text-xs text-gray-500">Create a contact by hand</p>
+              <h3 className="text-sm font-bold text-gray-900 mb-1">Add Manually</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">Create a contact by hand with name, email, organization, and custom notes</p>
             </button>
           </div>
+
+          <p className="text-[11px] text-gray-400 mt-8">
+            Keyboard shortcut: press <kbd className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-[10px] font-mono border border-gray-200">N</kbd> to add a new contact
+          </p>
         </div>
       ) : filteredContacts.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-xl border border-gray-100 shadow-sm">
@@ -1458,22 +1485,32 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
         </div>
       )}
 
-      {/* ===== Improvement 26: Floating Bulk Actions Bar ===== */}
+      {/* ===== Floating Bulk Actions Bar ===== */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white rounded-2xl shadow-2xl border border-gray-200 px-6 py-3 flex items-center gap-4">
-          <span className="text-sm font-semibold text-gray-700">
-            {selectedIds.size} selected
-          </span>
-          <div className="w-px h-6 bg-gray-200" />
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white rounded-2xl shadow-2xl border border-gray-200 px-6 py-3 flex items-center gap-3 animate-in slide-in-from-bottom-4">
+          <div className="flex items-center gap-2 pr-3 border-r border-gray-200">
+            <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center tabular-nums">
+              {selectedIds.size}
+            </div>
+            <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
+              contact{selectedIds.size !== 1 ? 's' : ''} selected
+            </span>
+          </div>
 
-          {/* Set Area dropdown */}
+          {/* Delete Selected */}
+          <button onClick={bulkDelete}
+            className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 flex items-center gap-1.5 transition-colors">
+            <Trash2 className="w-3.5 h-3.5" /> Delete
+          </button>
+
+          {/* Assign Area dropdown */}
           <div className="relative">
             <select
-              onChange={e => { if (e.target.value) bulkSetArea(e.target.value); e.target.value = ''; }}
-              defaultValue=""
+              onChange={e => { if (e.target.value !== '') bulkSetArea(e.target.value); e.target.value = '__placeholder__'; }}
+              defaultValue="__placeholder__"
               className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="" disabled>Set Area...</option>
+              <option value="__placeholder__" disabled>Assign Area</option>
               <option value="work">Work</option>
               <option value="personal">Personal</option>
               <option value="career">Career</option>
@@ -1481,14 +1518,53 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
             </select>
           </div>
 
-          <button onClick={bulkDelete}
-            className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 flex items-center gap-1 transition-colors">
-            <Trash2 className="w-3.5 h-3.5" /> Delete Selected
+          {/* AI Enrich All */}
+          <button
+            onClick={async () => {
+              const ids = Array.from(selectedIds);
+              toast.info(`Enriching ${ids.length} contact(s)...`);
+              let enriched = 0;
+              for (const id of ids) {
+                try {
+                  await runEnrichContact(id);
+                  enriched++;
+                } catch { /* skip */ }
+              }
+              toast.success(`Enriched ${enriched} of ${ids.length} contact(s)`);
+            }}
+            disabled={!!agentLoading}
+            className="px-3 py-1.5 bg-purple-50 text-purple-600 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 flex items-center gap-1.5 transition-colors disabled:opacity-50">
+            {agentLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />} AI Enrich
           </button>
 
-          <button onClick={deselectAll}
-            className="px-3 py-1.5 text-gray-500 hover:text-gray-700 text-xs font-medium">
-            Deselect All
+          {/* Export Selected */}
+          <button
+            onClick={() => {
+              const selected = contacts.filter(c => selectedIds.has(c.id));
+              const csv = [
+                ['Name', 'Email', 'Organization', 'Role', 'Area', 'Notes'].join(','),
+                ...selected.map(c =>
+                  [c.name, c.email || '', c.organization || '', c.role || '', c.area || '', (c.notes || '').replace(/,/g, ';')].map(v => `"${v}"`).join(',')
+                ),
+              ].join('\n');
+              const blob = new Blob([csv], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `contacts-export-${new Date().toISOString().slice(0, 10)}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+              toast.success(`Exported ${selected.length} contact(s) as CSV`);
+            }}
+            className="px-3 py-1.5 bg-gray-50 text-gray-600 border border-gray-200 rounded-lg text-xs font-medium hover:bg-gray-100 flex items-center gap-1.5 transition-colors">
+            <Download className="w-3.5 h-3.5" /> Export
+          </button>
+
+          <div className="w-px h-6 bg-gray-200" />
+
+          <button onClick={() => { deselectAll(); setSelectMode(false); }}
+            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors" title="Deselect all">
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}

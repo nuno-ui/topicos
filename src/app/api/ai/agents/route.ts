@@ -52,13 +52,17 @@ export async function POST(request: Request) {
         // AI suggests a better title for a topic
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
-        const { data: items } = await supabase.from('topic_items').select('title, source').eq('topic_id', topic_id).limit(10);
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(10);
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
         const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ suggestions: string[] }>(
-          'Suggest 3 clear, concise titles for this topic based on its content. Return JSON: { "suggestions": ["Title 1", "Title 2", "Title 3"] }',
-          `Current: ${topic.title}\nDescription: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string }) => `[${i.source}] ${i.title}`).join('\n')}\n${noteContext}`
+          'Suggest 3 clear, concise titles for this topic based on its content from all sources. Return JSON: { "suggestions": ["Title 1", "Title 2", "Title 3"] }',
+          `Current: ${topic.title}\nDescription: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
+            const content = i.body || i.snippet || '';
+            const preview = content.length > 300 ? content.substring(0, 300) + '...' : content;
+            return `[${i.source}] ${i.title}${preview ? ': ' + preview : ''}`;
+          }).join('\n')}\n${noteContext}`
         );
 
         result = { suggestions: data.suggestions };
@@ -136,12 +140,16 @@ export async function POST(request: Request) {
         // AI generates a daily briefing
         const { data: topics } = await supabase.from('topics').select('id, title, description, due_date, status, priority, summary, tags')
           .eq('user_id', user.id).eq('status', 'active').order('priority', { ascending: false }).limit(10);
-        const { data: recentItems } = await supabase.from('topic_items').select('title, source, occurred_at, topics(title)')
+        const { data: recentItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topics(title)')
           .eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);
 
         const { text } = await callClaude(
-          'You are an executive assistant. Generate a concise daily briefing for the user. Include: 1) Priority items needing attention today, 2) Key updates from recent activity, 3) Upcoming deadlines, 4) Suggested focus areas. Keep it brief and actionable.',
-          `Date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}\n\nActive Topics:\n${(topics || []).map((t: Record<string, unknown>) => `- ${t.title} (priority: ${t.priority || 0}, due: ${t.due_date || 'none'}, tags: ${(t.tags as string[] || []).join(', ')})\n  Summary: ${(t.summary as string || 'No summary').substring(0, 200)}`).join('\n')}\n\nRecent Items:\n${(recentItems || []).map((i: Record<string, unknown>) => `- [${i.source}] ${i.title} (${i.occurred_at})`).join('\n')}`
+          'You are an executive assistant. Generate a concise daily briefing for the user based on ALL their connected sources (email, calendar, drive, slack, notion, notes, links). Include: 1) Priority items needing attention today, 2) Key updates from recent activity, 3) Upcoming deadlines, 4) Suggested focus areas. Keep it brief and actionable.',
+          `Date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}\n\nActive Topics:\n${(topics || []).map((t: Record<string, unknown>) => `- ${t.title} (priority: ${t.priority || 0}, due: ${t.due_date || 'none'}, tags: ${(t.tags as string[] || []).join(', ')})\n  Summary: ${(t.summary as string || 'No summary').substring(0, 200)}`).join('\n')}\n\nRecent Items (from all sources):\n${(recentItems || []).map((i: Record<string, unknown>) => {
+            const content = (i.body as string) || (i.snippet as string) || '';
+            const preview = content.length > 300 ? content.substring(0, 300) + '...' : content;
+            return `- [${i.source}] ${i.title} (${i.occurred_at}) → ${(i.topics as {title: string} | null)?.title || 'Unlinked'}${preview ? '\n  ' + preview : ''}`;
+          }).join('\n')}`
         );
 
         result = { briefing: text };
@@ -150,14 +158,18 @@ export async function POST(request: Request) {
 
       case 'suggest_topics': {
         // AI suggests new topics based on uncategorized activity
-        const { data: recentItems } = await supabase.from('topic_items').select('title, source, snippet')
+        const { data: recentItems } = await supabase.from('topic_items').select('title, source, snippet, body')
           .eq('user_id', user.id).order('created_at', { ascending: false }).limit(30);
         const { data: topics } = await supabase.from('topics').select('title, description')
           .eq('user_id', user.id).eq('status', 'active');
 
         const { data } = await callClaudeJSON<{ suggestions: Array<{ title: string; description: string; area: string; reason: string }> }>(
-          'Based on recent activity patterns, suggest 3-5 new topics the user should create to organize their work. Avoid duplicating existing topics. Return JSON: { "suggestions": [{ "title": "...", "description": "...", "area": "work|personal|career", "reason": "..." }] }',
-          `Existing topics:\n${(topics || []).map((t: { title: string }) => `- ${t.title}`).join('\n')}\n\nRecent items:\n${(recentItems || []).map((i: { source: string; title: string }) => `[${i.source}] ${i.title}`).join('\n')}`
+          'Based on recent activity patterns from ALL sources (email, calendar, drive, slack, notion, notes, links), suggest 3-5 new topics the user should create to organize their work. Avoid duplicating existing topics. Return JSON: { "suggestions": [{ "title": "...", "description": "...", "area": "work|personal|career", "reason": "..." }] }',
+          `Existing topics:\n${(topics || []).map((t: { title: string }) => `- ${t.title}`).join('\n')}\n\nRecent items:\n${(recentItems || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
+            const content = i.body || i.snippet || '';
+            const preview = content.length > 200 ? content.substring(0, 200) + '...' : content;
+            return `[${i.source}] ${i.title}${preview ? ': ' + preview : ''}`;
+          }).join('\n')}`
         );
 
         result = { suggestions: data.suggestions };
@@ -167,7 +179,7 @@ export async function POST(request: Request) {
       case 'weekly_review': {
         // AI generates a weekly review
         const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        const { data: recentItems } = await supabase.from('topic_items').select('title, source, occurred_at, topics(title)')
+        const { data: recentItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topics(title)')
           .eq('user_id', user.id).gte('created_at', oneWeekAgo).order('created_at', { ascending: false }).limit(50);
         const { data: topics } = await supabase.from('topics').select('title, status, updated_at, summary')
           .eq('user_id', user.id).gte('updated_at', oneWeekAgo);
@@ -176,7 +188,11 @@ export async function POST(request: Request) {
 
         const { text } = await callClaude(
           'Generate a weekly review summary. Include: 1) Key accomplishments, 2) Topics that progressed, 3) Items that need follow-up, 4) Productivity stats, 5) Priorities for next week.',
-          `Week of ${new Date(oneWeekAgo).toLocaleDateString()} - ${new Date().toLocaleDateString()}\n\nItems processed: ${(recentItems || []).length}\nTopics updated: ${(topics || []).length}\nAI runs: ${(aiRuns || []).length}\n\nRecent items:\n${(recentItems || []).map((i: Record<string, unknown>) => `[${i.source}] ${i.title} → ${(i.topics as {title: string} | null)?.title || 'Unlinked'}`).join('\n')}\n\nUpdated topics:\n${(topics || []).map((t: Record<string, unknown>) => `- ${t.title} (${t.status})`).join('\n')}`
+          `Week of ${new Date(oneWeekAgo).toLocaleDateString()} - ${new Date().toLocaleDateString()}\n\nItems processed: ${(recentItems || []).length}\nTopics updated: ${(topics || []).length}\nAI runs: ${(aiRuns || []).length}\n\nRecent items (from ALL sources — email, calendar, drive, slack, notion, notes, links):\n${(recentItems || []).map((i: Record<string, unknown>) => {
+            const content = (i.body as string) || (i.snippet as string) || '';
+            const preview = content.length > 200 ? content.substring(0, 200) + '...' : content;
+            return `[${i.source}] ${i.title} → ${(i.topics as {title: string} | null)?.title || 'Unlinked'}${preview ? '\n  ' + preview : ''}`;
+          }).join('\n')}\n\nUpdated topics:\n${(topics || []).map((t: Record<string, unknown>) => `- ${t.title} (${t.status})`).join('\n')}`
         );
 
         result = { review: text };
@@ -219,19 +235,29 @@ export async function POST(request: Request) {
         const { data: contact } = await supabase.from('contacts').select('*').eq('id', contact_id).eq('user_id', user.id).single();
         if (!contact) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
 
-        const { data: interactions } = await supabase.from('topic_items').select('title, source, snippet, occurred_at, metadata')
+        const { data: interactions } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, metadata')
           .eq('user_id', user.id).limit(50);
 
         // Find items mentioning this contact
         const contactItems = (interactions || []).filter((i: Record<string, unknown>) => {
           const meta = i.metadata as Record<string, string> || {};
           const contactStr = JSON.stringify(meta).toLowerCase();
-          return contactStr.includes((contact.email || '').toLowerCase()) || contactStr.includes((contact.name || '').toLowerCase());
+          const titleSnippet = `${(i.title as string || '')} ${(i.snippet as string || '')} ${(i.body as string || '')}`.toLowerCase();
+          return (
+            contactStr.includes((contact.email || '').toLowerCase()) ||
+            contactStr.includes((contact.name || '').toLowerCase()) ||
+            ((contact.email || '').length > 3 && titleSnippet.includes((contact.email || '').toLowerCase())) ||
+            ((contact.name || '').length > 3 && titleSnippet.includes((contact.name || '').toLowerCase()))
+          );
         });
 
         const { data } = await callClaudeJSON<{ organization: string; role: string; relationship_summary: string; interaction_frequency: string; key_topics: string[] }>(
-          'Based on communications, enrich this contact profile. Return JSON: { "organization": "...", "role": "estimated role", "relationship_summary": "brief description", "interaction_frequency": "daily|weekly|monthly|rare", "key_topics": ["topic1", "topic2"] }',
-          `Contact: ${contact.name} <${contact.email}>\nCurrent org: ${contact.organization || 'unknown'}\n\nRelevant communications:\n${contactItems.slice(0, 20).map((i: Record<string, unknown>) => `[${i.source}] ${i.title}: ${i.snippet || ''}`).join('\n')}`
+          'Based on communications from ALL sources (email, calendar, drive, slack, notion, notes, links), enrich this contact profile. Return JSON: { "organization": "...", "role": "estimated role", "relationship_summary": "brief description", "interaction_frequency": "daily|weekly|monthly|rare", "key_topics": ["topic1", "topic2"] }',
+          `Contact: ${contact.name} <${contact.email}>\nCurrent org: ${contact.organization || 'unknown'}\n\nRelevant communications (${contactItems.length} items from all sources):\n${contactItems.slice(0, 20).map((i: Record<string, unknown>) => {
+            const content = (i.body as string) || (i.snippet as string) || '';
+            const preview = content.length > 800 ? content.substring(0, 800) + '...' : content;
+            return `[${i.source}] ${i.title}${preview ? '\n' + preview : ''}`;
+          }).join('\n---\n')}`
         );
 
         await supabase.from('contacts').update({
@@ -304,16 +330,18 @@ export async function POST(request: Request) {
           .select('topic_id, role, topics(title, status, due_date, priority)')
           .eq('contact_id', proposeContactId);
 
-        // Get items mentioning this contact
+        // Get items mentioning this contact (include body for full content from all sources)
         const { data: proposeItems } = await supabase.from('topic_items')
-          .select('title, source, snippet, occurred_at, metadata')
+          .select('title, source, snippet, body, occurred_at, metadata')
           .eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(100);
 
         const contactEmail = (proposeContact.email || '').toLowerCase();
         const contactName = (proposeContact.name || '').toLowerCase();
         const relevantItems = (proposeItems || []).filter((i: Record<string, unknown>) => {
           const metaStr = JSON.stringify(i.metadata || {}).toLowerCase();
-          return (contactEmail && metaStr.includes(contactEmail)) || (contactName.length > 2 && metaStr.includes(contactName));
+          const fullText = `${(i.title as string || '')} ${(i.snippet as string || '')} ${(i.body as string || '')}`.toLowerCase();
+          return (contactEmail && (metaStr.includes(contactEmail) || fullText.includes(contactEmail))) ||
+                 (contactName.length > 2 && (metaStr.includes(contactName) || fullText.includes(contactName)));
         }).slice(0, 30);
 
         const pendingTopics = (contactLinks || []).filter((l: Record<string, unknown>) => {
@@ -349,10 +377,12 @@ ${pendingTopics.map((l: Record<string, unknown>) => {
   return `- ${t?.title || 'Unknown'} (priority: ${t?.priority || 'none'}, due: ${t?.due_date || 'none'})`;
 }).join('\n')}
 
-Recent Communications (${relevantItems.length}):
+Recent Communications (${relevantItems.length} items from ALL sources including emails, calendar, drive, slack, notion, notes, links):
 ${relevantItems.map((i: Record<string, unknown>, idx: number) => {
   const meta = i.metadata as Record<string, unknown> || {};
-  return `${idx + 1}. [${i.source}] ${i.title}\n   From: ${meta.from || ''}\n   Date: ${i.occurred_at}`;
+  const content = (i.body as string) || (i.snippet as string) || '';
+  const preview = content.length > 500 ? content.substring(0, 500) + '...' : content;
+  return `${idx + 1}. [${i.source}] ${i.title}\n   From: ${meta.from || ''}\n   Date: ${i.occurred_at}\n   Content: ${preview}`;
 }).join('\n')}`
         );
 
@@ -381,16 +411,18 @@ ${relevantItems.map((i: Record<string, unknown>, idx: number) => {
           .select('topic_id, role, topics(title, status, area, due_date)')
           .eq('contact_id', intelContactId);
 
-        // Get all items mentioning this contact
+        // Get all items mentioning this contact (include body for full content from all sources)
         const { data: intelItems } = await supabase.from('topic_items')
-          .select('title, source, snippet, occurred_at, metadata')
+          .select('title, source, snippet, body, occurred_at, metadata')
           .eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(200);
 
         const intelEmail = (intelContact.email || '').toLowerCase();
         const intelName = (intelContact.name || '').toLowerCase();
         const intelRelevant = (intelItems || []).filter((i: Record<string, unknown>) => {
           const metaStr = JSON.stringify(i.metadata || {}).toLowerCase();
-          return (intelEmail && metaStr.includes(intelEmail)) || (intelName.length > 2 && metaStr.includes(intelName));
+          const fullText = `${(i.title as string || '')} ${(i.snippet as string || '')} ${(i.body as string || '')}`.toLowerCase();
+          return (intelEmail && (metaStr.includes(intelEmail) || fullText.includes(intelEmail))) ||
+                 (intelName.length > 2 && (metaStr.includes(intelName) || fullText.includes(intelName)));
         }).slice(0, 40);
 
         const { data: intelData } = await callClaudeJSON<{
@@ -429,10 +461,12 @@ ${(intelLinks || []).map((l: Record<string, unknown>) => {
   return `- ${t?.title || 'Unknown'} (${t?.status || 'unknown'}, ${l.role || 'no role'})`;
 }).join('\n')}
 
-Communication History (${intelRelevant.length} items):
+Communication History (${intelRelevant.length} items from ALL sources — emails, calendar, drive, slack, notion, notes, links):
 ${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
   const meta = i.metadata as Record<string, unknown> || {};
-  return `${idx + 1}. [${i.source}] ${i.title} — ${i.occurred_at}\n   From: ${meta.from || ''} To: ${meta.to || ''}`;
+  const content = (i.body as string) || (i.snippet as string) || '';
+  const preview = content.length > 600 ? content.substring(0, 600) + '...' : content;
+  return `${idx + 1}. [${i.source}] ${i.title} — ${i.occurred_at}\n   From: ${meta.from || ''} To: ${meta.to || ''}\n   Content: ${preview}`;
 }).join('\n')}`
         );
 
@@ -452,7 +486,7 @@ ${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
       case 'contact_auto_link': {
         // Auto-link contacts to topics based on topic_items metadata matching
         const allContacts = await supabase.from('contacts').select('id, name, email').eq('user_id', user.id);
-        const allItems = await supabase.from('topic_items').select('topic_id, metadata').eq('user_id', user.id);
+        const allItems = await supabase.from('topic_items').select('topic_id, title, snippet, body, metadata').eq('user_id', user.id);
         const existingLinks = await supabase.from('contact_topic_links').select('contact_id, topic_id').eq('user_id', user.id);
 
         const existingSet = new Set((existingLinks.data || []).map((l: Record<string, unknown>) => `${l.contact_id}:${l.topic_id}`));
@@ -466,7 +500,9 @@ ${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
           const topicIds = new Set<string>();
           for (const item of (allItems.data || [])) {
             const metaStr = JSON.stringify(item.metadata || {}).toLowerCase();
-            if ((cEmail && metaStr.includes(cEmail)) || (cName.length > 2 && metaStr.includes(cName))) {
+            const fullText = `${(item.title || '')} ${(item.snippet || '')} ${(item.body || '')}`.toLowerCase();
+            if ((cEmail && (metaStr.includes(cEmail) || fullText.includes(cEmail))) ||
+                (cName.length > 2 && (metaStr.includes(cName) || fullText.includes(cName)))) {
               topicIds.add(item.topic_id);
             }
           }
@@ -513,7 +549,7 @@ ${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
         }
 
         const { data: actionItems } = await supabase.from('topic_items')
-          .select('title, source, snippet, occurred_at, topic_id, metadata')
+          .select('title, source, snippet, body, occurred_at, topic_id, metadata')
           .in('topic_id', topicIds)
           .order('occurred_at', { ascending: false })
           .limit(50);
@@ -537,9 +573,11 @@ ${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
 { "action_items": [{ "task": "description", "topic": "topic name", "priority": "high|medium|low", "due_hint": "any mentioned deadline or ASAP", "status": "pending|done|unclear" }] }`,
           `Contact: ${actionContact.name} <${actionContact.email || ''}>
 
-Items from their linked topics:
+Items from their linked topics (ALL sources — emails, calendar, drive, slack, notion, notes, links):
 ${(actionItems || []).map((i: Record<string, unknown>, idx: number) => {
-  return `${idx + 1}. [${i.source}] ${i.title} (Topic: ${topicTitles[i.topic_id as string] || 'Unknown'})\n   ${i.snippet || ''}`;
+  const content = (i.body as string) || (i.snippet as string) || '';
+  const preview = content.length > 800 ? content.substring(0, 800) + '...' : content;
+  return `${idx + 1}. [${i.source}] ${i.title} (Topic: ${topicTitles[i.topic_id as string] || 'Unknown'})\n   ${preview}`;
 }).join('\n')}`
         );
 
@@ -803,7 +841,7 @@ Return JSON: { "people": [...], "organizations": [...], "dates": [...], "amounts
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
 
         const { data: items } = await supabase.from('topic_items')
-          .select('title, source, snippet, metadata')
+          .select('title, source, snippet, body, metadata')
           .eq('topic_id', topic_id).limit(15);
 
         // Get all other topics for comparison
@@ -818,7 +856,10 @@ Return JSON: { "people": [...], "organizations": [...], "dates": [...], "amounts
           break;
         }
 
-        const currentItems = (items || []).map((i: Record<string, unknown>) => `[${i.source}] ${i.title}: ${(i.snippet as string || '').substring(0, 200)}`).join('\n');
+        const currentItems = (items || []).map((i: Record<string, unknown>) => {
+          const content = (i.body as string) || (i.snippet as string) || '';
+          return `[${i.source}] ${i.title}: ${content.substring(0, 400)}`;
+        }).join('\n');
         const otherTopics = allTopics.map((t: Record<string, unknown>) =>
           `ID: ${t.id}\nTitle: ${t.title}\nDescription: ${t.description || 'None'}\nTags: ${(t.tags as string[] || []).join(', ')}\nSummary: ${((t.summary as string) || '').substring(0, 300)}`
         ).join('\n---\n');
@@ -852,7 +893,7 @@ Other Topics:\n${otherTopics}`
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
 
         const { data: items } = await supabase.from('topic_items')
-          .select('source, occurred_at, metadata')
+          .select('source, occurred_at, metadata, body')
           .eq('topic_id', topic_id);
 
         const { data: contacts } = await supabase.from('contact_topic_links')

@@ -1,20 +1,108 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { Loader2, Trash2, Plus, Shield, Sparkles, BarChart3, Brain, Zap, X } from 'lucide-react';
+import {
+  Loader2, Trash2, Plus, Shield, Sparkles, BarChart3, Brain, Zap, X,
+  Mail, MessageSquare, BookOpen, Download, Clock, AlertTriangle,
+} from 'lucide-react';
 import { SourceIcon } from '@/components/ui/source-icon';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface Props {
   googleAccounts: { id: string; email: string }[];
   slackAccounts: { id: string; team_name: string }[];
   notionAccounts: { id: string; workspace_name: string | null; workspace_icon: string | null }[];
+  accountSyncMap: Record<string, string>; // account_id -> last item created_at ISO string
 }
 
-export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: initialSlack, notionAccounts: initialNotion }: Props) {
+type AccountType = 'google' | 'slack' | 'notion';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Returns 'green' | 'amber' | 'red' based on how recent the last item is. */
+function getAccountStatus(lastSyncAt: string | undefined): 'green' | 'amber' | 'red' {
+  if (!lastSyncAt) return 'red';
+  const daysSince = (Date.now() - new Date(lastSyncAt).getTime()) / (1000 * 60 * 60 * 24);
+  if (daysSince <= 7) return 'green';
+  if (daysSince <= 30) return 'amber';
+  return 'red';
+}
+
+const statusDotColors: Record<string, string> = {
+  green: 'bg-green-500',
+  amber: 'bg-amber-500',
+  red: 'bg-red-500',
+};
+
+const statusLabels: Record<string, string> = {
+  green: 'Active',
+  amber: 'Stale',
+  red: 'Inactive',
+};
+
+const statusLabelColors: Record<string, string> = {
+  green: 'text-green-700 bg-green-50',
+  amber: 'text-amber-700 bg-amber-50',
+  red: 'text-red-700 bg-red-50',
+};
+
+function formatRelativeTime(isoDate: string | undefined): string {
+  if (!isoDate) return 'Never';
+  const diff = Date.now() - new Date(isoDate).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
+/** Status dot indicator component */
+function StatusDot({ status }: { status: 'green' | 'amber' | 'red' }) {
+  return (
+    <span className="relative flex h-2.5 w-2.5">
+      {status === 'green' && (
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+      )}
+      <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${statusDotColors[status]}`} />
+    </span>
+  );
+}
+
+/** Section divider */
+function SectionDivider() {
+  return <div className="border-t border-gray-200" />;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function SettingsPanel({
+  googleAccounts: initialGoogle,
+  slackAccounts: initialSlack,
+  notionAccounts: initialNotion,
+  accountSyncMap,
+}: Props) {
   const [googleAccounts, setGoogleAccounts] = useState(initialGoogle);
   const [slackAccounts, setSlackAccounts] = useState(initialSlack);
   const [notionAccounts, setNotionAccounts] = useState(initialNotion);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+
+  // Inline disconnect confirmation state
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState<{
+    accountId: string;
+    type: AccountType;
+    label: string;
+  } | null>(null);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // AI Agent state
   const [agentLoading, setAgentLoading] = useState<string | null>(null);
@@ -26,59 +114,60 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
   const [optimizations, setOptimizations] = useState<string | null>(null);
   const [showOptimizations, setShowOptimizations] = useState(false);
 
-  const connectGoogle = () => {
-    window.location.href = '/api/auth/google/connect';
+  // Export state
+  const [exporting, setExporting] = useState(false);
+  const [exportStep, setExportStep] = useState('');
+
+  // Auto-cancel disconnect confirmation after 5 seconds
+  useEffect(() => {
+    if (confirmingDisconnect) {
+      confirmTimerRef.current = setTimeout(() => {
+        setConfirmingDisconnect(null);
+      }, 5000);
+      return () => {
+        if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+      };
+    }
+  }, [confirmingDisconnect]);
+
+  // ========== CONNECT HANDLERS ==========
+
+  const connectGoogle = () => { window.location.href = '/api/auth/google/connect'; };
+  const connectSlack = () => { window.location.href = '/api/auth/slack/connect'; };
+  const connectNotion = () => { window.location.href = '/api/auth/notion/connect'; };
+
+  // ========== UNIFIED DISCONNECT HANDLER (DRY) ==========
+
+  const requestDisconnect = (type: AccountType, accountId: string, label: string) => {
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    setConfirmingDisconnect({ accountId, type, label });
   };
 
-  const connectSlack = () => {
-    window.location.href = '/api/auth/slack/connect';
+  const cancelDisconnect = () => {
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    setConfirmingDisconnect(null);
   };
 
-  const connectNotion = () => {
-    window.location.href = '/api/auth/notion/connect';
-  };
-
-  const disconnectGoogle = async (id: string, email: string) => {
-    if (!confirm(`Disconnect Google account ${email}? This will remove search access to Gmail, Calendar, and Drive for this account.`)) return;
-    setDisconnecting(id);
+  const handleDisconnect = useCallback(async (type: AccountType, accountId: string) => {
+    setConfirmingDisconnect(null);
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    setDisconnecting(accountId);
     try {
-      const res = await fetch(`/api/auth/google/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/auth/${type}/${accountId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to disconnect');
-      setGoogleAccounts(prev => prev.filter(a => a.id !== id));
-      toast.success(`Disconnected ${email}`);
+      if (type === 'google') {
+        setGoogleAccounts(prev => prev.filter(a => a.id !== accountId));
+      } else if (type === 'slack') {
+        setSlackAccounts(prev => prev.filter(a => a.id !== accountId));
+      } else {
+        setNotionAccounts(prev => prev.filter(a => a.id !== accountId));
+      }
+      toast.success('Account disconnected');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Disconnect failed');
     }
     setDisconnecting(null);
-  };
-
-  const disconnectSlack = async (id: string, teamName: string) => {
-    if (!confirm(`Disconnect Slack workspace ${teamName}? This will remove search access to this workspace's messages.`)) return;
-    setDisconnecting(id);
-    try {
-      const res = await fetch(`/api/auth/slack/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to disconnect');
-      setSlackAccounts(prev => prev.filter(a => a.id !== id));
-      toast.success(`Disconnected ${teamName}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Disconnect failed');
-    }
-    setDisconnecting(null);
-  };
-
-  const disconnectNotion = async (id: string, workspaceName: string) => {
-    if (!confirm(`Disconnect Notion workspace "${workspaceName}"? This will remove search access to pages and databases in this workspace.`)) return;
-    setDisconnecting(id);
-    try {
-      const res = await fetch(`/api/auth/notion/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to disconnect');
-      setNotionAccounts(prev => prev.filter(a => a.id !== id));
-      toast.success(`Disconnected ${workspaceName}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Disconnect failed');
-    }
-    setDisconnecting(null);
-  };
+  }, []);
 
   // ========== AI AGENT FUNCTIONS ==========
 
@@ -140,6 +229,59 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
     setAgentLoading(null);
   };
 
+  // ========== EXPORT DATA ==========
+
+  const handleExportData = async () => {
+    setExporting(true);
+    try {
+      setExportStep('topics');
+      const topicsRes = await fetch('/api/topics');
+      const topics = await topicsRes.json();
+
+      setExportStep('items');
+      const items: unknown[] = [];
+      for (const t of (topics.topics || []).slice(0, 50)) {
+        try {
+          const res = await fetch(`/api/topics/${t.id}/items`);
+          const data = await res.json();
+          items.push(...(data.items || []));
+        } catch { /* skip individual failures */ }
+      }
+
+      setExportStep('contacts');
+      const contactsRes = await fetch('/api/contacts');
+      const contacts = await contactsRes.json();
+
+      setExportStep('ai runs');
+      // Slight delay for UX feedback
+      await new Promise(r => setTimeout(r, 200));
+
+      const exportData = {
+        exported_at: new Date().toISOString(),
+        version: 'TopicOS v3',
+        topics: topics.topics || [],
+        contacts: contacts.contacts || [],
+        items,
+      };
+
+      setExportStep('downloading');
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `topicos-export-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Data exported successfully');
+    } catch {
+      toast.error('Export failed');
+    }
+    setExporting(false);
+    setExportStep('');
+  };
+
+  // ========== MARKDOWN RENDERER ==========
+
   const renderMarkdown = (text: string) => {
     return text.split('\n').map((line, i) => {
       if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-gray-900 mt-3 mb-1 text-sm">{line.replace('## ', '')}</h3>;
@@ -151,6 +293,37 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
     });
   };
 
+  // ========== INLINE DISCONNECT CONFIRMATION BAR ==========
+
+  const renderConfirmBar = (accountId: string) => {
+    if (!confirmingDisconnect || confirmingDisconnect.accountId !== accountId) return null;
+    return (
+      <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between gap-3 animate-in slide-in-from-top-1">
+        <div className="flex items-center gap-2 text-sm text-red-700">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>Are you sure? This will remove all connected data.</span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={cancelDisconnect}
+            className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => handleDisconnect(confirmingDisconnect.type, confirmingDisconnect.accountId)}
+            disabled={disconnecting === accountId}
+            className="px-3 py-1.5 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+          >
+            {disconnecting === accountId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Confirm Disconnect'}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // ========== RENDER ==========
+
   return (
     <div className="space-y-8">
       {/* AI Platform Assistants */}
@@ -160,18 +333,18 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
           AI Platform Assistants
         </h2>
         <div className="flex gap-2 flex-wrap">
-          <button onClick={runUsageInsights} disabled={!!agentLoading}
-            className="px-3 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 flex items-center gap-1.5">
+          <button onClick={runUsageInsights} disabled={agentLoading !== null}
+            className="px-3 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
             {agentLoading === 'usage' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BarChart3 className="w-3.5 h-3.5" />}
             Usage Insights
           </button>
-          <button onClick={runHealthCheck} disabled={!!agentLoading}
-            className="px-3 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 disabled:opacity-50 flex items-center gap-1.5">
+          <button onClick={runHealthCheck} disabled={agentLoading !== null}
+            className="px-3 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
             {agentLoading === 'health' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
             Health Check
           </button>
-          <button onClick={runOptimizations} disabled={!!agentLoading}
-            className="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 flex items-center gap-1.5">
+          <button onClick={runOptimizations} disabled={agentLoading !== null}
+            className="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
             {agentLoading === 'optimize' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
             Optimization Tips
           </button>
@@ -190,7 +363,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
             </button>
           </div>
           {usageStats && (
-            <div className="grid grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
               <div className="bg-white rounded-lg p-3 text-center border border-purple-100">
                 <p className="text-lg font-bold text-purple-600">{usageStats.topics}</p>
                 <p className="text-xs text-gray-500">Topics</p>
@@ -243,9 +416,14 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
         </div>
       )}
 
-      {/* Google Accounts */}
+      <SectionDivider />
+
+      {/* ============================================================ */}
+      {/* Google Accounts                                               */}
+      {/* ============================================================ */}
       <div>
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2.5 mb-1">
+          <Mail className="w-5 h-5 text-red-500" />
           <h2 className="text-lg font-semibold text-gray-900">Google Accounts</h2>
           <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 inline-flex items-center gap-1">
             <SourceIcon source="gmail" className="w-3.5 h-3.5" />
@@ -253,7 +431,7 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
             <SourceIcon source="drive" className="w-3.5 h-3.5" />
           </span>
         </div>
-        <p className="text-sm text-gray-500 mb-4">Connect Google to search Gmail, Calendar, and Drive</p>
+        <p className="text-sm text-gray-500 mb-4 ml-7.5">Connect Google to search Gmail, Calendar, and Drive</p>
         {googleAccounts.length === 0 ? (
           <div className="p-6 bg-gray-50 rounded-lg border border-gray-200 text-center">
             <p className="text-sm text-gray-500">No Google accounts connected</p>
@@ -261,34 +439,54 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
           </div>
         ) : (
           <div className="space-y-2">
-            {googleAccounts.map((a) => (
-              <div key={a.id} className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-medium">G</div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{a.email}</p>
-                    <div className="flex gap-2 mt-0.5">
-                      <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="gmail" className="w-3 h-3" /> Email</span>
-                      <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="calendar" className="w-3 h-3" /> Calendar</span>
-                      <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="drive" className="w-3 h-3" /> Drive</span>
+            {googleAccounts.map((a) => {
+              const status = getAccountStatus(accountSyncMap[a.id]);
+              const lastSync = accountSyncMap[a.id];
+              return (
+                <div key={a.id}>
+                  <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-medium">G</div>
+                        <span className="absolute -bottom-0.5 -right-0.5">
+                          <StatusDot status={status} />
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{a.email}</p>
+                        <div className="flex gap-2 mt-0.5 flex-wrap">
+                          <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="gmail" className="w-3 h-3" /> Email</span>
+                          <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="calendar" className="w-3 h-3" /> Calendar</span>
+                          <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="drive" className="w-3 h-3" /> Drive</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-gray-400 flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> Last synced: {formatRelativeTime(lastSync)}
+                          </span>
+                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${statusLabelColors[status]}`}>
+                            {statusLabels[status]}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-green-600 font-medium bg-green-50 px-2.5 py-1 rounded-full flex items-center gap-1">
+                        <Shield className="w-3 h-3" /> Connected
+                      </span>
+                      <button
+                        onClick={() => requestDisconnect('google', a.id, a.email)}
+                        disabled={disconnecting === a.id}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
+                        title="Disconnect"
+                      >
+                        {disconnecting === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
+                  {renderConfirmBar(a.id)}
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-green-600 font-medium bg-green-50 px-2.5 py-1 rounded-full flex items-center gap-1">
-                    <Shield className="w-3 h-3" /> Connected
-                  </span>
-                  <button
-                    onClick={() => disconnectGoogle(a.id, a.email)}
-                    disabled={disconnecting === a.id}
-                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
-                    title="Disconnect"
-                  >
-                    {disconnecting === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
         <button onClick={connectGoogle}
@@ -310,15 +508,20 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
         )}
       </div>
 
-      {/* Slack Workspaces */}
+      <SectionDivider />
+
+      {/* ============================================================ */}
+      {/* Slack Workspaces                                              */}
+      {/* ============================================================ */}
       <div>
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2.5 mb-1">
+          <MessageSquare className="w-5 h-5 text-purple-500" />
           <h2 className="text-lg font-semibold text-gray-900">Slack Workspaces</h2>
           <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 inline-flex items-center">
             <SourceIcon source="slack" className="w-3.5 h-3.5" />
           </span>
         </div>
-        <p className="text-sm text-gray-500 mb-4">Connect Slack to search messages across channels and DMs</p>
+        <p className="text-sm text-gray-500 mb-4 ml-7.5">Connect Slack to search messages across channels and DMs</p>
         {slackAccounts.length === 0 ? (
           <div className="p-6 bg-gray-50 rounded-lg border border-gray-200 text-center">
             <p className="text-sm text-gray-500">No Slack workspaces connected</p>
@@ -326,30 +529,50 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
           </div>
         ) : (
           <div className="space-y-2">
-            {slackAccounts.map((a) => (
-              <div key={a.id} className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-medium">S</div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{a.team_name}</p>
-                    <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="slack" className="w-3 h-3" /> Messages, channels, DMs</span>
+            {slackAccounts.map((a) => {
+              const status = getAccountStatus(accountSyncMap[a.id]);
+              const lastSync = accountSyncMap[a.id];
+              return (
+                <div key={a.id}>
+                  <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-medium">S</div>
+                        <span className="absolute -bottom-0.5 -right-0.5">
+                          <StatusDot status={status} />
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{a.team_name}</p>
+                        <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="slack" className="w-3 h-3" /> Messages, channels, DMs</span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-gray-400 flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> Last synced: {formatRelativeTime(lastSync)}
+                          </span>
+                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${statusLabelColors[status]}`}>
+                            {statusLabels[status]}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-green-600 font-medium bg-green-50 px-2.5 py-1 rounded-full flex items-center gap-1">
+                        <Shield className="w-3 h-3" /> Connected
+                      </span>
+                      <button
+                        onClick={() => requestDisconnect('slack', a.id, a.team_name)}
+                        disabled={disconnecting === a.id}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
+                        title="Disconnect"
+                      >
+                        {disconnecting === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
+                  {renderConfirmBar(a.id)}
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-green-600 font-medium bg-green-50 px-2.5 py-1 rounded-full flex items-center gap-1">
-                    <Shield className="w-3 h-3" /> Connected
-                  </span>
-                  <button
-                    onClick={() => disconnectSlack(a.id, a.team_name)}
-                    disabled={disconnecting === a.id}
-                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
-                    title="Disconnect"
-                  >
-                    {disconnecting === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
         <button onClick={connectSlack}
@@ -370,15 +593,20 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
         )}
       </div>
 
-      {/* Notion Workspaces */}
+      <SectionDivider />
+
+      {/* ============================================================ */}
+      {/* Notion Workspaces                                             */}
+      {/* ============================================================ */}
       <div>
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2.5 mb-1">
+          <BookOpen className="w-5 h-5 text-gray-700" />
           <h2 className="text-lg font-semibold text-gray-900">Notion Workspaces</h2>
           <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 inline-flex items-center">
             <SourceIcon source="notion" className="w-3.5 h-3.5" />
           </span>
         </div>
-        <p className="text-sm text-gray-500 mb-4">Connect Notion to search pages and databases linked to your topics</p>
+        <p className="text-sm text-gray-500 mb-4 ml-7.5">Connect Notion to search pages and databases linked to your topics</p>
         {notionAccounts.length === 0 ? (
           <div className="p-6 bg-gray-50 rounded-lg border border-gray-200 text-center">
             <p className="text-sm text-gray-500">No Notion workspaces connected</p>
@@ -386,32 +614,52 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
           </div>
         ) : (
           <div className="space-y-2">
-            {notionAccounts.map((a) => (
-              <div key={a.id} className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-700 font-medium text-lg">
-                    {a.workspace_icon || 'N'}
+            {notionAccounts.map((a) => {
+              const status = getAccountStatus(accountSyncMap[a.id]);
+              const lastSync = accountSyncMap[a.id];
+              return (
+                <div key={a.id}>
+                  <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-700 font-medium text-lg">
+                          {a.workspace_icon || 'N'}
+                        </div>
+                        <span className="absolute -bottom-0.5 -right-0.5">
+                          <StatusDot status={status} />
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{a.workspace_name || 'Notion Workspace'}</p>
+                        <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="notion" className="w-3 h-3" /> Pages, databases, wikis</span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-gray-400 flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> Last synced: {formatRelativeTime(lastSync)}
+                          </span>
+                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${statusLabelColors[status]}`}>
+                            {statusLabels[status]}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-green-600 font-medium bg-green-50 px-2.5 py-1 rounded-full flex items-center gap-1">
+                        <Shield className="w-3 h-3" /> Connected
+                      </span>
+                      <button
+                        onClick={() => requestDisconnect('notion', a.id, a.workspace_name || 'Notion Workspace')}
+                        disabled={disconnecting === a.id}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
+                        title="Disconnect"
+                      >
+                        {disconnecting === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{a.workspace_name || 'Notion Workspace'}</p>
-                    <span className="text-xs text-gray-400 flex items-center gap-1"><SourceIcon source="notion" className="w-3 h-3" /> Pages, databases, wikis</span>
-                  </div>
+                  {renderConfirmBar(a.id)}
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-green-600 font-medium bg-green-50 px-2.5 py-1 rounded-full flex items-center gap-1">
-                    <Shield className="w-3 h-3" /> Connected
-                  </span>
-                  <button
-                    onClick={() => disconnectNotion(a.id, a.workspace_name || 'Notion Workspace')}
-                    disabled={disconnecting === a.id}
-                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
-                    title="Disconnect"
-                  >
-                    {disconnecting === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
         <button onClick={connectNotion}
@@ -469,48 +717,26 @@ export function SettingsPanel({ googleAccounts: initialGoogle, slackAccounts: in
             <div>
               <p className="text-sm font-medium text-red-900">Export Your Data</p>
               <p className="text-xs text-red-600/70 mt-0.5">Download all your topics, items, and contacts as JSON</p>
+              {exporting && exportStep && (
+                <div className="flex items-center gap-2 mt-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                  <span className="text-xs text-red-600 font-medium">
+                    Exporting... ({exportStep})
+                  </span>
+                </div>
+              )}
             </div>
-            <button onClick={async () => {
-              toast.info('Preparing data export...');
-              try {
-                const [topicsRes, contactsRes, itemsRes] = await Promise.all([
-                  fetch('/api/topics'),
-                  fetch('/api/contacts'),
-                  fetch('/api/topics').then(r => r.json()).then(async d => {
-                    const items: unknown[] = [];
-                    for (const t of (d.topics || []).slice(0, 50)) {
-                      try {
-                        const res = await fetch(`/api/topics/${t.id}/items`);
-                        const data = await res.json();
-                        items.push(...(data.items || []));
-                      } catch {}
-                    }
-                    return items;
-                  }),
-                ]);
-                const topics = await topicsRes.json();
-                const contacts = await contactsRes.json();
-                const exportData = {
-                  exported_at: new Date().toISOString(),
-                  version: 'TopicOS v3',
-                  topics: topics.topics || [],
-                  contacts: contacts.contacts || [],
-                  items: itemsRes,
-                };
-                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `topicos-export-${new Date().toISOString().split('T')[0]}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-                toast.success('Data exported successfully');
-              } catch (err) {
-                toast.error('Export failed');
-              }
-            }}
-              className="px-4 py-2 bg-white border border-red-200 text-red-700 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors">
-              Export Data
+            <button
+              onClick={handleExportData}
+              disabled={exporting}
+              className="px-4 py-2 bg-white border border-red-200 text-red-700 rounded-xl text-sm font-medium hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            >
+              {exporting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              {exporting ? 'Exporting...' : 'Export Data'}
             </button>
           </div>
         </div>
