@@ -508,6 +508,23 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
     } else {
       toast.error('Failed to link items');
     }
+    // Auto-refresh AI analysis when new items are linked so Notion/new content is included
+    if (linked > 0) {
+      // Run analysis in background — don't await, don't block UI
+      setAnalysisLoading(true);
+      fetch('/api/ai/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic_id: topic.id }),
+      }).then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setAnalysis(data.analysis);
+          setShowAnalysis(true);
+        }
+      }).catch(() => { /* silent — user can manually refresh */ })
+        .finally(() => setAnalysisLoading(false));
+    }
   }, [topic.id, items]);
 
   const linkSelectedSearch = () => {
