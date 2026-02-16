@@ -60,13 +60,33 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    const { data, error } = await supabase
+    // Try update with all fields first
+    let { data, error } = await supabase
       .from('contacts')
       .update(updateData)
       .eq('id', id)
       .eq('user_id', user.id)
       .select()
       .single();
+
+    // If the 'area' column doesn't exist yet (schema cache error), retry without it
+    if (error && error.message.includes('schema cache') && updateData.area !== undefined) {
+      console.warn('PATCH /api/contacts/[id]: area column not in schema, retrying without it');
+      const { area: _area, ...withoutArea } = updateData;
+      if (Object.keys(withoutArea).length > 0) {
+        const retry = await supabase
+          .from('contacts')
+          .update(withoutArea)
+          .eq('id', id)
+          .eq('user_id', user.id)
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      } else {
+        return NextResponse.json({ error: 'Area column not yet available. Please run migration 008.' }, { status: 400 });
+      }
+    }
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!data) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });

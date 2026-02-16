@@ -63,13 +63,32 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     // Always update timestamp
     updateData.updated_at = new Date().toISOString();
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('topics')
       .update(updateData)
       .eq('id', id)
       .eq('user_id', user.id)
       .select()
       .single();
+
+    // If schema cache error, retry with only base fields (new columns may not exist yet)
+    if (error && error.message.includes('schema cache')) {
+      console.warn('PATCH /api/topics/[id]: new columns not in schema, retrying with base fields only');
+      const baseFields = ['title', 'description', 'area', 'status', 'due_date', 'updated_at'];
+      const safeData: Record<string, unknown> = {};
+      for (const key of baseFields) {
+        if (key in updateData) safeData[key] = updateData[key];
+      }
+      const retry = await supabase
+        .from('topics')
+        .update(safeData)
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .select()
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ topic: data });

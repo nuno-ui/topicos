@@ -78,7 +78,23 @@ export async function POST(request: Request) {
     if (tags && Array.isArray(tags)) insertData.tags = tags;
     if (folder_id) insertData.folder_id = folder_id;
 
-    const { data, error } = await supabase.from('topics').insert(insertData).select().single();
+    let { data, error } = await supabase.from('topics').insert(insertData).select().single();
+
+    // If schema cache error, retry with only base fields (new columns may not exist yet)
+    if (error && error.message.includes('schema cache')) {
+      console.warn('POST /api/topics: new columns not in schema, retrying with base fields only');
+      const safeData: Record<string, unknown> = {
+        title: insertData.title,
+        description: insertData.description,
+        status: insertData.status,
+        area: insertData.area,
+        due_date: insertData.due_date,
+        user_id: insertData.user_id,
+      };
+      const retry = await supabase.from('topics').insert(safeData).select().single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ topic: data }, { status: 201 });

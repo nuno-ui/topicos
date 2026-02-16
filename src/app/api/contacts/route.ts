@@ -76,6 +76,21 @@ export async function POST(request: Request) {
       result = await supabase.from('contacts').insert(insertData).select().single();
     }
 
+    // If schema cache error, retry without the new columns (area may not exist yet)
+    if (result.error && result.error.message.includes('schema cache')) {
+      console.warn('POST /api/contacts: new columns not in schema, retrying without area');
+      const safeData = { ...insertData };
+      delete safeData.area;
+      if (email?.trim()) {
+        result = await supabase.from('contacts').upsert(
+          safeData,
+          { onConflict: 'user_id, email' }
+        ).select().single();
+      } else {
+        result = await supabase.from('contacts').insert(safeData).select().single();
+      }
+    }
+
     if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 });
     return NextResponse.json({ contact: result.data }, { status: 201 });
   } catch (err) {

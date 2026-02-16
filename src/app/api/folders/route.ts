@@ -60,7 +60,20 @@ export async function POST(request: Request) {
   };
   if (area) insertData.area = area;
 
-  const { data, error } = await supabase.from('folders').insert(insertData).select().single();
+  let { data, error } = await supabase.from('folders').insert(insertData).select().single();
+
+  // If schema cache error, retry without new columns (area/color/icon may not exist yet)
+  if (error && error.message.includes('schema cache')) {
+    console.warn('POST /api/folders: new columns not in schema, retrying without area/color/icon');
+    const safeData: Record<string, unknown> = {
+      name: insertData.name,
+      parent_id: insertData.parent_id,
+      user_id: insertData.user_id,
+    };
+    const retry = await supabase.from('folders').insert(safeData).select().single();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ folder: data }, { status: 201 });

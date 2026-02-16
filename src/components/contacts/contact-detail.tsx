@@ -358,21 +358,25 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       if (editContactMethod.trim()) metadata.preferred_contact_method = editContactMethod.trim();
       else delete metadata.preferred_contact_method;
 
+      const payload = {
+        name: editName.trim(),
+        email: editEmail.trim() || null,
+        organization: editOrganization.trim() || null,
+        role: editRole.trim() || null,
+        area: editArea || null,
+        notes: editNotes.trim() || null,
+        metadata,
+      };
       const res = await fetch(`/api/contacts/${contact.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: editName.trim(),
-          email: editEmail.trim() || null,
-          organization: editOrganization.trim() || null,
-          role: editRole.trim() || null,
-          area: editArea || null,
-          notes: editNotes.trim() || null,
-          metadata,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        console.error('Contact save failed:', data.error, 'Payload:', payload);
+        throw new Error(data.error || 'Save failed');
+      }
       // Build list of changed fields for the toast
       const changes: string[] = [];
       if (editName.trim() !== contact.name) changes.push('name');

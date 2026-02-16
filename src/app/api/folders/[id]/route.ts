@@ -31,13 +31,31 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (body.position !== undefined) updateData.position = body.position;
   if (body.area !== undefined) updateData.area = body.area || null;
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('folders')
     .update(updateData)
     .eq('id', id)
     .eq('user_id', user.id)
     .select()
     .single();
+
+  // If schema cache error, retry without new columns (area/color/icon may not exist yet)
+  if (error && error.message.includes('schema cache')) {
+    console.warn('PATCH /api/folders/[id]: new columns not in schema, retrying without area/color/icon');
+    const safeData: Record<string, unknown> = { updated_at: updateData.updated_at };
+    if (updateData.name !== undefined) safeData.name = updateData.name;
+    if (updateData.parent_id !== undefined) safeData.parent_id = updateData.parent_id;
+    if (updateData.position !== undefined) safeData.position = updateData.position;
+    const retry = await supabase
+      .from('folders')
+      .update(safeData)
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .select()
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ folder: data });
