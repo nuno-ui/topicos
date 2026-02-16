@@ -84,5 +84,19 @@ CREATE INDEX IF NOT EXISTS idx_feedback_user_id ON public.feedback(user_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_status ON public.feedback(status);
 
 -- ============================================================
+-- 8. Fix topic_items source check constraint
+-- ============================================================
+-- The existing constraint only allows a limited set of sources.
+-- The app now supports: gmail, calendar, drive, slack, notion, manual, link
+ALTER TABLE public.topic_items DROP CONSTRAINT IF EXISTS topic_items_source_check;
+ALTER TABLE public.topic_items ADD CONSTRAINT topic_items_source_check
+  CHECK (source IN ('gmail', 'calendar', 'drive', 'slack', 'notion', 'manual', 'link'));
+
+-- Also update items table source check to include 'link'
+ALTER TABLE public.items DROP CONSTRAINT IF EXISTS items_source_check;
+ALTER TABLE public.items ADD CONSTRAINT items_source_check
+  CHECK (source IN ('gmail', 'calendar', 'drive', 'slack', 'notion', 'manual', 'link'));
+
+-- ============================================================
 -- DONE! All columns and tables are now in sync with the app.
 -- ============================================================

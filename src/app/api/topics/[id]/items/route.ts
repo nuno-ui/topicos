@@ -136,6 +136,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     if (error) {
       console.error('Topic item insert error:', error);
+      // Check if it's a source check constraint violation — means the DB needs migration 009
+      if (error.code === '23514' && error.message?.includes('source_check')) {
+        return NextResponse.json({
+          error: `Source "${source}" is not allowed by the database constraint. Please run migration 009 in Supabase SQL Editor to fix this.`,
+          constraint_error: true,
+          migration_needed: '009_fix_topic_items_source_check',
+        }, { status: 500 });
+      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 

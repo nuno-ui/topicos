@@ -467,6 +467,9 @@ export function TopicDetail({ topic: initialTopic, initialItems }: { topic: Topi
         } else {
           const errData = await res.json().catch(() => ({}));
           console.error('Link item failed:', res.status, errData);
+          if (errData.constraint_error) {
+            toast.error(`Database needs updating: run migration 009 in Supabase SQL Editor to enable ${result.source} linking`);
+          }
         }
       } catch (err) {
         console.error('Link failed:', err);
