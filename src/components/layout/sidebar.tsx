@@ -43,7 +43,8 @@ export function MobileMenuButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="fixed top-3 left-3 z-40 md:hidden p-2 bg-white border border-gray-200 rounded-xl shadow-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors"
+      className="fixed top-3 left-3 z-40 md:hidden p-2 bg-white/90 backdrop-blur border border-gray-200 rounded-xl shadow-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors"
+      style={{ top: 'max(0.75rem, env(safe-area-inset-top, 0.75rem))' }}
       aria-label="Open navigation menu"
     >
       <Menu className="w-5 h-5" />
@@ -329,7 +330,7 @@ export function Sidebar({ user }: { user: User }) {
           collapsed && !isMobile ? 'justify-center' : 'gap-2.5'
         )}>
           <div className="w-9 h-9 brand-gradient rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
-            <Sparkles className="w-4.5 h-4.5 text-white" />
+            <span className="text-white font-bold text-base leading-none">Y</span>
           </div>
           <div className={cn(
             'min-w-0 flex-1 overflow-hidden transition-all duration-200',
@@ -562,7 +563,7 @@ export function Sidebar({ user }: { user: User }) {
             onClick={() => setMobileOpen(false)}
           />
           {/* Sliding sidebar */}
-          <aside className="absolute inset-y-0 left-0 w-72 bg-white border-r border-gray-200 flex flex-col shadow-2xl sidebar-slide-in">
+          <aside className="absolute inset-y-0 left-0 w-72 bg-white border-r border-gray-200 flex flex-col shadow-2xl sidebar-slide-in" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
             {sidebarContent(true)}
           </aside>
         </div>
@@ -625,6 +626,20 @@ export function Sidebar({ user }: { user: User }) {
                   </span>
                   <kbd className="text-xs px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-lg font-mono text-gray-600 shadow-sm">Ctrl+K</kbd>
                 </div>
+              </div>
+              <div className="border-t border-gray-100 pt-2 mt-3">
+                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Quick Navigation</p>
+                {[
+                  { keys: 'G then D', label: 'Go to Dashboard' },
+                  { keys: 'G then T', label: 'Go to Topics' },
+                  { keys: 'G then C', label: 'Go to Contacts' },
+                  { keys: 'G then S', label: 'Go to Search' },
+                ].map(item => (
+                  <div key={item.keys} className="flex items-center justify-between py-2 px-2 rounded-lg hover:bg-gray-50">
+                    <span className="text-sm text-gray-700">{item.label}</span>
+                    <kbd className="text-xs px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-lg font-mono text-gray-600 shadow-sm">{item.keys}</kbd>
+                  </div>
+                ))}
               </div>
             </div>
           </div>

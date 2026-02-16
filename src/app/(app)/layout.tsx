@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { Sidebar } from '@/components/layout/sidebar';
 import { CommandPalette } from '@/components/ui/command-palette';
+import { FeedbackButton } from '@/components/feedback/feedback-button';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabaseClient();
@@ -19,6 +20,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </main>
       </div>
       <CommandPalette />
+      <FeedbackButton />
     </div>
   );
 }

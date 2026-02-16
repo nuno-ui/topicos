@@ -4,8 +4,9 @@ import { toast } from 'sonner';
 import {
   Loader2, Trash2, Plus, Shield, Sparkles, BarChart3, Brain, Zap, X,
   Mail, MessageSquare, BookOpen, Download, Clock, AlertTriangle,
-  Settings, Database, Upload, CheckCircle2, Info,
+  Settings, Database, Upload, CheckCircle2, Info, MessageSquarePlus,
 } from 'lucide-react';
+import { FeedbackPanel } from '@/components/feedback/feedback-panel';
 import { SourceIcon } from '@/components/ui/source-icon';
 
 // ---------------------------------------------------------------------------
@@ -756,6 +757,70 @@ export function SettingsPanel({
       </div>
 
       {/* ============================================================ */}
+      {/* Theme                                                          */}
+      {/* ============================================================ */}
+      <div>
+        <SectionHeader icon={Settings} title="Theme" subtitle="Customize the look and feel of YouOS" />
+        <div className="p-5 bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-100 to-amber-50 flex items-center justify-center">
+                <span className="text-lg">&#9728;&#65039;</span>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Light Mode</p>
+                <p className="text-xs text-gray-500 mt-0.5">Currently active</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-400">Light</span>
+              <button
+                className="relative w-11 h-6 bg-gray-200 rounded-full transition-colors cursor-default"
+                title="Dark mode coming soon"
+              >
+                <span className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform" />
+              </button>
+              <span className="text-xs text-gray-400">Dark</span>
+            </div>
+          </div>
+          <p className="text-[10px] text-gray-400 mt-3 pl-13">Dark mode and custom themes coming soon</p>
+        </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/* Account Storage Usage                                         */}
+      {/* ============================================================ */}
+      <div>
+        <SectionHeader icon={Database} title="Account Usage" subtitle="Overview of your workspace storage" />
+        <div className="p-5 bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-medium text-gray-700">Storage Used</span>
+            <span className="text-xs text-gray-400">Free plan</span>
+          </div>
+          <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden mb-3">
+            <div
+              className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all"
+              style={{ width: `${Math.min(((usageStats?.topics || 0) + (usageStats?.items || 0)) / 10, 100)}%` }}
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center p-2.5 bg-blue-50 rounded-lg">
+              <p className="text-lg font-bold text-blue-600">{usageStats?.topics ?? '...'}</p>
+              <p className="text-[10px] text-gray-500 font-medium mt-0.5">Topics</p>
+            </div>
+            <div className="text-center p-2.5 bg-green-50 rounded-lg">
+              <p className="text-lg font-bold text-green-600">{usageStats?.items ?? '...'}</p>
+              <p className="text-[10px] text-gray-500 font-medium mt-0.5">Items</p>
+            </div>
+            <div className="text-center p-2.5 bg-purple-50 rounded-lg">
+              <p className="text-lg font-bold text-purple-600">{(googleAccounts.length + slackAccounts.length + notionAccounts.length)}</p>
+              <p className="text-[10px] text-gray-500 font-medium mt-0.5">Connected</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ============================================================ */}
       {/* Data Management                                               */}
       {/* ============================================================ */}
       <div>
@@ -824,6 +889,18 @@ export function SettingsPanel({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/* Bug & Improvement Reporter                                    */}
+      {/* ============================================================ */}
+      <div>
+        <SectionHeader
+          icon={MessageSquarePlus}
+          title="Bug & Improvement Reporter"
+          subtitle="View submitted feedback, AI analysis, and export for Claude Code"
+        />
+        <FeedbackPanel />
       </div>
 
       {/* ============================================================ */}

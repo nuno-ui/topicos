@@ -109,6 +109,24 @@ export function SearchPanel() {
   // Search error state
   const [searchError, setSearchError] = useState<string | null>(null);
 
+  // Rotating placeholder
+  const placeholderHints = [
+    'Search emails about project updates...',
+    'Find Slack messages from your team...',
+    'Look up meeting notes from last week...',
+    'Search Notion pages about strategy...',
+    'Find invoices or receipts in Drive...',
+    'Search for messages mentioning deadlines...',
+  ];
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPlaceholderIndex(prev => (prev + 1) % placeholderHints.length);
+    }, 3000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     fetch('/api/topics').then(r => r.json()).then(data => {
       setTopics(data.topics || []);
@@ -507,7 +525,7 @@ export function SearchPanel() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="Search across all connected sources..."
+              placeholder={placeholderHints[placeholderIndex]}
               className="w-full px-5 py-3.5 border border-gray-200 rounded-xl text-base focus:outline-none search-input-glow pr-10 bg-white relative z-[1] placeholder:text-gray-400"
             />
             {query && (

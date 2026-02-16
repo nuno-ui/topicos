@@ -749,97 +749,60 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 opacity-0 group-hover:opacity-100 checked:opacity-100 transition-opacity cursor-pointer" />
         </div>
         <Link href={`/topics/${t.id}`}
-          className={`block pl-4 pr-4 py-3 bg-white rounded-xl border border-gray-100 border-l-[3px] ${borderColor} hover:border-blue-200 hover:shadow-lg transition-all shadow-sm group-hover:bg-gray-50/30 ${isUrgent ? 'hover:shadow-red-100/50 hover:ring-1 hover:ring-red-200/50' : ''}`}>
-          {/* Row 1: Health dot + Title + Status + Area + Priority */}
+          className={`block px-3 py-2.5 bg-white rounded-xl border border-gray-100 border-l-[3px] ${borderColor} hover:border-blue-200 hover:shadow-lg transition-all shadow-sm group-hover:bg-gray-50/30 ${isUrgent ? 'hover:shadow-red-100/50 hover:ring-1 hover:ring-red-200/50' : ''}`}>
+          {/* Row 1: Priority dot + Title + Due + Tags */}
           <div className="flex items-center gap-2 min-w-0">
-            <span className="relative group/health flex-shrink-0">
-              <span className={`block w-2.5 h-2.5 rounded-full ring-2 ${healthDotColor} ${healthDotRing}`} />
-              {/* Health tooltip */}
-              <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-gray-900 text-white text-[10px] rounded whitespace-nowrap opacity-0 group-hover/health:opacity-100 pointer-events-none transition-opacity z-20">
-                Health: {health.score}% - {health.label}
-                {health.issues.length > 0 && <><br />{health.issues.join(', ')}</>}
-              </span>
-            </span>
-            <h3 className="font-semibold text-gray-900 truncate text-sm">
+            {/* Priority as small colored dot */}
+            <span className={`block w-2 h-2 rounded-full flex-shrink-0 ${t.priority >= 5 ? 'bg-red-500' : t.priority >= 4 ? 'bg-orange-500' : t.priority >= 3 ? 'bg-amber-400' : t.priority >= 2 ? 'bg-blue-400' : 'bg-gray-300'}`} title={priorityMeta[t.priority]?.label || 'None'} />
+            <h3 className="font-semibold text-gray-900 truncate text-sm flex-1 min-w-0">
               {searchQuery.trim()
                 ? <HighlightText text={t.title} query={searchQuery} />
                 : t.title}
             </h3>
-            <span className={`text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 font-medium ${statusColors[t.status] || 'bg-gray-100 text-gray-600'}`}>
-              {t.status}
-            </span>
-            <span className={`text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 font-medium ${areaColors[t.area] || 'bg-gray-100 text-gray-600'}`}>
-              {t.area}
-            </span>
-            {renderPriorityIndicator(t.priority)}
             {overdue && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium flex-shrink-0 flex items-center gap-0.5 animate-pulse">
-                <AlertTriangle className="w-3 h-3" /> Overdue
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold flex-shrink-0">Overdue</span>
+            )}
+            {t.due_date && !overdue && daysUntilDue !== null && (
+              <span className={`text-[10px] flex-shrink-0 ${daysUntilDue <= 3 ? 'text-amber-600 font-semibold' : 'text-gray-400'}`}>
+                {daysUntilDue === 0 ? 'Today' : `${daysUntilDue}d left`}
               </span>
             )}
-            {/* Tags as colored pills (max 3, then +N more) */}
-            {tags.slice(0, 3).map((tag, idx) => (
-              <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 font-medium hidden lg:inline-block ${tagPillColors[idx % tagPillColors.length]}`}>
+            {/* Tags as tiny pills */}
+            {tags.slice(0, 2).map((tag, idx) => (
+              <span key={tag} className={`text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0 font-medium hidden lg:inline-block ${tagPillColors[idx % tagPillColors.length]}`}>
                 {tag}
               </span>
             ))}
-            {tags.length > 3 && (
-              <span className="text-[10px] text-gray-400 flex-shrink-0 hidden lg:inline-block font-medium">+{tags.length - 3} more</span>
+            {tags.length > 2 && (
+              <span className="text-[9px] text-gray-400 flex-shrink-0 hidden lg:inline-block">+{tags.length - 2}</span>
             )}
           </div>
-          {/* Row 1.5: Description truncated to 2 lines */}
-          {t.description && (
-            <p className="text-xs text-gray-500 mt-1 pl-5 line-clamp-2">
-              {searchQuery.trim()
-                ? <HighlightText text={t.description} query={searchQuery} />
-                : t.description}
-            </p>
-          )}
-          {/* Row 2: Meta stats */}
-          <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 pl-5">
+          {/* Row 2: Description (one-line) + meta */}
+          <div className="flex items-center gap-2 mt-1 pl-4 text-[11px] text-gray-400">
+            {t.description && (
+              <span className="truncate text-gray-500 flex-1 min-w-0">
+                {searchQuery.trim()
+                  ? <HighlightText text={t.description} query={searchQuery} />
+                  : t.description}
+              </span>
+            )}
+            {!t.description && <span className="flex-1" />}
             {itemCount > 0 && (
-              <span className="flex items-center gap-1">
-                <Paperclip className="w-3 h-3" /> {itemCount} item{itemCount !== 1 ? 's' : ''}
+              <span className="flex items-center gap-0.5 flex-shrink-0">
+                <Paperclip className="w-3 h-3" /> {itemCount}
               </span>
             )}
-            {contactCount > 0 && (
-              <span className="flex items-center gap-1">
-                <Users className="w-3 h-3" /> {contactCount} contact{contactCount !== 1 ? 's' : ''}
-              </span>
-            )}
-            {t.due_date && !overdue && (
-              <span className={`flex items-center gap-1 ${daysUntilDue !== null && daysUntilDue <= 3 ? 'text-amber-500 font-medium' : ''}`}>
-                <Clock className="w-3 h-3" />
-                {daysUntilDue === 0 ? 'Due today' : `${daysUntilDue}d left`}
-              </span>
-            )}
-            {t.progress_percent != null && (
-              <span className="flex items-center gap-1.5">
-                <div className={`w-14 h-1.5 rounded-full overflow-hidden ${progressNearComplete ? 'bg-green-100' : 'bg-gray-200'}`}>
-                  <div className={`h-full rounded-full transition-all ${progressNearComplete ? 'bg-green-500' : 'bg-blue-500'} ${t.progress_percent === 100 ? 'animate-pulse' : ''}`}
+            {t.progress_percent != null && t.progress_percent > 0 && (
+              <span className="flex items-center gap-1 flex-shrink-0">
+                <div className={`w-10 h-1 rounded-full overflow-hidden ${progressNearComplete ? 'bg-green-100' : 'bg-gray-200'}`}>
+                  <div className={`h-full rounded-full ${progressNearComplete ? 'bg-green-500' : 'bg-blue-500'}`}
                     style={{ width: `${t.progress_percent}%` }} />
                 </div>
-                <span className={progressNearComplete ? 'text-green-600 font-semibold' : ''}>{t.progress_percent}%</span>
+                <span className={`text-[10px] ${progressNearComplete ? 'text-green-600' : ''}`}>{t.progress_percent}%</span>
               </span>
             )}
-            {t.summary && (
-              <span className="flex items-center gap-1 text-purple-400">
-                <Sparkles className="w-3 h-3" /> AI
-              </span>
-            )}
-            {/* Source badges */}
-            {t.source_counts && Object.keys(t.source_counts).length > 0 && (
-              Object.entries(t.source_counts).slice(0, 3).map(([src, count]) => {
-                const icons: Record<string, typeof Mail> = { gmail: Mail, calendar: Calendar, drive: FileText, slack: MessageSquare, notion: BookOpen, manual: StickyNote };
-                const Icon = icons[src] || Paperclip;
-                return (
-                  <span key={src} className="flex items-center gap-0.5 text-gray-400">
-                    <Icon className="w-3 h-3" /> {count as number}
-                  </span>
-                );
-              })
-            )}
-            <span className="ml-auto text-gray-400">{formatRelativeDate(t.updated_at)}</span>
+            {t.summary && <Sparkles className="w-3 h-3 text-purple-400 flex-shrink-0" />}
+            <span className="flex-shrink-0">{formatRelativeDate(t.updated_at)}</span>
           </div>
         </Link>
         {/* Quick action buttons on hover - Edit, Move, Pin, Archive */}
@@ -1766,8 +1729,68 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             </div>
           ) : viewMode === 'folders' && displayFolders.length > 0 ? (
             <div>
-              {/* Folder tree */}
+              {/* Folder cards grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+                {displayFolderTree.map(node => {
+                  const topicsSource = selectedArea ? areaFilteredTopics : filteredTopics;
+                  const countDeepFn = (n: { folder: FolderType; children: any[] }): number => {
+                    const direct = topicsSource.filter(t => t.folder_id === n.folder.id).length;
+                    return direct + n.children.reduce((sum: number, c: any) => sum + countDeepFn(c), 0);
+                  };
+                  const totalCount = countDeepFn(node);
+                  const folderTopics = topicsSource.filter(t => t.folder_id === node.folder.id);
+                  const latestTopic = folderTopics.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0];
+                  const firstDesc = folderTopics.find(t => t.description)?.description;
+                  const ContextIcon = getFolderIcon(node.folder.name);
+                  const areaBorderMap: Record<string, string> = { work: 'border-l-blue-500', personal: 'border-l-green-500', career: 'border-l-purple-500' };
+                  const areaIconBg: Record<string, string> = { work: 'bg-blue-100 text-blue-600', personal: 'bg-green-100 text-green-600', career: 'bg-purple-100 text-purple-600' };
+                  const folderArea = node.folder.area || selectedArea || 'work';
+                  const isExpanded = expandedFolders.has(node.folder.id);
+
+                  return (
+                    <div
+                      key={node.folder.id}
+                      className={`group/fcard relative bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-gray-200 transition-all cursor-pointer border-l-4 ${areaBorderMap[folderArea] || 'border-l-gray-300'} overflow-hidden`}
+                      onClick={() => toggleFolder(node.folder.id)}
+                    >
+                      <div className="p-4">
+                        <div className="flex items-start gap-3">
+                          <div className={`w-10 h-10 rounded-xl ${areaIconBg[folderArea] || 'bg-gray-100 text-gray-600'} flex items-center justify-center flex-shrink-0`}>
+                            <ContextIcon className="w-5 h-5" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-semibold text-sm text-gray-900 truncate">{node.folder.name}</h3>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${totalCount > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'}`}>
+                                {totalCount} topic{totalCount !== 1 ? 's' : ''}
+                              </span>
+                            </div>
+                            {firstDesc && (
+                              <p className="text-xs text-gray-400 mt-1 line-clamp-1">{firstDesc}</p>
+                            )}
+                            {latestTopic && (
+                              <p className="text-[10px] text-gray-400 mt-1.5 flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                Updated {formatRelativeDate(latestTopic.updated_at)}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {/* Hover overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-blue-50/80 to-transparent opacity-0 group-hover/fcard:opacity-100 transition-opacity flex items-end justify-center pb-3 pointer-events-none">
+                        <span className="text-xs font-semibold text-blue-600 flex items-center gap-1">
+                          {isExpanded ? 'Collapse' : 'Open'} <ChevronRight className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Expanded folder contents */}
               {displayFolderTree.map(node => renderFolderNode(node))}
+
               {/* Unfiled topics */}
               {displayUnfoldered.length > 0 && (
                 <div className="mt-4">

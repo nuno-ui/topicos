@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Search, LayoutDashboard, FolderKanban, Users, Settings, Brain,
-  Sparkles, RefreshCw, Command, X, Zap, ArrowRight, StickyNote
+  Sparkles, RefreshCw, Command, X, Zap, ArrowRight, StickyNote, Clock
 } from 'lucide-react';
 
 interface CommandItem {
@@ -23,6 +23,25 @@ export function CommandPalette() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+
+  // Recent searches persisted in localStorage
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('youos_cmd_recent');
+      if (stored) setRecentSearches(JSON.parse(stored));
+    } catch { /* ignore */ }
+  }, []);
+
+  const addRecentSearch = useCallback((term: string) => {
+    if (!term.trim()) return;
+    setRecentSearches(prev => {
+      const updated = [term, ...prev.filter(s => s !== term)].slice(0, 3);
+      try { localStorage.setItem('youos_cmd_recent', JSON.stringify(updated)); } catch { /* ignore */ }
+      return updated;
+    });
+  }, []);
 
   const commands: CommandItem[] = [
     // Navigation
@@ -100,10 +119,11 @@ export function CommandPalette() {
   };
 
   const executeCommand = useCallback((cmd: CommandItem) => {
+    if (query.trim()) addRecentSearch(query.trim());
     setOpen(false);
     setQuery('');
     cmd.action();
-  }, []);
+  }, [query, addRecentSearch]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -171,6 +191,23 @@ export function CommandPalette() {
         </div>
         {/* Commands list */}
         <div className="max-h-[340px] overflow-y-auto py-2">
+          {/* Recent searches shown when query is empty */}
+          {!query.trim() && recentSearches.length > 0 && (
+            <div className="mb-1">
+              <p className="px-4 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Recent</p>
+              {recentSearches.map((term) => (
+                <button
+                  key={term}
+                  onClick={() => setQuery(term)}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-left text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
+                >
+                  <Clock className="w-3.5 h-3.5 text-gray-300" />
+                  <span className="text-sm">{term}</span>
+                </button>
+              ))}
+              <div className="mx-4 my-1 border-t border-gray-100" />
+            </div>
+          )}
           {filteredCommands.length === 0 ? (
             <div className="px-4 py-8 text-center">
               <p className="text-sm text-gray-400">No commands found</p>

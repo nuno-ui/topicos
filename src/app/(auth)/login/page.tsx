@@ -31,7 +31,7 @@ export default function LoginPage() {
           <div className="mb-10">
             <div className="flex items-center gap-3 mb-5">
               <div className="w-13 h-13 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg shadow-black/10">
-                <Sparkles className="w-7 h-7 text-white" />
+                <span className="text-white font-bold text-2xl leading-none">Y</span>
               </div>
               <div>
                 <div className="flex items-center gap-2.5">
@@ -113,7 +113,7 @@ export default function LoginPage() {
           <div className="lg:hidden text-center mb-8">
             <div className="inline-flex flex-col items-center gap-3 mb-4">
               <div className="w-16 h-16 brand-gradient rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20">
-                <Sparkles className="w-8 h-8 text-white" />
+                <span className="text-white font-bold text-3xl leading-none">Y</span>
               </div>
               <div>
                 <div className="flex items-center justify-center gap-2">

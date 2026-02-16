@@ -19,6 +19,9 @@ export const metadata: Metadata = {
     index: false,
     follow: false,
   },
+  icons: {
+    icon: '/icon',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

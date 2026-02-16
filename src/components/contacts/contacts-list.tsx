@@ -912,9 +912,15 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                   <Clock className="w-3 h-3" /> {getRelativeTime(c.last_interaction_at)}
                 </span>
               </div>
+              {/* Recent interaction preview */}
+              {c.notes && (
+                <p className="text-[10px] text-gray-400 mt-1 truncate italic max-w-[300px]" title={c.notes}>
+                  {c.notes.length > 60 ? c.notes.slice(0, 60) + '...' : c.notes}
+                </p>
+              )}
             </div>
 
-            {/* Quick action icons on hover */}
+            {/* Quick action overlay on hover */}
             <div className="flex items-center gap-0.5">
               {c.email && (
                 <a href={`mailto:${c.email}`} onClick={e => e.stopPropagation()}
@@ -927,6 +933,12 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                 className="p-1.5 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100" title="View contact"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); startEdit(c); }}
+                className="p-1.5 text-gray-300 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-all opacity-0 group-hover:opacity-100" title="Edit contact"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setSelectedContact(selectedContact === c.id ? null : c.id); }}
