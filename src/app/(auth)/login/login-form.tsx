@@ -16,7 +16,7 @@ export function LoginForm() {
     setMessage('');
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOtp({
-      email, options: { emailRedirectTo: window.location.origin + '/dashboard' },
+      email, options: { emailRedirectTo: window.location.origin + '/auth/callback' },
     });
     if (error) {
       setStatus('error');
@@ -34,7 +34,7 @@ export function LoginForm() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin + '/dashboard',
+          redirectTo: window.location.origin + '/auth/callback',
           scopes: 'openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.readonly',
         },
       });
