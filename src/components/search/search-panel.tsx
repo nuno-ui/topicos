@@ -1,9 +1,9 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { sourceLabel, formatRelativeDate, sourceBorderClass, sourceToggleClass, sourceIconBgClass, decodeHtmlEntities } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
-import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, ChevronUp, ChevronRight, Clock, ArrowUpDown, Calendar, X, Sparkles, Brain, Tags, Wand2, Bookmark, BookmarkCheck, Eye, Mail, Filter, RotateCcw, ChevronsUpDown, SearchX, Lightbulb } from 'lucide-react';
+import { Search, Link2, Plus, ExternalLink, Loader2, ChevronDown, ChevronUp, ChevronRight, Clock, ArrowUpDown, Calendar, X, Sparkles, Brain, Tags, Wand2, Bookmark, BookmarkCheck, Eye, Mail, Filter, RotateCcw, ChevronsUpDown, SearchX, Lightbulb, ClipboardCopy } from 'lucide-react';
 
 interface SearchResult {
   external_id: string;
@@ -108,6 +108,13 @@ export function SearchPanel() {
 
   // Search error state
   const [searchError, setSearchError] = useState<string | null>(null);
+
+  // Track whether a search has been performed (for showing empty state vs initial state)
+  const [hasSearched, setHasSearched] = useState(false);
+
+  // Hover preview state for result cards
+  const [hoveredResult, setHoveredResult] = useState<string | null>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Rotating placeholder
   const placeholderHints = [
@@ -217,9 +224,7 @@ export function SearchPanel() {
       setShowCategorized(false);
       setSearchSummary(null);
       setCollapsedGroups(new Set());
-      if (allItems.length === 0) {
-        toast.info('No results found. Try different keywords or date range.');
-      }
+      setHasSearched(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Search failed';
       setSearchError(message);
@@ -513,6 +518,86 @@ export function SearchPanel() {
 
   const allGroupsCollapsed = sourceGroups.length > 0 && collapsedGroups.size === sourceGroups.length;
 
+  // Source color dot class for the results summary bar
+  const sourceColorDotClass = (source: string): string => {
+    switch (source) {
+      case 'gmail': return 'bg-red-400';
+      case 'calendar': return 'bg-blue-400';
+      case 'drive': return 'bg-yellow-400';
+      case 'slack': return 'bg-purple-400';
+      case 'notion': return 'bg-gray-700';
+      case 'manual': return 'bg-green-400';
+      case 'link': return 'bg-cyan-400';
+      default: return 'bg-gray-400';
+    }
+  };
+
+  // Copy URL to clipboard
+  const copyToClipboard = (url: string) => {
+    navigator.clipboard.writeText(url).then(() => {
+      toast.success('Link copied to clipboard');
+    }).catch(() => {
+      toast.error('Failed to copy link');
+    });
+  };
+
+  // Handle hover with delay for result cards
+  const handleResultHover = (key: string) => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredResult(key);
+    }, 500);
+  };
+
+  const handleResultLeave = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    setHoveredResult(null);
+  };
+
+  // Quick date filter helpers
+  const setQuickDateRange = (preset: 'today' | 'this_week' | 'this_month' | 'last_3_months') => {
+    const now = new Date();
+    const toDate = now.toISOString().split('T')[0];
+    let fromDate: string;
+    switch (preset) {
+      case 'today':
+        fromDate = toDate;
+        break;
+      case 'this_week': {
+        const day = now.getDay();
+        const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+        const monday = new Date(now);
+        monday.setDate(diff);
+        fromDate = monday.toISOString().split('T')[0];
+        break;
+      }
+      case 'this_month': {
+        const first = new Date(now.getFullYear(), now.getMonth(), 1);
+        fromDate = first.toISOString().split('T')[0];
+        break;
+      }
+      case 'last_3_months': {
+        const threeMonthsAgo = new Date(now);
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+        fromDate = threeMonthsAgo.toISOString().split('T')[0];
+        break;
+      }
+    }
+    setDateFrom(fromDate);
+    setDateTo(toDate);
+    setShowDateFilters(true);
+  };
+
+  // Clear all filters (user can then click Search to retry)
+  const clearFiltersAndRetry = () => {
+    setSources(new Set(SOURCES));
+    setDateFrom('');
+    setDateTo('');
+    setSelectedAccounts(new Set());
+    setShowDateFilters(false);
+    toast.info('Filters cleared -- click Search to retry');
+  };
+
   // Active source filter count
   const activeFilterCount = sources.size;
 
@@ -529,15 +614,24 @@ export function SearchPanel() {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               placeholder={placeholderHints[placeholderIndex]}
-              className="w-full px-5 py-3.5 border border-gray-200 rounded-xl text-base focus:outline-none search-input-glow pr-10 bg-white relative z-[1] placeholder:text-gray-400"
+              className="w-full px-5 py-3.5 border border-gray-200 rounded-xl text-base focus:outline-none search-input-glow pr-28 bg-white relative z-[1] placeholder:text-gray-400"
             />
-            {query && (
-              <button onClick={() => { setQuery(''); setResults([]); setSearchError(null); }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-[2] p-1 rounded-full hover:bg-gray-100 transition-colors"
-                aria-label="Clear search"
-                title="Clear search">
-                <X className="w-4 h-4" />
-              </button>
+            {(query || (hasSearched && sortedResults.length > 0)) && (
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 z-[2] flex items-center gap-1.5">
+                {hasSearched && sortedResults.length > 0 && !loading && (
+                  <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 whitespace-nowrap">
+                    {sortedResults.length} result{sortedResults.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {query && (
+                  <button onClick={() => { setQuery(''); setResults([]); setSearchError(null); setHasSearched(false); }}
+                    className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition-colors"
+                    aria-label="Clear search"
+                    title="Clear search">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             )}
           </div>
           <button
@@ -556,9 +650,27 @@ export function SearchPanel() {
           )}
         </div>
 
-        {/* Search result count */}
-        {sortedResults.length > 0 && (
-          <p className="text-xs text-gray-500 font-medium">Showing {sortedResults.length} result{sortedResults.length !== 1 ? 's' : ''}</p>
+        {/* Search results summary bar */}
+        {hasSearched && sortedResults.length > 0 && !loading && (
+          <div className="flex items-center gap-3 px-4 py-2.5 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100 animate-fade-in">
+            <div className="flex items-center gap-1.5">
+              <Search className="w-3.5 h-3.5 text-blue-500" />
+              <span className="text-sm font-semibold text-gray-700">
+                Found {sortedResults.length} result{sortedResults.length !== 1 ? 's' : ''}
+              </span>
+              <span className="text-sm text-gray-500">
+                across {sourceGroups.length} source{sourceGroups.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 ml-auto flex-wrap">
+              {sourceGroups.map(src => (
+                <span key={src} className="inline-flex items-center gap-1 text-xs text-gray-600">
+                  <span className={`w-2 h-2 rounded-full ${sourceColorDotClass(src)}`} />
+                  {groupedResults[src].results.length} {sourceLabel(src).toLowerCase()}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Source filters with source-colored backgrounds when active */}
@@ -657,19 +769,38 @@ export function SearchPanel() {
 
         {/* Date range filter */}
         {showDateFilters && (
-          <div className="flex gap-3 items-center p-3 bg-amber-50 rounded-lg border border-amber-200">
-            <Calendar className="w-4 h-4 text-amber-600" />
-            <div className="flex gap-2 items-center text-sm">
-              <label className="text-gray-600">From:</label>
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                className="px-2 py-1 border rounded text-xs" />
-              <label className="text-gray-600">To:</label>
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                className="px-2 py-1 border rounded text-xs" />
+          <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 space-y-2">
+            <div className="flex gap-2 items-center flex-wrap">
+              <Calendar className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+              <span className="text-xs text-amber-700 font-medium flex-shrink-0">Quick:</span>
+              {[
+                { label: 'Today', value: 'today' as const },
+                { label: 'This Week', value: 'this_week' as const },
+                { label: 'This Month', value: 'this_month' as const },
+                { label: 'Last 3 Months', value: 'last_3_months' as const },
+              ].map(chip => (
+                <button
+                  key={chip.value}
+                  onClick={() => setQuickDateRange(chip.value)}
+                  className="px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200 transition-colors hover:shadow-sm"
+                >
+                  {chip.label}
+                </button>
+              ))}
             </div>
-            {(dateFrom || dateTo) && (
-              <button onClick={clearDateFilters} className="text-xs text-amber-600 hover:text-amber-800">Clear</button>
-            )}
+            <div className="flex gap-3 items-center">
+              <div className="flex gap-2 items-center text-sm">
+                <label className="text-gray-600">From:</label>
+                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                  className="px-2 py-1 border rounded text-xs" />
+                <label className="text-gray-600">To:</label>
+                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                  className="px-2 py-1 border rounded text-xs" />
+              </div>
+              {(dateFrom || dateTo) && (
+                <button onClick={clearDateFilters} className="text-xs text-amber-600 hover:text-amber-800">Clear</button>
+              )}
+            </div>
           </div>
         )}
 
@@ -955,8 +1086,12 @@ export function SearchPanel() {
                       const key = item.source + ':' + item.external_id;
                       const globalIndex = group.indices[groupIdx];
                       const cat = getCategoryForResult(globalIndex);
+                      const isHovered = hoveredResult === key;
                       return (
-                        <div key={key} className={`p-4 bg-white rounded-xl border-l-[3px] ${sourceBorderClass(item.source)} border transition-all hover-lift ${
+                        <div key={key}
+                          onMouseEnter={() => handleResultHover(key)}
+                          onMouseLeave={handleResultLeave}
+                          className={`p-4 bg-white rounded-xl border-l-[3px] ${sourceBorderClass(item.source)} border transition-all hover-lift group/card ${
                           item.already_linked
                             ? 'border-green-200 bg-green-50/50'
                             : 'border-gray-100 hover:border-gray-200'
@@ -1036,8 +1171,22 @@ export function SearchPanel() {
                                   )}
                                 </div>
                               )}
+                              {/* Hover preview -- expanded snippet */}
+                              {isHovered && item.snippet && item.snippet.length > 80 && expandedResult !== key && (
+                                <div className="mt-2 p-2.5 bg-gray-50 rounded-lg border border-gray-100 animate-fade-in">
+                                  <p className="text-xs text-gray-600 leading-relaxed">{decodeHtmlEntities(item.snippet)}</p>
+                                </div>
+                              )}
                             </div>
                             <div className="flex gap-1.5 items-center flex-shrink-0">
+                              {/* Copy link button -- appears on hover */}
+                              <button
+                                onClick={() => copyToClipboard(item.url)}
+                                className="p-2 text-gray-300 opacity-0 group-hover/card:opacity-100 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-all"
+                                title="Copy link"
+                              >
+                                <ClipboardCopy className="w-4 h-4" />
+                              </button>
                               {item.source !== 'manual' && (
                                 <a href={item.url} target="_blank" rel="noopener noreferrer"
                                   className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open in source">
@@ -1128,29 +1277,52 @@ export function SearchPanel() {
         </div>
       )}
 
-      {/* No results -- better display with suggestion */}
-      {!loading && results.length === 0 && query && !searchError && (
-        <div className="text-center py-16 animate-fade-in">
-          <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
+      {/* No results -- enhanced inline empty state */}
+      {!loading && results.length === 0 && hasSearched && query && !searchError && (
+        <div className="text-center py-12 animate-fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-gray-100 to-blue-50 flex items-center justify-center mx-auto mb-4">
             <SearchX className="w-8 h-8 text-gray-400" />
           </div>
-          <p className="text-gray-700 text-sm font-semibold">No results found</p>
-          <p className="text-gray-400 text-sm mt-1">for &ldquo;{query}&rdquo;</p>
-          <div className="mt-4 p-3 bg-blue-50 rounded-xl border border-blue-100 max-w-sm mx-auto">
-            <div className="flex items-start gap-2">
+          <p className="text-gray-700 text-base font-semibold">No results found</p>
+          <p className="text-gray-400 text-sm mt-1">
+            Your search for <span className="font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded">&ldquo;{query}&rdquo;</span> didn&apos;t match any items
+          </p>
+
+          {/* Active filters summary */}
+          {(sources.size < SOURCES.length || dateFrom || dateTo) && (
+            <div className="mt-3 flex items-center justify-center gap-2 flex-wrap text-xs text-gray-500">
+              <Filter className="w-3 h-3" />
+              <span>Active filters:</span>
+              {sources.size < SOURCES.length && (
+                <span className="px-2 py-0.5 bg-gray-100 rounded-full">{sources.size}/{SOURCES.length} sources</span>
+              )}
+              {dateFrom && <span className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded-full">from {dateFrom}</span>}
+              {dateTo && <span className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded-full">to {dateTo}</span>}
+            </div>
+          )}
+
+          <div className="mt-5 p-4 bg-blue-50 rounded-xl border border-blue-100 max-w-md mx-auto">
+            <div className="flex items-start gap-2.5">
               <Lightbulb className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
               <div className="text-left">
-                <p className="text-xs font-medium text-blue-700">Suggestions</p>
-                <ul className="text-xs text-blue-600 mt-1 space-y-0.5">
-                  <li>Try different or broader keywords</li>
-                  <li>Enable more source filters above</li>
-                  <li>Adjust or remove date range filters</li>
-                  <li>Use AI Smart Search for better queries</li>
+                <p className="text-xs font-semibold text-blue-700">Suggestions to find what you need</p>
+                <ul className="text-xs text-blue-600 mt-1.5 space-y-1">
+                  <li className="flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-blue-400 flex-shrink-0" /> Try broader keywords or different phrasing</li>
+                  <li className="flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-blue-400 flex-shrink-0" /> Check your source filters -- some sources may be disabled</li>
+                  <li className="flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-blue-400 flex-shrink-0" /> Remove or widen the date range if set</li>
+                  <li className="flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-blue-400 flex-shrink-0" /> Use AI Smart Search for intelligent query expansion</li>
                 </ul>
               </div>
             </div>
           </div>
-          <div className="flex gap-2 justify-center mt-5">
+
+          <div className="flex gap-2 justify-center mt-5 flex-wrap">
+            {(sources.size < SOURCES.length || dateFrom || dateTo) && (
+              <button onClick={clearFiltersAndRetry}
+                className="px-4 py-2 bg-amber-100 text-amber-700 rounded-xl text-sm font-medium hover:bg-amber-200 flex items-center gap-2 transition-colors border border-amber-200">
+                <RotateCcw className="w-4 h-4" /> Clear filters &amp; retry
+              </button>
+            )}
             <button onClick={handleSearch}
               className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 flex items-center gap-2 transition-colors">
               <RotateCcw className="w-4 h-4" /> Retry

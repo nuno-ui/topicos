@@ -1,7 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { sourceLabel, formatRelativeDate, getTopicHealthScore, getDaysUntil, formatSmartDate, decodeHtmlEntities } from '@/lib/utils';
-import { Zap, Clock, FolderKanban, Newspaper, PieChart, Mail, Calendar, FileText, MessageSquare, BookOpen, StickyNote, Link2, File, Search, Users, Plus, Sparkles, Paperclip, TrendingUp, TrendingDown, ArrowRight, Brain, Flame, LinkIcon, CheckCircle2, Circle, Rocket } from 'lucide-react';
+import { Zap, Clock, FolderKanban, Newspaper, PieChart, Mail, Calendar, FileText, MessageSquare, BookOpen, StickyNote, Link2, File, Search, Users, Plus, Sparkles, Paperclip, TrendingUp, TrendingDown, ArrowRight, Brain, Flame, LinkIcon, CheckCircle2, Circle, Rocket, AlertTriangle } from 'lucide-react';
 import { DashboardAgents } from '@/components/dashboard/dashboard-agents';
 import { ClientGreeting, ClientDate } from '@/components/dashboard/client-date';
 
@@ -194,6 +194,9 @@ export default async function DashboardPage() {
   // Connected sources count for getting started tracker
   const connectedSourcesCount = (hasGoogle ? 1 : 0) + (hasSlack ? 1 : 0) + (hasNotion ? 1 : 0);
 
+  // Overdue topics: active topics with a due_date in the past
+  const overdueTopics = topics.filter((t: any) => t.due_date && new Date(t.due_date) < now);
+
   // Compute trend: positive means more items this week than last
   const itemsTrend = itemsLast7 - itemsPrior7;
 
@@ -220,6 +223,14 @@ export default async function DashboardPage() {
   for (const item of recentItems) {
     if (!lastSyncBySource[item.source]) {
       lastSyncBySource[item.source] = item.created_at;
+    }
+  }
+
+  // Count items per source from the last 7 days (for sparkline text)
+  const itemsThisWeekBySource: Record<string, number> = {};
+  for (const item of recentItems) {
+    if (new Date(item.created_at) >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)) {
+      itemsThisWeekBySource[item.source] = (itemsThisWeekBySource[item.source] || 0) + 1;
     }
   }
 
@@ -297,6 +308,38 @@ export default async function DashboardPage() {
           <span>{currentTip.tip}</span>
         </div>
       </div>
+
+      {/* Overdue Topics Alert Banner */}
+      {overdueTopics.length > 0 && (
+        <div className="mb-6 p-4 bg-gradient-to-r from-red-500 to-amber-500 rounded-xl shadow-sm text-white">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
+              <AlertTriangle className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm">
+                {overdueTopics.length} overdue topic{overdueTopics.length !== 1 ? 's' : ''} need{overdueTopics.length === 1 ? 's' : ''} attention
+              </p>
+              <div className="flex gap-2 mt-1 flex-wrap">
+                {overdueTopics.slice(0, 5).map((t: any) => (
+                  <Link
+                    key={t.id}
+                    href={`/topics/${t.id}`}
+                    className="text-xs bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-md font-medium transition-colors truncate max-w-[200px]"
+                  >
+                    {t.title}
+                  </Link>
+                ))}
+                {overdueTopics.length > 5 && (
+                  <Link href="/topics" className="text-xs bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-md font-medium transition-colors">
+                    +{overdueTopics.length - 5} more
+                  </Link>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Welcome + Stats */}
       <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
@@ -442,6 +485,9 @@ export default async function DashboardPage() {
               {s.connected && lastSyncBySource[s.sourceKey] && (
                 <span className="text-[10px] opacity-60 mt-0.5 flex items-center gap-1">
                   <Clock className="w-2.5 h-2.5" /> {formatRelativeDate(lastSyncBySource[s.sourceKey])}
+                  {itemsThisWeekBySource[s.sourceKey] && (
+                    <span className="ml-1 opacity-80">&middot; {itemsThisWeekBySource[s.sourceKey]} this week</span>
+                  )}
                 </span>
               )}
             </div>
@@ -502,7 +548,23 @@ export default async function DashboardPage() {
               <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FolderKanban className="w-5 h-5 text-blue-500" /> Active Topics</h2>
               <Link href="/topics" className="text-sm text-blue-600 hover:underline font-medium">View all &rarr;</Link>
             </div>
-            {topics.length === 0 ? (
+            {topics.length === 0 && totalItems === 0 ? (
+              <div className="p-8 bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 rounded-2xl shadow-lg text-white text-center">
+                <div className="w-16 h-16 mx-auto bg-white/20 rounded-2xl flex items-center justify-center mb-5">
+                  <Rocket className="w-8 h-8 text-white" />
+                </div>
+                <h2 className="text-2xl font-bold mb-2">Welcome to YouOS</h2>
+                <p className="text-blue-100 max-w-md mx-auto mb-6">
+                  Your personal operating system for knowledge. Connect your sources, create topics, and let AI help you stay on top of everything.
+                </p>
+                <Link
+                  href="/topics"
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-white text-indigo-700 rounded-xl text-sm font-bold hover:bg-blue-50 transition-all shadow-md"
+                >
+                  <Plus className="w-5 h-5" /> Create your first topic
+                </Link>
+              </div>
+            ) : topics.length === 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <Link href="/topics" className="group p-6 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-blue-200 hover:shadow-md transition-all text-center">
                   <div className="w-12 h-12 mx-auto bg-blue-50 rounded-xl flex items-center justify-center mb-3 group-hover:bg-blue-100 transition-colors">
@@ -596,7 +658,12 @@ export default async function DashboardPage() {
                             </div>
                           )}
                         </div>
-                        <span className="text-xs text-gray-400 ml-3 flex-shrink-0">{formatSmartDate(topic.updated_at)}</span>
+                        <span className="text-xs text-gray-400 ml-3 flex-shrink-0 flex items-center gap-1.5">
+                          {formatSmartDate(topic.updated_at)}
+                          {new Date(topic.updated_at) < new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-md font-semibold">Stale</span>
+                          )}
+                        </span>
                       </div>
                     </Link>
                   );
@@ -634,7 +701,19 @@ export default async function DashboardPage() {
                             {agentKindLabel(run.kind)}
                           </span>
                         </div>
-                        <p className="text-xs text-gray-500 mt-0.5 truncate">{run.input_summary}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <p className="text-xs text-gray-500 truncate">{run.input_summary}</p>
+                          {run.topic_id && (run.topics as unknown as { title: string } | null)?.title && (
+                            <Link
+                              href={`/topics/${run.topic_id}`}
+                              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition-colors flex-shrink-0"
+                            >
+                              <FolderKanban className="w-3 h-3" />
+                              <span className="truncate max-w-[120px]">{(run.topics as unknown as { title: string }).title}</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </Link>
+                          )}
+                        </div>
                         <div className="flex gap-3 mt-1.5 text-xs text-gray-400">
                           {run.tokens_used ? <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500" /> {run.tokens_used.toLocaleString()} tokens</span> : null}
                           <span>{formatSmartDate(run.created_at)}</span>

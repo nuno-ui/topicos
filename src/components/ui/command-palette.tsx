@@ -4,8 +4,10 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Search, LayoutDashboard, FolderKanban, Users, Settings, Brain,
-  Sparkles, RefreshCw, Command, X, Zap, ArrowRight, StickyNote, Clock
+  Sparkles, RefreshCw, Command, X, Zap, ArrowRight, StickyNote, Clock,
+  History
 } from 'lucide-react';
+import { usePathname } from 'next/navigation';
 
 interface CommandItem {
   id: string;
@@ -23,6 +25,20 @@ export function CommandPalette() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+  const pathname = usePathname();
+
+  // Recent topics from localStorage
+  const [recentTopics, setRecentTopics] = useState<{ id: string; title: string }[]>([]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('youos_recent_topics');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) setRecentTopics(parsed.slice(0, 3));
+      }
+    } catch { /* ignore */ }
+  }, [open]);
 
   // Recent searches persisted in localStorage
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -80,6 +96,30 @@ export function CommandPalette() {
         setTimeout(() => window.dispatchEvent(new CustomEvent('topicos:new-topic')), 500);
       },
     },
+    {
+      id: 'search_in_topic',
+      label: 'Search in Current Topic',
+      description: pathname.startsWith('/topics/') ? 'Search within this topic\'s context' : 'Navigate to a topic first',
+      icon: Search,
+      category: 'action',
+      action: () => {
+        const topicId = pathname.startsWith('/topics/') ? pathname.split('/')[2] : '';
+        if (topicId) {
+          router.push(`/search?topic=${topicId}`);
+        } else {
+          router.push('/search');
+        }
+      },
+    },
+    // Recent topics
+    ...recentTopics.map((topic, i) => ({
+      id: `recent_topic_${i}`,
+      label: topic.title,
+      description: 'Go to recent topic',
+      icon: History as React.ComponentType<{ className?: string }>,
+      category: 'navigation' as const,
+      action: () => router.push(`/topics/${topic.id}`),
+    })),
   ];
 
   const filteredCommands = query.trim()
@@ -191,6 +231,11 @@ export function CommandPalette() {
             aria-expanded="true"
             aria-autocomplete="list"
           />
+          {query.trim() && (
+            <span className="text-[10px] px-1.5 py-0.5 text-gray-300 font-medium tabular-nums">
+              {filteredCommands.length} result{filteredCommands.length !== 1 ? 's' : ''}
+            </span>
+          )}
           <kbd className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-400 rounded border border-gray-200 font-mono">ESC</kbd>
         </div>
         {/* Commands list */}
@@ -213,8 +258,25 @@ export function CommandPalette() {
             </div>
           )}
           {filteredCommands.length === 0 ? (
-            <div className="px-4 py-8 text-center">
-              <p className="text-sm text-gray-400">No commands found</p>
+            <div className="px-4 py-8 text-center space-y-3">
+              <p className="text-sm text-gray-400">No commands match &ldquo;{query}&rdquo;</p>
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-semibold text-gray-300 uppercase tracking-wider">Try instead</p>
+                {[
+                  { hint: 'briefing', desc: 'for AI agents' },
+                  { hint: 'sync', desc: 'to pull latest data' },
+                  { hint: '1\u20135', desc: 'to navigate pages' },
+                ].map(s => (
+                  <button
+                    key={s.hint}
+                    onClick={() => setQuery(s.hint)}
+                    className="block mx-auto text-xs text-gray-400 hover:text-blue-500 transition-colors"
+                  >
+                    <kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono text-[10px] mr-1">{s.hint}</kbd>
+                    <span className="text-gray-300">{s.desc}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             categories.map(cat => {

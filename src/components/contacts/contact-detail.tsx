@@ -38,6 +38,8 @@ import {
   Heart,
   MessageSquare,
   Tag,
+  Flame,
+  CalendarDays,
 } from 'lucide-react';
 
 // ============================
@@ -147,6 +149,24 @@ const getEngagementLevel = (lastInteraction: string | null) => {
   return { label: 'Cold', color: 'bg-red-100 text-red-700', dotColor: 'bg-red-500' };
 };
 
+const getInteractionFrequency = (interactionCount: number, createdAt: string): string | null => {
+  if (interactionCount === 0) return null;
+  const daysSinceCreated = Math.max(1, Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24)));
+  const monthsSinceCreated = daysSinceCreated / 30;
+  if (monthsSinceCreated < 1) {
+    // Less than a month old - show weekly rate
+    const weeklyRate = interactionCount / (daysSinceCreated / 7);
+    if (weeklyRate >= 5) return 'Daily contact';
+    if (weeklyRate >= 1) return `~${Math.round(weeklyRate)}/week`;
+    return `${interactionCount} so far`;
+  }
+  const monthlyRate = interactionCount / monthsSinceCreated;
+  if (monthlyRate >= 20) return 'Daily contact';
+  if (monthlyRate >= 4) return 'Weekly contact';
+  if (monthlyRate >= 1) return `~${Math.round(monthlyRate)} interactions/month`;
+  return `~${Math.round(interactionCount / Math.max(1, monthsSinceCreated))} interactions/month`;
+};
+
 const getDaysAgo = (dateStr: string | null): number | null => {
   if (!dateStr) return null;
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24));
@@ -229,6 +249,13 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
   // Communication timeline state
   const [timelineDisplayCount, setTimelineDisplayCount] = useState(20);
 
+  // Copy email tooltip state
+  const [emailCopied, setEmailCopied] = useState(false);
+
+  // Quick note state
+  const [quickNote, setQuickNote] = useState('');
+  const [savingQuickNote, setSavingQuickNote] = useState(false);
+
   // Sections collapse
   const [showPendingTopics, setShowPendingTopics] = useState(true);
   const [showAllTopics, setShowAllTopics] = useState(true);
@@ -257,6 +284,27 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
         const bUpdated = b.topics?.updated_at ? new Date(b.topics.updated_at).getTime() : 0;
         return bUpdated - aUpdated;
       });
+  }, [topicLinks]);
+
+  const sortedTopicLinks = useMemo(() => {
+    return [...topicLinks].sort((a, b) => {
+      // Overdue items first
+      const now = new Date();
+      const aDue = a.topics?.due_date ? new Date(a.topics.due_date) : null;
+      const bDue = b.topics?.due_date ? new Date(b.topics.due_date) : null;
+      const aOverdue = aDue && aDue < now ? 1 : 0;
+      const bOverdue = bDue && bDue < now ? 1 : 0;
+      if (aOverdue !== bOverdue) return bOverdue - aOverdue;
+      // Then by priority descending
+      const aPriority = a.topics?.priority ?? 0;
+      const bPriority = b.topics?.priority ?? 0;
+      if (aPriority !== bPriority) return bPriority - aPriority;
+      // Then by due date ascending (soonest first)
+      if (aDue && bDue) return aDue.getTime() - bDue.getTime();
+      if (aDue) return -1;
+      if (bDue) return 1;
+      return 0;
+    });
   }, [topicLinks]);
 
   const filteredLinkTopics = useMemo(() => {
@@ -299,6 +347,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
 
   const engagement = getEngagementLevel(contact.last_interaction_at);
   const daysAgo = getDaysAgo(contact.last_interaction_at);
+  const interactionFrequency = getInteractionFrequency(contact.interaction_count, contact.created_at);
 
   // ============================
   // Actions
@@ -308,6 +357,8 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
     if (!contact.email) return;
     try {
       await navigator.clipboard.writeText(contact.email);
+      setEmailCopied(true);
+      setTimeout(() => setEmailCopied(false), 1500);
       toast.success('Email copied');
     } catch {
       toast.error('Failed to copy email');
@@ -457,6 +508,33 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
     setSavingNotes(false);
     setEditingNotes(false);
   }, [inlineNotes, contact.notes, contact.id]);
+
+  // Quick note: prepend timestamped note
+  const saveQuickNote = useCallback(async () => {
+    const text = quickNote.trim();
+    if (!text) return;
+    setSavingQuickNote(true);
+    const timestamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const newNote = `[${timestamp}] ${text}`;
+    const updatedNotes = contact.notes ? `${newNote}\n${contact.notes}` : newNote;
+    try {
+      const res = await fetch(`/api/contacts/${contact.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: updatedNotes }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setContact(prev => ({ ...prev, notes: updatedNotes, ...data.contact, contact_topic_links: prev.contact_topic_links }));
+      setInlineNotes(updatedNotes);
+      setQuickNote('');
+      setLastSavedAt(new Date());
+      toast.success('Quick note added');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save quick note');
+    }
+    setSavingQuickNote(false);
+  }, [quickNote, contact.notes, contact.id]);
 
   // Keyboard shortcut: Enter to save, Escape to cancel in edit mode
   useEffect(() => {
@@ -918,6 +996,12 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                         <span className={cn('w-1.5 h-1.5 rounded-full animate-pulse-dot', engagement.dotColor)} />
                         {engagement.label}
                       </span>
+                      {interactionFrequency && (
+                        <span className="text-xs text-gray-600 flex items-center gap-1.5 bg-gray-50 rounded-full px-3 py-1 border border-gray-100">
+                          <TrendingUp className="w-3 h-3 text-gray-400" />
+                          {interactionFrequency}
+                        </span>
+                      )}
                       {contact.interaction_count > 0 && (
                         <span className="text-xs text-gray-600 flex items-center gap-1.5 bg-gray-50 rounded-full px-3 py-1 border border-gray-100">
                           <Activity className="w-3 h-3 text-gray-400" />
@@ -950,10 +1034,15 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                         </a>
                         <button
                           onClick={copyEmail}
-                          className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-all"
+                          className="group/copy relative p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-all"
                           title="Copy email"
                         >
-                          <Copy className="w-3 h-3" />
+                          {emailCopied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                          {emailCopied && (
+                            <span className="absolute -top-7 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-gray-900 text-white text-[10px] rounded-md whitespace-nowrap z-30 animate-fade-in">
+                              Copied!
+                            </span>
+                          )}
                         </button>
                       </div>
                     )}
@@ -1605,12 +1694,15 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               </div>
             ) : (
               <div className="space-y-2">
-                {topicLinks.map(link => {
+                {sortedTopicLinks.map(link => {
                   const topic = link.topics;
                   if (!topic) return null;
                   const isTopicOverdue = topic.due_date ? new Date(topic.due_date) < new Date() : false;
                   const isTopicActive = topic.status === 'active';
                   const topicPriority = topic.priority ?? 0;
+                  const topicDueDate = topic.due_date ? new Date(topic.due_date) : null;
+                  const topicDueDaysAway = topicDueDate ? Math.ceil((topicDueDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+                  const isTopicUpcoming = topicDueDate && !isTopicOverdue && topicDueDaysAway !== null && topicDueDaysAway <= 7;
                   const statusDotColor: Record<string, string> = { active: 'bg-emerald-500', completed: 'bg-gray-400', archived: 'bg-amber-500' };
                   // Health indicator: green if active + recent update, amber if stale, red if overdue
                   const lastUpdate = topic.updated_at ? Math.floor((Date.now() - new Date(topic.updated_at).getTime()) / (1000 * 60 * 60 * 24)) : 999;
@@ -1650,6 +1742,36 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                           {topic.area && (
                             <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-semibold capitalize', areaColor(topic.area))}>
                               {topic.area}
+                            </span>
+                          )}
+                          {/* Priority indicator */}
+                          {topicPriority >= 4 && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-bold flex items-center gap-0.5">
+                              <Flame className="w-3 h-3" /> Urgent
+                            </span>
+                          )}
+                          {topicPriority === 3 && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold flex items-center gap-0.5">
+                              <Flame className="w-3 h-3" /> High
+                            </span>
+                          )}
+                          {/* Due date indicators */}
+                          {isTopicOverdue && topicDueDate && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-bold flex items-center gap-1 animate-pulse-dot">
+                              <AlertTriangle className="w-3 h-3" />
+                              {Math.abs(topicDueDaysAway!)}d overdue
+                            </span>
+                          )}
+                          {isTopicUpcoming && topicDueDate && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-semibold flex items-center gap-1">
+                              <CalendarDays className="w-3 h-3" />
+                              Due {formatShortDate(topic.due_date!)}
+                            </span>
+                          )}
+                          {topicDueDate && !isTopicOverdue && !isTopicUpcoming && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 font-medium flex items-center gap-1">
+                              <CalendarDays className="w-3 h-3" />
+                              Due {formatShortDate(topic.due_date!)}
                             </span>
                           )}
 
@@ -1857,13 +1979,23 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                                   <div className="flex-1 min-w-0 p-3 rounded-xl border border-transparent group-hover:border-gray-200 group-hover:bg-gray-50/50 transition-all -mt-0.5">
                                     <div className="flex items-start justify-between gap-2">
                                       <div className="min-w-0">
-                                        {itemUrl ? (
-                                          <a href={itemUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-gray-900 hover:text-blue-600 truncate block transition-colors">
-                                            {itemTitle}
-                                          </a>
-                                        ) : (
-                                          <p className="text-sm font-semibold text-gray-900 truncate">{itemTitle}</p>
-                                        )}
+                                        <div className="flex items-center gap-1.5">
+                                          {/* Source-colored inline icon */}
+                                          <span
+                                            className="inline-flex items-center justify-center w-4 h-4 rounded-full flex-shrink-0"
+                                            style={{ background: sourceGradient }}
+                                            title={itemSource}
+                                          >
+                                            <SourceIcon source={itemSource} className="w-2.5 h-2.5 text-white" />
+                                          </span>
+                                          {itemUrl ? (
+                                            <a href={itemUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-gray-900 hover:text-blue-600 truncate transition-colors">
+                                              {itemTitle}
+                                            </a>
+                                          ) : (
+                                            <p className="text-sm font-semibold text-gray-900 truncate">{itemTitle}</p>
+                                          )}
+                                        </div>
                                         {truncatedSnippet && (
                                           <p className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">{truncatedSnippet}</p>
                                         )}
@@ -2025,6 +2157,36 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
             </span>
           )}
         </div>
+        {/* Quick Note input */}
+        {!editingNotes && (
+          <div className="mb-4">
+            <div className="flex items-center gap-2">
+              <input
+                value={quickNote}
+                onChange={e => setQuickNote(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && quickNote.trim()) {
+                    e.preventDefault();
+                    saveQuickNote();
+                  }
+                }}
+                placeholder="Add a quick note..."
+                className="flex-1 px-3.5 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-400 transition-shadow placeholder:text-gray-400"
+                disabled={savingQuickNote}
+              />
+              <button
+                onClick={saveQuickNote}
+                disabled={!quickNote.trim() || savingQuickNote}
+                className="px-3.5 py-2 text-white rounded-xl text-xs font-semibold hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5 transition-all shadow-sm"
+                style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)' }}
+              >
+                {savingQuickNote ? <Loader2 className="w-3 h-3 animate-spin" /> : <StickyNote className="w-3 h-3" />}
+                Add
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1 ml-1">Press Enter to add a timestamped note</p>
+          </div>
+        )}
         {editingNotes ? (
           <div className="space-y-2">
             <textarea

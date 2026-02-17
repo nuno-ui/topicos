@@ -156,6 +156,7 @@ export function Sidebar({ user }: { user: User }) {
   const router = useRouter();
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [followUpCount, setFollowUpCount] = useState(0);
+  const [topicsCount, setTopicsCount] = useState(0);
   const [dashboardAlerts, setDashboardAlerts] = useState(0);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -203,6 +204,24 @@ export function Sidebar({ user }: { user: User }) {
     };
     fetchFollowUpCount();
     const interval = setInterval(fetchFollowUpCount, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [user.id]);
+
+  // Fetch active topics count for badge
+  useEffect(() => {
+    const fetchTopicsCount = async () => {
+      try {
+        const supabase = createClient();
+        const { count } = await supabase
+          .from('topics')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('status', 'active');
+        setTopicsCount(count || 0);
+      } catch { /* ignore */ }
+    };
+    fetchTopicsCount();
+    const interval = setInterval(fetchTopicsCount, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [user.id]);
 
@@ -368,6 +387,7 @@ export function Sidebar({ user }: { user: User }) {
           const isActive = pathname.startsWith(item.href);
           const showCollapsed = collapsed && !isMobile;
           const hasDashboardBadge = item.href === '/dashboard' && dashboardAlerts > 0;
+          const hasTopicsBadge = item.href === '/topics' && topicsCount > 0;
           return (
             <div key={item.href} className="relative group/nav">
               <Link
@@ -393,6 +413,10 @@ export function Sidebar({ user }: { user: User }) {
                     {showCollapsed && hasDashboardBadge && (
                       <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse-dot" />
                     )}
+                    {/* Topics count dot (collapsed) */}
+                    {showCollapsed && hasTopicsBadge && (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white" />
+                    )}
                   </div>
                   {!showCollapsed && (
                     <>
@@ -407,6 +431,14 @@ export function Sidebar({ user }: { user: User }) {
                           title={followUpCount > 9 ? `${followUpCount} contacts need follow-up` : undefined}
                         >
                           {followUpCount > 9 ? '9+' : followUpCount}
+                        </span>
+                      )}
+                      {item.href === '/topics' && topicsCount > 0 && (
+                        <span
+                          className="ml-1 px-1.5 py-0.5 bg-blue-500 text-white text-[10px] rounded-full font-bold min-w-[18px] text-center leading-tight cursor-default"
+                          title={`${topicsCount} active topic${topicsCount !== 1 ? 's' : ''}`}
+                        >
+                          {topicsCount > 99 ? '99+' : topicsCount}
                         </span>
                       )}
                     </>
@@ -430,6 +462,11 @@ export function Sidebar({ user }: { user: User }) {
                   {item.href === '/contacts' && followUpCount > 0 && (
                     <span className="ml-0.5 px-1.5 py-0.5 bg-red-500 rounded-full text-[10px] font-bold">
                       {followUpCount}
+                    </span>
+                  )}
+                  {item.href === '/topics' && topicsCount > 0 && (
+                    <span className="ml-0.5 px-1.5 py-0.5 bg-blue-500 rounded-full text-[10px] font-bold">
+                      {topicsCount > 99 ? '99+' : topicsCount}
                     </span>
                   )}
                 </div>
@@ -481,9 +518,12 @@ export function Sidebar({ user }: { user: User }) {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <p className="text-sm font-semibold text-gray-900 truncate">{displayName}</p>
+                <p className="text-sm font-semibold text-gray-900 truncate">{fullName || displayName}</p>
                 <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-gray-100 text-gray-500 border border-gray-200 flex-shrink-0">
                   Free
+                </span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-medium tracking-wider bg-blue-50 text-blue-400 border border-blue-100 flex-shrink-0">
+                  v1.0
                 </span>
               </div>
               <p className="text-[11px] text-gray-400 truncate">{user.email}</p>
@@ -508,11 +548,16 @@ export function Sidebar({ user }: { user: User }) {
               <LogOut className="w-4 h-4" />
             </button>
             <div className="absolute left-full top-0 ml-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/user:opacity-100 transition-opacity z-50 shadow-lg">
-              <p className="font-semibold">{displayName}</p>
+              <p className="font-semibold">{fullName || displayName}</p>
               <p className="text-gray-400 text-[10px]">{user.email}</p>
-              <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-gray-700 text-gray-300">
-                Free
-              </span>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-gray-700 text-gray-300">
+                  Free
+                </span>
+                <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-medium tracking-wider bg-blue-900/50 text-blue-300">
+                  v1.0
+                </span>
+              </div>
             </div>
           </div>
         )}

@@ -250,6 +250,20 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     return Array.from(orgs).sort();
   }, [contacts]);
 
+  // Top 5 organizations by contact count for quick filter chips
+  const topOrganizations = useMemo(() => {
+    const orgCounts: Record<string, number> = {};
+    contacts.forEach(c => {
+      if (c.organization) {
+        orgCounts[c.organization] = (orgCounts[c.organization] || 0) + 1;
+      }
+    });
+    return Object.entries(orgCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count }));
+  }, [contacts]);
+
   // ========== ACTIVE FILTER COUNT ==========
 
   const activeFilterCount = useMemo(() => {
@@ -317,13 +331,18 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     // Dashboard filter
     if (dashboardFilter) {
       const now = Date.now();
+      const sevenDays = 7 * 24 * 60 * 60 * 1000;
       const thirtyDays = 30 * 24 * 60 * 60 * 1000;
       if (dashboardFilter === 'total') {
         // no additional filter
       } else if (dashboardFilter === 'organizations') {
         result = result.filter(c => !!c.organization);
+      } else if (dashboardFilter === 'active7') {
+        result = result.filter(c => c.last_interaction_at && (now - new Date(c.last_interaction_at).getTime()) <= sevenDays);
       } else if (dashboardFilter === 'active30') {
         result = result.filter(c => c.last_interaction_at && (now - new Date(c.last_interaction_at).getTime()) <= thirtyDays);
+      } else if (dashboardFilter === 'needsFollowUp') {
+        result = result.filter(c => c.interaction_count > 0 && c.last_interaction_at && (now - new Date(c.last_interaction_at).getTime()) > thirtyDays);
       } else if (dashboardFilter === 'avgInteractions') {
         // show all for avg interactions, just highlight the stat
       }
@@ -364,9 +383,12 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
   const dashboardStats = useMemo(() => {
     const now = Date.now();
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
     const thirtyDays = 30 * 24 * 60 * 60 * 1000;
     const orgs = new Set<string>();
+    let active7 = 0;
     let active30 = 0;
+    let needsFollowUp = 0;
     let totalInteractions = 0;
 
     contacts.forEach(c => {
@@ -374,7 +396,10 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       totalInteractions += c.interaction_count || 0;
       if (c.last_interaction_at) {
         const timeSince = now - new Date(c.last_interaction_at).getTime();
+        if (timeSince <= sevenDays) active7++;
         if (timeSince <= thirtyDays) active30++;
+        // Needs follow-up: had interactions but last one was > 30 days ago
+        if (c.interaction_count > 0 && timeSince > thirtyDays) needsFollowUp++;
       }
     });
 
@@ -383,8 +408,10 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     return {
       total: contacts.length,
       organizations: orgs.size,
+      active7,
       active30,
       avgInteractions,
+      needsFollowUp,
     };
   }, [contacts]);
 
@@ -877,10 +904,19 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
                   </span>
                 )}
                 {topicCount > 0 && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-semibold border border-indigo-100">
-                    <Hash className="w-2.5 h-2.5" />
-                    {topicCount}
-                  </span>
+                  <>
+                    {c.contact_topic_links!.slice(0, 2).map((link) => (
+                      <span key={link.topic_id} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-medium border border-indigo-100 truncate max-w-[100px]" title={link.topics?.title || 'Unknown'}>
+                        <Hash className="w-2.5 h-2.5 flex-shrink-0" />
+                        {link.topics?.title || 'Unknown'}
+                      </span>
+                    ))}
+                    {topicCount > 2 && (
+                      <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50/60 text-indigo-400 font-medium border border-indigo-100">
+                        +{topicCount - 2}
+                      </span>
+                    )}
+                  </>
                 )}
                 {c.interaction_count > 0 && (
                   <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-gray-50 text-gray-500 font-medium border border-gray-100">
@@ -1100,9 +1136,9 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {([
           { key: 'total', value: dashboardStats.total, label: 'Total Contacts', icon: Users, colors: { border: 'border-blue-400', bg: 'bg-blue-50', iconBg: 'bg-blue-100', iconText: 'text-blue-600', hoverBorder: 'hover:border-blue-200' } },
-          { key: 'active30', value: dashboardStats.active30, label: 'Active (30 days)', icon: Activity, colors: { border: 'border-green-400', bg: 'bg-green-50', iconBg: 'bg-green-100', iconText: 'text-green-600', hoverBorder: 'hover:border-green-200' } },
+          { key: 'active7', value: dashboardStats.active7, label: 'Active (7 days)', icon: Activity, colors: { border: 'border-green-400', bg: 'bg-green-50', iconBg: 'bg-green-100', iconText: 'text-green-600', hoverBorder: 'hover:border-green-200' } },
           { key: 'organizations', value: dashboardStats.organizations, label: 'Organizations', icon: Building2, colors: { border: 'border-purple-400', bg: 'bg-purple-50', iconBg: 'bg-purple-100', iconText: 'text-purple-600', hoverBorder: 'hover:border-purple-200' } },
-          { key: 'avgInteractions', value: dashboardStats.avgInteractions, label: 'Avg Interactions', icon: TrendingUp, colors: { border: 'border-amber-400', bg: 'bg-amber-50', iconBg: 'bg-amber-100', iconText: 'text-amber-600', hoverBorder: 'hover:border-amber-200' } },
+          { key: 'needsFollowUp', value: dashboardStats.needsFollowUp, label: 'Needs Follow-up', icon: Clock, colors: { border: 'border-amber-400', bg: 'bg-amber-50', iconBg: 'bg-amber-100', iconText: 'text-amber-600', hoverBorder: 'hover:border-amber-200' } },
         ] as const).map(stat => {
           const Icon = stat.icon;
           const isActive = dashboardFilter === stat.key;
@@ -1130,6 +1166,45 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
           );
         })}
       </div>
+
+      {/* Organization Quick Filter Chips */}
+      {topOrganizations.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="text-xs text-gray-400 font-medium flex items-center gap-1 flex-shrink-0">
+            <Building2 className="w-3 h-3" /> Top orgs:
+          </span>
+          {topOrganizations.map(org => {
+            const isActive = filterOrg === org.name;
+            return (
+              <button
+                key={org.name}
+                onClick={() => setFilterOrg(isActive ? '' : org.name)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                  isActive
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'bg-white text-gray-600 border border-gray-200 hover:border-purple-300 hover:bg-purple-50 hover:text-purple-700'
+                }`}
+              >
+                <Building className="w-3 h-3" />
+                <span className="truncate max-w-[120px]">{org.name}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${
+                  isActive ? 'bg-purple-500 text-purple-100' : 'bg-gray-100 text-gray-500'
+                }`}>
+                  {org.count}
+                </span>
+              </button>
+            );
+          })}
+          {filterOrg && topOrganizations.some(o => o.name === filterOrg) && (
+            <button
+              onClick={() => setFilterOrg('')}
+              className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-0.5"
+            >
+              <X className="w-3 h-3" /> Clear
+            </button>
+          )}
+        </div>
+      )}
 
       {/* AI Assistants Panel */}
       <div className="mb-6 p-4 bg-white rounded-xl border border-gray-100 shadow-sm">

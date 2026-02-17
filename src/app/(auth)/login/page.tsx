@@ -2,10 +2,10 @@ import { LoginForm } from './login-form';
 import { Sparkles, Search, Brain, Zap, Shield, Globe, Users, Star } from 'lucide-react';
 
 const features = [
-  { icon: Brain, title: 'AI Companion', desc: 'Your personal AI that handles the grunt work — organizing, connecting, and acting on your behalf', badge: 'Core' },
-  { icon: Search, title: 'Unified Life View', desc: 'One place for everything. Gmail, Slack, Notion, Calendar, Drive — all connected', badge: 'Connected' },
-  { icon: Zap, title: 'Focus on Being Human', desc: 'While AI manages your digital life, you focus on what truly matters', badge: 'Freedom' },
-  { icon: Shield, title: 'Supercharged Productivity', desc: 'Be 10x more productive with zero extra stress', badge: '10x' },
+  { icon: Brain, title: 'AI Companion', desc: 'AI that reads your emails, analyzes Slack threads, and keeps every project on track', badge: 'Core' },
+  { icon: Search, title: 'Unified Life View', desc: 'Gmail, Slack, Notion, Calendar & Drive — search and organize across all of them', badge: 'Connected' },
+  { icon: Zap, title: 'Focus on Being Human', desc: 'Automatic contact extraction, meeting summaries, and action item tracking', badge: 'Freedom' },
+  { icon: Shield, title: 'Supercharged Productivity', desc: 'AI-powered topic analysis, daily briefings, and smart search across 5+ sources', badge: '10x' },
 ];
 
 export default function LoginPage() {
@@ -68,8 +68,20 @@ export default function LoginPage() {
             ))}
           </div>
 
+          {/* Powered by integrations */}
+          <div className="mt-8 pt-6 border-t border-white/10">
+            <p className="text-blue-100/50 text-[10px] uppercase tracking-widest font-semibold mb-3">Powered by</p>
+            <div className="flex flex-wrap gap-2">
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-red-500/20 text-red-200 border border-red-400/20">Gmail</span>
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-200 border border-blue-400/20">Google Calendar</span>
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-yellow-500/20 text-yellow-200 border border-yellow-400/20">Google Drive</span>
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-200 border border-purple-400/20">Slack</span>
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-gray-400/20 text-gray-200 border border-gray-400/20">Notion</span>
+            </div>
+          </div>
+
           {/* Social proof / testimonial section */}
-          <div className="mt-10 pt-8 border-t border-white/10">
+          <div className="mt-8 pt-6 border-t border-white/10">
             <div className="flex items-center gap-4 mb-4">
               <div className="flex -space-x-2.5">
                 <div className="w-8 h-8 rounded-full bg-blue-300/30 border-2 border-white/20 flex items-center justify-center text-[10px] font-bold text-white/80">JM</div>
@@ -91,18 +103,33 @@ export default function LoginPage() {
                 </div>
               </div>
             </div>
-            <p className="text-blue-100/50 text-xs italic leading-relaxed max-w-sm">
-              &ldquo;YouOS transformed how I manage my digital life. I spend 60% less time on admin work and can finally focus on what matters.&rdquo;
-            </p>
-            <p className="text-blue-100/40 text-[11px] mt-1.5 font-medium">
-              &mdash; Sarah K., Product Manager at TechCorp
-            </p>
+            <div className="space-y-4">
+              <div>
+                <p className="text-blue-100/50 text-xs italic leading-relaxed max-w-sm">
+                  &ldquo;YouOS transformed how I manage my digital life. I spend 60% less time on admin work and can finally focus on what matters.&rdquo;
+                </p>
+                <p className="text-blue-100/40 text-[11px] mt-1.5 font-medium">
+                  &mdash; Sarah K., Product Manager at TechCorp
+                </p>
+              </div>
+              <div>
+                <p className="text-blue-100/50 text-xs italic leading-relaxed max-w-sm">
+                  &ldquo;The AI briefings save me 45 minutes every morning. It pulls together Slack, email, and calendar into one clear summary.&rdquo;
+                </p>
+                <p className="text-blue-100/40 text-[11px] mt-1.5 font-medium">
+                  &mdash; Marcus R., Engineering Lead at Datawise
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="mt-8 flex items-center gap-2 text-blue-100/60 text-xs">
             <Globe className="w-3.5 h-3.5" />
             <span>Integrates with Google Workspace, Slack & Notion</span>
           </div>
+          <p className="mt-2 text-blue-100/40 text-[11px]">
+            Pro tip: Use <kbd className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] font-mono border border-white/15">&#8984;K</kbd> to access the command palette from anywhere
+          </p>
         </div>
       </div>
 
@@ -122,9 +149,10 @@ export default function LoginPage() {
                     v1
                   </span>
                 </div>
-                <p className="text-gray-500 text-sm mt-1.5">Your AI-Powered Life OS</p>
+                <p className="text-gray-500 text-sm mt-1.5 font-medium">Your AI-Powered Life OS</p>
               </div>
             </div>
+            <p className="text-gray-600 text-sm mb-4">Organize your digital life with AI</p>
             {/* Mobile social proof */}
             <div className="flex items-center justify-center gap-2 mt-3">
               <div className="flex -space-x-1.5">

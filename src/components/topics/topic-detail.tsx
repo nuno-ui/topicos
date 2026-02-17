@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { NoteEditor } from './note-editor';
 import { NoteCard } from './note-card';
 import { TopicTimeline } from './topic-timeline';
-import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp, Eye, EyeOff, Pin, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Layers, GitBranch, Compass, Award, Target, MoreHorizontal, ChevronRight, Info, Calendar, FolderOpen, Check, CircleDot } from 'lucide-react';
+import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp, Eye, EyeOff, Pin, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Layers, GitBranch, Compass, Award, Target, MoreHorizontal, ChevronRight, Info, Calendar, FolderOpen, Check, CircleDot, Keyboard, Activity } from 'lucide-react';
 
 interface TopicItem {
   id: string;
@@ -202,6 +202,16 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
 
+  // Quick progress update state
+  const [showProgressPicker, setShowProgressPicker] = useState(false);
+  const [progressUpdating, setProgressUpdating] = useState(false);
+
+  // Keyboard shortcuts hint state
+  const [showKeyboardHints, setShowKeyboardHints] = useState(false);
+
+  // AI Summary collapse state
+  const [summaryCollapsed, setSummaryCollapsed] = useState(false);
+
   // AI Agent success animation and last run tracking
   const [agentSuccess, setAgentSuccess] = useState<string | null>(null);
   const [agentLastRun, setAgentLastRun] = useState<Record<string, string>>(() => {
@@ -220,6 +230,74 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
     window.addEventListener('topicos:add-note', handler);
     return () => window.removeEventListener('topicos:add-note', handler);
   }, []);
+
+  // Keyboard navigation shortcuts
+  const sectionTabOrder: SectionTab[] = ['items', 'intelligence', 'search', 'details', 'contacts', 'notes', 'timeline'];
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInputFocused = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable;
+      // Tab key cycles between section tabs (only when not in input)
+      if (e.key === 'Tab' && !isInputFocused && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setActiveSection(prev => {
+          const idx = sectionTabOrder.indexOf(prev);
+          if (e.shiftKey) {
+            return sectionTabOrder[(idx - 1 + sectionTabOrder.length) % sectionTabOrder.length];
+          }
+          return sectionTabOrder[(idx + 1) % sectionTabOrder.length];
+        });
+      }
+      // 'n' key opens note editor (when not in input)
+      if (e.key === 'n' && !isInputFocused && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setShowNoteEditor(true);
+      }
+      // '?' key toggles keyboard hints
+      if (e.key === '?' && !isInputFocused) {
+        e.preventDefault();
+        setShowKeyboardHints(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Quick progress update function
+  const updateProgressQuick = async (value: number) => {
+    setProgressUpdating(true);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ progress_percent: value }),
+      });
+      if (!res.ok) throw new Error('Failed to update progress');
+      const data = await res.json();
+      setTopic(prev => ({ ...prev, ...data.topic }));
+      setShowProgressPicker(false);
+      toast.success(`Progress updated to ${value}%`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update progress');
+    }
+    setProgressUpdating(false);
+  };
+
+  // Health score calculation
+  const healthScore = (() => {
+    let score = 0;
+    if (topic.description) score += 20;
+    if (items.length > 0) score += 20;
+    const daysSinceUpdate = Math.floor((Date.now() - new Date(topic.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+    if (daysSinceUpdate <= 7) score += 20;
+    if (topic.due_date) score += 20;
+    if (topic.tags && topic.tags.length > 0) score += 20;
+    return score;
+  })();
+  const healthLabel = healthScore >= 80 ? 'Excellent' : healthScore >= 50 ? 'Good' : 'Needs Attention';
+  const healthColor = healthScore >= 80 ? 'text-green-600' : healthScore >= 50 ? 'text-amber-600' : 'text-red-600';
+  const healthBg = healthScore >= 80 ? 'bg-green-500' : healthScore >= 50 ? 'bg-amber-500' : 'bg-red-500';
+  const healthRingColor = healthScore >= 80 ? '#22c55e' : healthScore >= 50 ? '#f59e0b' : '#ef4444';
 
   // Contact search effects
   useEffect(() => {
@@ -1359,57 +1437,105 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                     })()}
                   </div>
 
-                  {/* Progress visualization (if progress_percent is set) */}
-                  {topic.progress_percent != null && topic.progress_percent > 0 && (
-                    <div className="mt-4 flex items-center gap-4 max-w-lg">
-                      {/* Progress ring */}
-                      <div className="relative flex-shrink-0">
-                        <svg width="56" height="56" viewBox="0 0 56 56" className="-rotate-90">
-                          <circle cx="28" cy="28" r="24" fill="none" stroke="#e5e7eb" strokeWidth="5" />
-                          <circle
-                            cx="28" cy="28" r="24" fill="none"
-                            strokeWidth="5"
-                            strokeLinecap="round"
-                            strokeDasharray={`${2 * Math.PI * 24}`}
-                            strokeDashoffset={`${2 * Math.PI * 24 * (1 - topic.progress_percent / 100)}`}
-                            stroke={`url(#progress-gradient-${topic.id})`}
-                            className="transition-all duration-500"
-                          />
-                          <defs>
-                            <linearGradient id={`progress-gradient-${topic.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                              <stop offset="0%" stopColor="#3b82f6" />
-                              <stop offset="100%" stopColor={topic.progress_percent >= 80 ? '#22c55e' : topic.progress_percent >= 50 ? '#06b6d4' : '#3b82f6'} />
-                            </linearGradient>
-                          </defs>
-                        </svg>
-                        <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-gray-700">
-                          {topic.progress_percent}%
-                        </span>
-                      </div>
-                      {/* Progress bar alongside */}
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-medium text-gray-500">Progress</span>
-                          <span className={`text-xs font-semibold ${
-                            topic.progress_percent >= 100 ? 'text-green-600' : topic.progress_percent >= 60 ? 'text-blue-600' : 'text-amber-600'
-                          }`}>
-                            {topic.progress_percent >= 100 ? 'Complete' : topic.progress_percent >= 75 ? 'Almost there' : topic.progress_percent >= 50 ? 'Halfway' : 'In progress'}
+                  {/* Quick Progress Update - clickable progress bar */}
+                  {topic.progress_percent != null && (
+                    <div className="mt-4 max-w-lg relative">
+                      <div className="flex items-center gap-4">
+                        {/* Progress ring */}
+                        <button
+                          onClick={() => setShowProgressPicker(prev => !prev)}
+                          className="relative flex-shrink-0 group cursor-pointer"
+                          title="Click to update progress"
+                        >
+                          <svg width="56" height="56" viewBox="0 0 56 56" className="-rotate-90">
+                            <circle cx="28" cy="28" r="24" fill="none" stroke="#e5e7eb" strokeWidth="5" />
+                            <circle
+                              cx="28" cy="28" r="24" fill="none"
+                              strokeWidth="5"
+                              strokeLinecap="round"
+                              strokeDasharray={`${2 * Math.PI * 24}`}
+                              strokeDashoffset={`${2 * Math.PI * 24 * (1 - (topic.progress_percent || 0) / 100)}`}
+                              stroke={`url(#progress-gradient-${topic.id})`}
+                              className="transition-all duration-500"
+                            />
+                            <defs>
+                              <linearGradient id={`progress-gradient-${topic.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stopColor="#3b82f6" />
+                                <stop offset="100%" stopColor={(topic.progress_percent || 0) >= 80 ? '#22c55e' : (topic.progress_percent || 0) >= 50 ? '#06b6d4' : '#3b82f6'} />
+                              </linearGradient>
+                            </defs>
+                          </svg>
+                          <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-gray-700 group-hover:text-blue-600 transition-colors">
+                            {topic.progress_percent || 0}%
                           </span>
-                        </div>
-                        <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden shadow-inner">
-                          <div
-                            className="h-full rounded-full transition-all duration-500"
-                            style={{
-                              width: `${Math.min(topic.progress_percent, 100)}%`,
-                              background: `linear-gradient(90deg, #3b82f6 0%, ${topic.progress_percent >= 80 ? '#22c55e' : topic.progress_percent >= 50 ? '#06b6d4' : '#3b82f6'} 100%)`,
-                            }}
-                          />
+                          <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm">
+                            <Edit3 className="w-2.5 h-2.5 text-white" />
+                          </span>
+                        </button>
+                        {/* Progress bar alongside - also clickable */}
+                        <div className="flex-1 cursor-pointer" onClick={() => setShowProgressPicker(prev => !prev)}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-medium text-gray-500">Progress</span>
+                            <span className={`text-xs font-semibold ${
+                              (topic.progress_percent || 0) >= 100 ? 'text-green-600' : (topic.progress_percent || 0) >= 60 ? 'text-blue-600' : 'text-amber-600'
+                            }`}>
+                              {(topic.progress_percent || 0) >= 100 ? 'Complete' : (topic.progress_percent || 0) >= 75 ? 'Almost there' : (topic.progress_percent || 0) >= 50 ? 'Halfway' : 'In progress'}
+                            </span>
+                          </div>
+                          <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden shadow-inner">
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${Math.min(topic.progress_percent || 0, 100)}%`,
+                                background: `linear-gradient(90deg, #3b82f6 0%, ${(topic.progress_percent || 0) >= 80 ? '#22c55e' : (topic.progress_percent || 0) >= 50 ? '#06b6d4' : '#3b82f6'} 100%)`,
+                              }}
+                            />
+                          </div>
                         </div>
                       </div>
+                      {/* Quick progress picker dropdown */}
+                      {showProgressPicker && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setShowProgressPicker(false)} />
+                          <div className="absolute left-0 top-full mt-2 z-50 bg-white rounded-xl border border-gray-200 shadow-xl p-3 animate-scale-in w-72">
+                            <p className="text-xs font-semibold text-gray-600 mb-2">Quick Update Progress</p>
+                            <div className="flex gap-1.5 mb-3">
+                              {[0, 25, 50, 75, 100].map(val => (
+                                <button key={val} onClick={() => updateProgressQuick(val)} disabled={progressUpdating}
+                                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all border disabled:opacity-50 ${
+                                    (topic.progress_percent || 0) === val
+                                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                      : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700'
+                                  }`}>
+                                  {val}%
+                                </button>
+                              ))}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input type="range" min={0} max={100} step={5} value={topic.progress_percent || 0}
+                                onChange={e => {
+                                  const val = Number(e.target.value);
+                                  setTopic(prev => ({ ...prev, progress_percent: val }));
+                                }}
+                                onMouseUp={e => updateProgressQuick(Number((e.target as HTMLInputElement).value))}
+                                onTouchEnd={e => updateProgressQuick(Number((e.target as HTMLInputElement).value))}
+                                className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                                disabled={progressUpdating}
+                              />
+                              <span className="text-xs font-bold text-gray-600 w-10 text-right">{topic.progress_percent || 0}%</span>
+                            </div>
+                            {progressUpdating && (
+                              <div className="flex items-center gap-1.5 mt-2 text-xs text-blue-500">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Saving...
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
-                  {/* Compact dates row */}
+                  {/* Compact dates row with health score and keyboard hint */}
                   <div className="flex items-center gap-4 mt-3 text-xs text-gray-400">
                     <span className="inline-flex items-center gap-1 hover:text-gray-600 transition-colors">
                       <Clock className="w-3 h-3" /> Created {formatSmartDate(topic.created_at)}
@@ -1422,6 +1548,55 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                         <Calendar className="w-3 h-3" /> Due {new Date(topic.due_date).toLocaleDateString()}
                       </span>
                     )}
+                    {/* Health Score Indicator */}
+                    <span className="inline-flex items-center gap-2 ml-auto" title={`Health: ${healthScore}% - ${healthLabel}`}>
+                      <span className="relative w-6 h-6 flex-shrink-0">
+                        <svg width="24" height="24" viewBox="0 0 24 24" className="-rotate-90">
+                          <circle cx="12" cy="12" r="10" fill="none" stroke="#e5e7eb" strokeWidth="2.5" />
+                          <circle cx="12" cy="12" r="10" fill="none" stroke={healthRingColor} strokeWidth="2.5" strokeLinecap="round"
+                            strokeDasharray={`${2 * Math.PI * 10}`} strokeDashoffset={`${2 * Math.PI * 10 * (1 - healthScore / 100)}`}
+                            className="transition-all duration-500" />
+                        </svg>
+                        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-gray-600">{healthScore}</span>
+                      </span>
+                      <span className={`text-[10px] font-semibold ${healthColor}`}>{healthLabel}</span>
+                    </span>
+                    {/* Keyboard shortcuts hint */}
+                    <div className="relative">
+                      <button onClick={() => setShowKeyboardHints(prev => !prev)}
+                        className="p-1 text-gray-300 hover:text-gray-500 hover:bg-white/50 rounded transition-colors" title="Keyboard shortcuts (?)">
+                        <Keyboard className="w-3.5 h-3.5" />
+                      </button>
+                      {showKeyboardHints && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setShowKeyboardHints(false)} />
+                          <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white rounded-xl border border-gray-200 shadow-xl p-3 animate-scale-in">
+                            <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-2">Keyboard Shortcuts</p>
+                            <div className="space-y-1.5 text-xs">
+                              <div className="flex items-center justify-between">
+                                <span className="text-gray-600">Next tab</span>
+                                <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px] font-mono text-gray-500 border border-gray-200">Tab</kbd>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-gray-600">Previous tab</span>
+                                <span className="flex gap-0.5">
+                                  <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px] font-mono text-gray-500 border border-gray-200">Shift</kbd>
+                                  <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px] font-mono text-gray-500 border border-gray-200">Tab</kbd>
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-gray-600">New note</span>
+                                <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px] font-mono text-gray-500 border border-gray-200">n</kbd>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-gray-600">This panel</span>
+                                <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px] font-mono text-gray-500 border border-gray-200">?</kbd>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </>
               )}
@@ -1599,6 +1774,50 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
               </div>
             </div>
           )}
+          {/* Source Distribution Bar - stacked horizontal bar chart */}
+          {items.length >= 2 && Object.keys(sourceCounts).length >= 2 && (() => {
+            const sourceColors: Record<string, { bg: string; text: string }> = {
+              gmail: { bg: 'bg-red-500', text: 'text-red-700' },
+              calendar: { bg: 'bg-blue-500', text: 'text-blue-700' },
+              drive: { bg: 'bg-amber-500', text: 'text-amber-700' },
+              slack: { bg: 'bg-purple-500', text: 'text-purple-700' },
+              notion: { bg: 'bg-gray-500', text: 'text-gray-700' },
+              manual: { bg: 'bg-green-500', text: 'text-green-700' },
+              link: { bg: 'bg-cyan-500', text: 'text-cyan-700' },
+            };
+            const total = items.length;
+            return (
+              <div className="mb-4 p-3 bg-gray-50/50 rounded-xl border border-gray-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <Activity className="w-3.5 h-3.5 text-gray-400" />
+                  <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Source Distribution</span>
+                </div>
+                {/* Stacked bar */}
+                <div className="flex h-3 rounded-full overflow-hidden shadow-inner bg-gray-200">
+                  {Object.entries(sourceCounts).map(([src, count]) => (
+                    <div
+                      key={src}
+                      className={`${sourceColors[src]?.bg || 'bg-gray-400'} transition-all duration-300 first:rounded-l-full last:rounded-r-full`}
+                      style={{ width: `${(count / total) * 100}%` }}
+                      title={`${sourceLabel(src)}: ${count} (${Math.round((count / total) * 100)}%)`}
+                    />
+                  ))}
+                </div>
+                {/* Legend */}
+                <div className="flex items-center gap-3 mt-2 flex-wrap">
+                  {Object.entries(sourceCounts).map(([src, count]) => (
+                    <button key={src} onClick={() => setActiveTab(src)}
+                      className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors cursor-pointer">
+                      <span className={`w-2.5 h-2.5 rounded-full ${sourceColors[src]?.bg || 'bg-gray-400'} flex-shrink-0`} />
+                      <SourceIcon source={src} className="w-3 h-3" />
+                      <span className="font-medium">{count}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Source tabs - polished with active indicator */}
           <div className="flex gap-1 mb-4 border-b border-gray-100 -mx-1 px-1 overflow-x-auto">
             <button onClick={() => setActiveTab('all')}
@@ -1818,37 +2037,105 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                 </p>
               </div>
             ) : analysis ? (
-              <div className="ai-glass-card rounded-xl p-5">
-                <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
-                  {analysis.split('\n').map((line, i) => {
-                    if (line.startsWith('## ')) {
-                      return <h3 key={i} className="font-bold text-gray-900 mt-5 mb-2 text-base border-b border-purple-100/50 pb-1.5">{line.replace('## ', '')}</h3>;
-                    }
-                    if (line.startsWith('# ')) {
-                      return <h2 key={i} className="font-bold text-gray-900 mt-4 mb-2 text-lg">{line.replace('# ', '')}</h2>;
-                    }
-                    if (line.startsWith('- ') || line.startsWith('* ')) {
-                      return <li key={i} className="ml-4 text-sm text-gray-700 mt-1 leading-relaxed">{line.slice(2)}</li>;
-                    }
-                    if (line.startsWith('**') && line.endsWith('**')) {
-                      return <p key={i} className="font-semibold text-gray-800 mt-3">{line.replace(/\*\*/g, '')}</p>;
-                    }
-                    if (line.trim() === '') return <br key={i} />;
-                    return <p key={i} className="text-sm text-gray-700 mt-1.5 leading-relaxed">{line}</p>;
-                  })}
-                </div>
+              <div className="ai-glass-card rounded-xl border border-purple-100/50 overflow-hidden">
+                {/* Collapsible header with metadata */}
+                <button
+                  onClick={() => setSummaryCollapsed(prev => !prev)}
+                  className="w-full px-5 py-3 flex items-center justify-between bg-gradient-to-r from-purple-50/40 to-blue-50/40 hover:from-purple-50/60 hover:to-blue-50/60 transition-all"
+                >
+                  <div className="flex items-center gap-2">
+                    <Brain className="w-4 h-4 text-purple-500" />
+                    <span className="text-sm font-semibold text-gray-800">AI Summary</span>
+                    {topic.updated_at && (
+                      <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+                        Last analyzed: {formatRelativeDate(topic.updated_at)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      onClick={(e) => { e.stopPropagation(); runAnalysis(); }}
+                      className="px-2.5 py-1 bg-purple-100 text-purple-700 rounded-lg text-[10px] font-semibold hover:bg-purple-200 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Re-analyze
+                    </span>
+                    {summaryCollapsed ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronUp className="w-4 h-4 text-gray-400" />}
+                  </div>
+                </button>
+                {/* Collapsible content */}
+                {!summaryCollapsed && (
+                  <div className="px-5 py-4">
+                    <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
+                      {analysis.split('\n').map((line, i) => {
+                        if (line.startsWith('## ')) {
+                          return <h3 key={i} className="font-bold text-gray-900 mt-5 mb-2 text-base border-b border-purple-100/50 pb-1.5">{line.replace('## ', '')}</h3>;
+                        }
+                        if (line.startsWith('# ')) {
+                          return <h2 key={i} className="font-bold text-gray-900 mt-4 mb-2 text-lg">{line.replace('# ', '')}</h2>;
+                        }
+                        if (line.startsWith('### ')) {
+                          return <h4 key={i} className="font-semibold text-gray-800 mt-3 mb-1 text-sm">{line.replace('### ', '')}</h4>;
+                        }
+                        if (line.startsWith('- ') || line.startsWith('* ')) {
+                          return <li key={i} className="ml-4 text-sm text-gray-700 mt-1 leading-relaxed">{line.slice(2)}</li>;
+                        }
+                        if (/^\d+\.\s/.test(line)) {
+                          return <li key={i} className="ml-4 text-sm text-gray-700 mt-1 leading-relaxed list-decimal">{line.replace(/^\d+\.\s/, '')}</li>;
+                        }
+                        if (line.startsWith('**') && line.endsWith('**')) {
+                          return <p key={i} className="font-semibold text-gray-800 mt-3">{line.replace(/\*\*/g, '')}</p>;
+                        }
+                        if (line.startsWith('> ')) {
+                          return <blockquote key={i} className="border-l-3 border-purple-300 pl-3 text-sm text-gray-600 italic mt-2 bg-purple-50/30 py-1 rounded-r">{line.slice(2)}</blockquote>;
+                        }
+                        if (line.startsWith('```')) {
+                          return <div key={i} className="bg-gray-900 text-gray-200 rounded-lg px-3 py-2 text-xs font-mono mt-2">{line.replace(/```\w*/, '')}</div>;
+                        }
+                        if (line.trim() === '') return <br key={i} />;
+                        // Inline bold/italic support
+                        const rendered = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>');
+                        if (rendered !== line) {
+                          return <p key={i} className="text-sm text-gray-700 mt-1.5 leading-relaxed" dangerouslySetInnerHTML={{ __html: rendered }} />;
+                        }
+                        return <p key={i} className="text-sm text-gray-700 mt-1.5 leading-relaxed">{line}</p>;
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="text-center py-8">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-100 to-blue-100 flex items-center justify-center mx-auto mb-3">
-                  <Brain className="w-7 h-7 text-purple-400" />
+              <div className="text-center py-10">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-100 to-blue-100 flex items-center justify-center mx-auto mb-4 shadow-sm">
+                  <Brain className="w-8 h-8 text-purple-400" />
                 </div>
-                <p className="text-sm text-gray-500 font-medium">
-                  {items.length > 0
-                    ? 'Click "Run" to get AI-powered insights'
-                    : 'Link some items first, then run AI analysis'}
-                </p>
-                <p className="text-xs text-gray-400 mt-1">Powered by AI topic intelligence</p>
+                {items.length > 0 ? (
+                  <>
+                    <h3 className="text-base font-semibold text-gray-800 mb-1">Unlock Topic Intelligence</h3>
+                    <p className="text-sm text-gray-500 max-w-sm mx-auto mb-5">
+                      AI will analyze your {items.length} linked item{items.length !== 1 ? 's' : ''} to generate insights, identify patterns, and surface key information.
+                    </p>
+                    <button onClick={() => runAnalysis()}
+                      className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl text-sm font-semibold hover:from-purple-700 hover:to-blue-700 inline-flex items-center gap-2 transition-all shadow-md hover:shadow-lg">
+                      <Sparkles className="w-4 h-4" /> Run AI Analysis
+                    </button>
+                    <div className="flex items-center justify-center gap-4 mt-4 text-xs text-gray-400">
+                      <span className="inline-flex items-center gap-1"><Brain className="w-3 h-3" /> Summary</span>
+                      <span className="inline-flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Key Insights</span>
+                      <span className="inline-flex items-center gap-1"><ListChecks className="w-3 h-3" /> Next Steps</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-base font-semibold text-gray-800 mb-1">Link Items to Get Started</h3>
+                    <p className="text-sm text-gray-500 max-w-sm mx-auto mb-4">
+                      Add emails, documents, messages, or notes to this topic, then run AI analysis for powerful insights.
+                    </p>
+                    <button onClick={() => setActiveSection('search')}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-1.5 transition-colors">
+                      <Search className="w-3.5 h-3.5" /> Find & Link Items
+                    </button>
+                  </>
+                )}
               </div>
             )}
 

@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client';
 import { formatRelativeDate } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, ArrowRightLeft, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, ArrowRightLeft, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban, Circle, Undo2 } from 'lucide-react';
 import Link from 'next/link';
 
 // --- Area border color map for topic cards ---
@@ -750,6 +750,40 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     );
   };
 
+  // Quick complete handler with undo toast
+  const handleQuickComplete = async (topicId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const previousStatus = topics.find(tp => tp.id === topicId)?.status;
+    // Optimistically update
+    setTopics(prev => prev.map(tp => tp.id === topicId ? { ...tp, status: 'completed' } : tp));
+    const res = await fetch(`/api/topics/${topicId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'completed' }),
+    });
+    if (!res.ok) {
+      setTopics(prev => prev.map(tp => tp.id === topicId ? { ...tp, status: previousStatus || 'active' } : tp));
+      toast.error('Failed to complete topic');
+      return;
+    }
+    toast.success('Topic marked as completed', {
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          const undoRes = await fetch(`/api/topics/${topicId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: previousStatus || 'active' }),
+          });
+          if (undoRes.ok) {
+            setTopics(prev => prev.map(tp => tp.id === topicId ? { ...tp, status: previousStatus || 'active' } : tp));
+          }
+        },
+      },
+    });
+  };
+
   // Render a topic card (enhanced - visual improvements)
   const renderTopicCard = (t: Topic) => {
     const itemCount = t.topic_items?.[0]?.count || 0;
@@ -775,10 +809,35 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
         </div>
         <Link href={`/topics/${t.id}`}
           className={`block px-3 py-2.5 bg-white rounded-xl border border-gray-100 border-l-[3px] ${borderColor} hover:border-blue-200 hover:shadow-lg transition-all shadow-sm group-hover:bg-gray-50/30 ${isUrgent ? 'hover:shadow-red-100/50 hover:ring-1 hover:ring-red-200/50' : ''}`}>
-          {/* Row 1: Priority dot + Title + Due + Tags */}
+          {/* Row 1: Quick complete circle + Title + Due + Tags */}
           <div className="flex items-center gap-2 min-w-0">
-            {/* Priority as small colored dot */}
-            <span className={`block w-2 h-2 rounded-full flex-shrink-0 ${t.priority >= 5 ? 'bg-red-500' : t.priority >= 4 ? 'bg-orange-500' : t.priority >= 3 ? 'bg-amber-400' : t.priority >= 2 ? 'bg-blue-400' : 'bg-gray-300'}`} title={priorityMeta[t.priority]?.label || 'None'} />
+            {/* Quick complete toggle circle */}
+            {t.status === 'completed' ? (
+              <span
+                className="flex-shrink-0 cursor-pointer"
+                title="Completed (click to reactivate)"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  (async () => {
+                    setTopics(prev => prev.map(tp => tp.id === t.id ? { ...tp, status: 'active' } : tp));
+                    const res = await fetch(`/api/topics/${t.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'active' }) });
+                    if (!res.ok) setTopics(prev => prev.map(tp => tp.id === t.id ? { ...tp, status: 'completed' } : tp));
+                    else toast.success('Topic reactivated');
+                  })();
+                }}
+              >
+                <CheckCircle2 className="w-4 h-4 text-green-500 hover:text-green-600 transition-colors" />
+              </span>
+            ) : (
+              <span
+                className="flex-shrink-0 cursor-pointer"
+                title={`Mark as completed (Priority: ${priorityMeta[t.priority]?.label || 'None'})`}
+                onClick={(e) => handleQuickComplete(t.id, e)}
+              >
+                <Circle className={`w-4 h-4 transition-colors hover:text-green-500 ${t.priority >= 5 ? 'text-red-400' : t.priority >= 4 ? 'text-orange-400' : t.priority >= 3 ? 'text-amber-400' : t.priority >= 2 ? 'text-blue-400' : 'text-gray-300'}`} />
+              </span>
+            )}
             <h3 className="font-semibold text-gray-900 truncate text-sm flex-1 min-w-0">
               {searchQuery.trim()
                 ? <HighlightText text={t.title} query={searchQuery} />
@@ -829,6 +888,13 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             {t.summary && <Sparkles className="w-3 h-3 text-purple-400 flex-shrink-0" />}
             <span className="flex-shrink-0">{formatRelativeDate(t.updated_at)}</span>
           </div>
+          {/* Row 3: Last activity preview from recent_items */}
+          {t.recent_items && t.recent_items.length > 0 && (
+            <div className="flex items-center gap-1.5 mt-1 pl-4 text-[10px] text-gray-400 truncate">
+              <SourceIcon source={t.recent_items[0].source} className="w-3 h-3 flex-shrink-0 text-gray-300" />
+              <span className="truncate">Latest: {t.recent_items[0].title}</span>
+            </div>
+          )}
         </Link>
         {/* Quick action buttons on hover - Edit, Move, Pin, Archive */}
         <div className="absolute top-2 right-12 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-all z-10">
@@ -1023,6 +1089,23 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             {node.children.map((child: any) => renderFolderNode(child))}
             <div className="space-y-1.5 mt-1 mb-2 ml-3">
               {folderTopics.map(t => renderTopicCard(t))}
+              {folderTopics.length === 0 && node.children.length === 0 && (
+                <div className="flex items-center gap-3 py-4 px-4 text-center rounded-lg border border-dashed border-gray-200 bg-gray-50/50">
+                  <Inbox className="w-4 h-4 text-gray-300 flex-shrink-0" />
+                  <span className="text-xs text-gray-400">No topics in this folder</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCreateFolderId(node.folder.id);
+                      if (node.folder.area) setArea(node.folder.area);
+                      setShowCreate(true);
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 hover:underline"
+                  >
+                    <Plus className="w-3 h-3" /> Add topic here
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1094,6 +1177,32 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
       {/* ======================== AREA SELECTION VIEW ======================== */}
       {!selectedArea ? (
         <div>
+          {/* Topics Stats Summary Bar */}
+          {(() => {
+            const totalTopics = topics.length;
+            const activeCount = topics.filter(t => t.status === 'active').length;
+            const completedCount = topics.filter(t => t.status === 'completed').length;
+            const archivedCount = topics.filter(t => t.status === 'archived').length;
+            const totalItems = topics.reduce((sum, t) => sum + (t.topic_items?.[0]?.count || 0), 0);
+            return (
+              <div className="flex items-center gap-2 px-3 py-2 mb-4 bg-gray-50 border border-gray-100 rounded-lg text-xs">
+                <span className="font-semibold text-gray-700">{totalTopics} topic{totalTopics !== 1 ? 's' : ''}</span>
+                <span className="w-px h-3.5 bg-gray-300" />
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">
+                  <CircleDot className="w-3 h-3" /> {activeCount} active
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
+                  <CheckCircle2 className="w-3 h-3" /> {completedCount} completed
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
+                  <Archive className="w-3 h-3" /> {archivedCount} archived
+                </span>
+                <span className="w-px h-3.5 bg-gray-300" />
+                <span className="text-gray-500">{totalItems} item{totalItems !== 1 ? 's' : ''} total across all topics</span>
+              </div>
+            );
+          })()}
+
           {/* Dashboard Stats Cards - compact row */}
           <div className="grid grid-cols-5 gap-3 mb-6">
             <button onClick={() => { setStatsFilter(statsFilter === 'active' ? null : 'active'); setFilterStatus('active'); setFilterArea('all'); }}
@@ -1379,8 +1488,8 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             <div className="flex-1 relative">
               <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input ref={searchInputRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search titles, descriptions, tags... (press / to focus)" className="w-full pl-10 pr-20 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              {searchQuery && (
+                placeholder="Search titles, descriptions, tags..." className="w-full pl-10 pr-20 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {searchQuery ? (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
                   <span className="text-[11px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded font-medium">
                     {displayTopics.length} result{displayTopics.length !== 1 ? 's' : ''}
@@ -1388,6 +1497,10 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                   <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-600">
                     <X className="w-4 h-4" />
                   </button>
+                </div>
+              ) : (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <kbd className="text-[11px] text-gray-400 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded font-mono shadow-sm">/</kbd>
                 </div>
               )}
             </div>

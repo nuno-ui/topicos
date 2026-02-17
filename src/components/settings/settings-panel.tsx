@@ -3,8 +3,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import {
   Loader2, Trash2, Plus, Shield, Sparkles, BarChart3, Brain, Zap, X,
-  Mail, MessageSquare, BookOpen, Download, Clock, AlertTriangle,
-  Settings, Database, Upload, CheckCircle2, Info, MessageSquarePlus,
+  Mail, MessageSquare, BookOpen, Download, AlertTriangle,
+  Settings, Database, Upload, CheckCircle2, Info, MessageSquarePlus, Command,
 } from 'lucide-react';
 import { FeedbackPanel } from '@/components/feedback/feedback-panel';
 import { SourceIcon } from '@/components/ui/source-icon';
@@ -140,6 +140,30 @@ export function SettingsPanel({
       };
     }
   }, [confirmingDisconnect]);
+
+  // ========== AUTO-FETCH DATA STATS ON MOUNT ==========
+
+  const [dataStats, setDataStats] = useState<{ topics: number; items: number } | null>(null);
+  const [dataStatsLoading, setDataStatsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/topics');
+        const data = await res.json();
+        if (!cancelled) {
+          const topics = data.topics || [];
+          const totalItems = topics.reduce((sum: number, t: { item_count?: number }) => sum + (t.item_count || 0), 0);
+          setDataStats({ topics: topics.length, items: totalItems });
+        }
+      } catch {
+        // silently fail
+      }
+      if (!cancelled) setDataStatsLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // ========== CONNECT HANDLERS ==========
 
@@ -346,10 +370,82 @@ export function SettingsPanel({
     );
   };
 
+  // ========== CONNECTION SCORE ==========
+
+  const connectedCount = (googleAccounts.length > 0 ? 1 : 0)
+    + (slackAccounts.length > 0 ? 1 : 0)
+    + (notionAccounts.length > 0 ? 1 : 0);
+  const totalSources = 3;
+  const connectionScoreGradient = connectedCount === totalSources
+    ? 'from-green-500 to-emerald-600'
+    : connectedCount === 0
+      ? 'from-red-500 to-red-600'
+      : 'from-amber-500 to-amber-600';
+  const connectionScoreBg = connectedCount === totalSources
+    ? 'from-green-50 to-emerald-50'
+    : connectedCount === 0
+      ? 'from-red-50 to-rose-50'
+      : 'from-amber-50 to-yellow-50';
+  const connectionScoreBorder = connectedCount === totalSources
+    ? 'border-green-200'
+    : connectedCount === 0
+      ? 'border-red-200'
+      : 'border-amber-200';
+
   // ========== RENDER ==========
 
   return (
     <div className="space-y-8">
+      {/* Connection Score Card */}
+      <div className={`p-5 bg-gradient-to-br ${connectionScoreBg} rounded-xl border ${connectionScoreBorder} shadow-sm`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${connectionScoreGradient} flex items-center justify-center shadow-md`}>
+              <span className="text-2xl font-bold text-white">{connectedCount}</span>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-900">
+                {connectedCount} of {totalSources} sources connected
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {connectedCount === totalSources
+                  ? 'All sources connected — you have full coverage!'
+                  : connectedCount === 0
+                    ? 'Connect your accounts to get started'
+                    : `Connect ${totalSources - connectedCount} more source${totalSources - connectedCount > 1 ? 's' : ''} for full coverage`}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {[
+              { label: 'Google', connected: googleAccounts.length > 0, icon: Mail, color: 'red' },
+              { label: 'Slack', connected: slackAccounts.length > 0, icon: MessageSquare, color: 'purple' },
+              { label: 'Notion', connected: notionAccounts.length > 0, icon: BookOpen, color: 'gray' },
+            ].map((s) => (
+              <div key={s.label} className="flex flex-col items-center gap-1">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                  s.connected ? 'bg-white shadow-sm border border-gray-100' : 'bg-gray-100/80'
+                }`}>
+                  <s.icon className={`w-4 h-4 ${s.connected ? `text-${s.color}-500` : 'text-gray-300'}`} />
+                </div>
+                <span className={`text-[10px] font-medium ${s.connected ? 'text-gray-700' : 'text-gray-400'}`}>
+                  {s.connected ? 'On' : 'Off'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Progress bar */}
+        <div className="mt-4">
+          <div className="w-full h-2 bg-white/60 rounded-full overflow-hidden">
+            <div
+              className={`h-full bg-gradient-to-r ${connectionScoreGradient} rounded-full transition-all duration-500 ease-out`}
+              style={{ width: `${(connectedCount / totalSources) * 100}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* AI Platform Assistants -- gradient background with icons */}
       <div>
         <SectionHeader icon={Sparkles} title="AI Platform Assistants" subtitle="AI-powered insights about your workspace" />
@@ -449,6 +545,56 @@ export function SettingsPanel({
       )}
 
       {/* ============================================================ */}
+      {/* Data Statistics Card                                          */}
+      {/* ============================================================ */}
+      <div>
+        <SectionHeader icon={BarChart3} title="Data Overview" subtitle="Summary of your workspace data and AI usage" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-white rounded-xl p-4 text-center border border-blue-100 shadow-sm hover-lift">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center mx-auto mb-2">
+              <BookOpen className="w-4.5 h-4.5 text-blue-500" />
+            </div>
+            <p className="text-2xl font-bold text-blue-600">
+              {dataStatsLoading ? '...' : (dataStats?.topics ?? usageStats?.topics ?? 0)}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5 font-medium">Topics</p>
+          </div>
+          <div className="bg-white rounded-xl p-4 text-center border border-green-100 shadow-sm hover-lift">
+            <div className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center mx-auto mb-2">
+              <Database className="w-4.5 h-4.5 text-green-500" />
+            </div>
+            <p className="text-2xl font-bold text-green-600">
+              {dataStatsLoading ? '...' : (dataStats?.items ?? usageStats?.items ?? 0)}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5 font-medium">Items</p>
+          </div>
+          <div className="bg-white rounded-xl p-4 text-center border border-purple-100 shadow-sm hover-lift">
+            <div className="w-9 h-9 rounded-xl bg-purple-50 flex items-center justify-center mx-auto mb-2">
+              <Sparkles className="w-4.5 h-4.5 text-purple-500" />
+            </div>
+            <p className="text-2xl font-bold text-purple-600">
+              {usageStats?.aiRuns ?? '---'}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5 font-medium">AI Runs</p>
+          </div>
+          <div className="bg-white rounded-xl p-4 text-center border border-amber-100 shadow-sm hover-lift">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center mx-auto mb-2">
+              <Zap className="w-4.5 h-4.5 text-amber-500" />
+            </div>
+            <p className="text-2xl font-bold text-amber-600">
+              {usageStats?.totalTokens ? usageStats.totalTokens.toLocaleString() : '---'}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5 font-medium">Tokens Used</p>
+          </div>
+        </div>
+        {!usageStats && (
+          <p className="text-[10px] text-gray-400 mt-2 text-center">
+            Run &quot;Usage Insights&quot; above to populate AI Runs and Tokens Used
+          </p>
+        )}
+      </div>
+
+      {/* ============================================================ */}
       {/* Google Accounts                                               */}
       {/* ============================================================ */}
       <div>
@@ -458,12 +604,27 @@ export function SettingsPanel({
           subtitle="Connect Google to search Gmail, Calendar, and Drive"
         />
         {googleAccounts.length === 0 ? (
-          <div className="p-8 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-red-100 flex items-center justify-center mx-auto mb-3">
-              <Mail className="w-6 h-6 text-red-500" />
+          <div className="p-6 bg-gradient-to-br from-red-50/60 via-white to-orange-50/40 rounded-xl border-2 border-dashed border-red-200 hover:border-red-300 transition-colors">
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-red-100 to-red-50 flex items-center justify-center flex-shrink-0 shadow-sm">
+                <Mail className="w-7 h-7 text-red-500" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-900">Connect Google</p>
+                <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                  Search your Gmail inbox, read attachments, browse Calendar events, and access Google Drive files -- all from one place.
+                </p>
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  <span className="text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded-full font-medium">Gmail</span>
+                  <span className="text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded-full font-medium">Calendar</span>
+                  <span className="text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded-full font-medium">Drive</span>
+                </div>
+                <button onClick={connectGoogle}
+                  className="mt-3 px-5 py-2.5 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl text-sm font-semibold hover:from-red-600 hover:to-red-700 flex items-center gap-2 transition-all shadow-sm hover:shadow-md">
+                  <Plus className="w-4 h-4" /> Connect Google Account
+                </button>
+              </div>
             </div>
-            <p className="text-sm font-medium text-gray-700">No Google accounts connected</p>
-            <p className="text-xs text-gray-400 mt-1">Connect to search your emails, events, and files</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -496,9 +657,10 @@ export function SettingsPanel({
                               <SourceIcon source="drive" className="w-3 h-3" /> Drive
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <span className="text-xs text-gray-400 flex items-center gap-1">
-                              <Clock className="w-3 h-3" /> Last synced: {formatRelativeTime(lastSync)}
+                          <div className="flex items-center gap-2.5 mt-2 p-2 bg-gray-50 rounded-lg">
+                            <StatusDot status={status} />
+                            <span className="text-xs text-gray-600 font-medium">
+                              Last activity: {formatRelativeTime(lastSync)}
                             </span>
                             <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${statusLabelColors[status]}`}>
                               {statusLabels[status]}
@@ -567,12 +729,27 @@ export function SettingsPanel({
           subtitle="Connect Slack to search messages across channels and DMs"
         />
         {slackAccounts.length === 0 ? (
-          <div className="p-8 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-purple-100 flex items-center justify-center mx-auto mb-3">
-              <MessageSquare className="w-6 h-6 text-purple-500" />
+          <div className="p-6 bg-gradient-to-br from-purple-50/60 via-white to-violet-50/40 rounded-xl border-2 border-dashed border-purple-200 hover:border-purple-300 transition-colors">
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-100 to-purple-50 flex items-center justify-center flex-shrink-0 shadow-sm">
+                <MessageSquare className="w-7 h-7 text-purple-500" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-900">Connect Slack</p>
+                <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                  Search messages across channels and DMs, find shared files, and stay on top of conversations without switching apps.
+                </p>
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  <span className="text-[10px] text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full font-medium">Messages</span>
+                  <span className="text-[10px] text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full font-medium">Channels</span>
+                  <span className="text-[10px] text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full font-medium">DMs</span>
+                </div>
+                <button onClick={connectSlack}
+                  className="mt-3 px-5 py-2.5 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl text-sm font-semibold hover:from-purple-600 hover:to-purple-700 flex items-center gap-2 transition-all shadow-sm hover:shadow-md">
+                  <Plus className="w-4 h-4" /> Connect Slack Workspace
+                </button>
+              </div>
             </div>
-            <p className="text-sm font-medium text-gray-700">No Slack workspaces connected</p>
-            <p className="text-xs text-gray-400 mt-1">Connect to search your Slack messages</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -597,9 +774,10 @@ export function SettingsPanel({
                           <span className="text-xs text-gray-400 flex items-center gap-1 bg-gray-50 px-1.5 py-0.5 rounded mt-1 inline-flex">
                             <SourceIcon source="slack" className="w-3 h-3" /> Messages, channels, DMs
                           </span>
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <span className="text-xs text-gray-400 flex items-center gap-1">
-                              <Clock className="w-3 h-3" /> Last synced: {formatRelativeTime(lastSync)}
+                          <div className="flex items-center gap-2.5 mt-2 p-2 bg-gray-50 rounded-lg">
+                            <StatusDot status={status} />
+                            <span className="text-xs text-gray-600 font-medium">
+                              Last activity: {formatRelativeTime(lastSync)}
                             </span>
                             <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${statusLabelColors[status]}`}>
                               {statusLabels[status]}
@@ -667,12 +845,27 @@ export function SettingsPanel({
           subtitle="Connect Notion to search pages and databases linked to your topics"
         />
         {notionAccounts.length === 0 ? (
-          <div className="p-8 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
-              <BookOpen className="w-6 h-6 text-gray-600" />
+          <div className="p-6 bg-gradient-to-br from-gray-50/60 via-white to-slate-50/40 rounded-xl border-2 border-dashed border-gray-300 hover:border-gray-400 transition-colors">
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-gray-100 to-gray-50 flex items-center justify-center flex-shrink-0 shadow-sm">
+                <BookOpen className="w-7 h-7 text-gray-600" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-900">Connect Notion</p>
+                <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                  Search pages, databases, and wikis. Pull in notes and documentation to enrich your topics with Notion content.
+                </p>
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  <span className="text-[10px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full font-medium">Pages</span>
+                  <span className="text-[10px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full font-medium">Databases</span>
+                  <span className="text-[10px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full font-medium">Wikis</span>
+                </div>
+                <button onClick={connectNotion}
+                  className="mt-3 px-5 py-2.5 bg-gradient-to-r from-gray-800 to-gray-900 text-white rounded-xl text-sm font-semibold hover:from-gray-900 hover:to-black flex items-center gap-2 transition-all shadow-sm hover:shadow-md">
+                  <Plus className="w-4 h-4" /> Connect Notion Workspace
+                </button>
+              </div>
             </div>
-            <p className="text-sm font-medium text-gray-700">No Notion workspaces connected</p>
-            <p className="text-xs text-gray-400 mt-1">Connect to search your Notion pages, databases, and wikis</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -697,9 +890,10 @@ export function SettingsPanel({
                           <span className="text-xs text-gray-400 flex items-center gap-1 bg-gray-50 px-1.5 py-0.5 rounded mt-1 inline-flex">
                             <SourceIcon source="notion" className="w-3 h-3" /> Pages, databases, wikis
                           </span>
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <span className="text-xs text-gray-400 flex items-center gap-1">
-                              <Clock className="w-3 h-3" /> Last synced: {formatRelativeTime(lastSync)}
+                          <div className="flex items-center gap-2.5 mt-2 p-2 bg-gray-50 rounded-lg">
+                            <StatusDot status={status} />
+                            <span className="text-xs text-gray-600 font-medium">
+                              Last activity: {formatRelativeTime(lastSync)}
                             </span>
                             <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${statusLabelColors[status]}`}>
                               {statusLabels[status]}
@@ -931,6 +1125,33 @@ export function SettingsPanel({
               <SourceIcon source="notion" className="w-3 h-3" />
               Multi-source
             </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/* Keyboard Shortcuts                                            */}
+      {/* ============================================================ */}
+      <div>
+        <SectionHeader icon={Command} title="Keyboard Shortcuts" subtitle="Quick reference for navigating YouOS" />
+        <div className="p-5 bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {[
+              { keys: '\u2318K', description: 'Command Palette' },
+              { keys: '1', description: 'Navigate to Topics' },
+              { keys: '2', description: 'Navigate to People' },
+              { keys: '3', description: 'Navigate to Calendar' },
+              { keys: '4', description: 'Navigate to Search' },
+              { keys: '5', description: 'Navigate to Settings' },
+              { keys: '?', description: 'Show Shortcuts' },
+            ].map((shortcut) => (
+              <div key={shortcut.keys} className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+                <kbd className="inline-flex items-center justify-center min-w-[2rem] px-2 py-1 text-xs font-mono font-semibold text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm">
+                  {shortcut.keys}
+                </kbd>
+                <span className="text-xs text-gray-600">{shortcut.description}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
