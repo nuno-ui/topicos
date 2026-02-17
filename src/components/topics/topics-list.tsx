@@ -215,7 +215,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   const [searchQuery, setSearchQuery] = useState('');
   const [filterArea, setFilterArea] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('active');
-  const [sortBy, setSortBy] = useState<string>('updated_at');
+  const [sortBy, setSortBy] = useState<string>('progress');
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'folders' | 'flat'>('folders');
 
@@ -582,6 +582,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     }
     result.sort((a, b) => {
       switch (sortBy) {
+        case 'progress': return (b.progress_percent ?? -1) - (a.progress_percent ?? -1);
         case 'updated_at': return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
         case 'priority': return (b.priority || 0) - (a.priority || 0);
         case 'due_date':
@@ -1603,6 +1604,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                 <div className="flex items-center gap-1 ml-auto">
                   <ArrowUpDown className="w-3 h-3 text-gray-400" />
                   <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="text-xs border rounded-lg px-2 py-1.5 text-gray-600 bg-white">
+                    <option value="progress">Completion %</option>
                     <option value="updated_at">Last Updated</option>
                     <option value="priority">Priority</option>
                     <option value="due_date">Due Date</option>
