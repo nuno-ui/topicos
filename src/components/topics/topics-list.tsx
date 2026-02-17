@@ -209,6 +209,9 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   const [editingFolder, setEditingFolder] = useState<string | null>(null);
   const [editFolderName, setEditFolderName] = useState('');
   const [movingTopic, setMovingTopic] = useState<string | null>(null);
+  const [moveFolderSearch, setMoveFolderSearch] = useState('');
+  const [moveInlineNewFolder, setMoveInlineNewFolder] = useState(false);
+  const [moveNewFolderName, setMoveNewFolderName] = useState('');
   const [folderContextMenu, setFolderContextMenu] = useState<string | null>(null);
 
   // Search & Filters
@@ -356,8 +359,39 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     });
     if (!res.ok) { toast.error('Failed to move topic'); return; }
     setTopics(topics.map(t => t.id === topicId ? { ...t, folder_id: folderId } : t));
-    setMovingTopic(null);
+    closeMoveModal();
     toast.success('Topic moved');
+  };
+
+  const bulkMoveToFolder = async (folderId: string | null) => {
+    if (selectedTopics.size === 0) return;
+    setBulkActionLoading(true);
+    let success = 0;
+    for (const topicId of selectedTopics) {
+      try {
+        const res = await fetch(`/api/topics/${topicId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folder_id: folderId }),
+        });
+        if (res.ok) {
+          setTopics(prev => prev.map(t => t.id === topicId ? { ...t, folder_id: folderId } : t));
+          success++;
+        }
+      } catch {}
+    }
+    setSelectedTopics(new Set());
+    setBulkActionLoading(false);
+    closeMoveModal();
+    const folderName = folderId ? folders.find(f => f.id === folderId)?.name || 'folder' : 'No folder';
+    toast.success(`Moved ${success} topic${success !== 1 ? 's' : ''} to ${folderName}`);
+  };
+
+  const closeMoveModal = () => {
+    setMovingTopic(null);
+    setMoveFolderSearch('');
+    setMoveInlineNewFolder(false);
+    setMoveNewFolderName('');
   };
 
   const toggleFolder = (folderId: string) => {
@@ -920,20 +954,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             <Archive className="w-3 h-3" />
           </button>
         </div>
-        {/* Move to folder dropdown */}
-        {movingTopic === t.id && (
-          <div className="absolute top-2 right-2 z-20 bg-white border rounded-lg shadow-lg p-2 text-xs space-y-1 min-w-[160px]">
-            <button onClick={() => moveTopicToFolder(t.id, null)} className="w-full text-left px-2 py-1.5 hover:bg-gray-100 rounded flex items-center gap-2">
-              <X className="w-3 h-3" /> No folder
-            </button>
-            {folders.map(f => (
-              <button key={f.id} onClick={() => moveTopicToFolder(t.id, f.id)} className="w-full text-left px-2 py-1.5 hover:bg-gray-100 rounded flex items-center gap-2">
-                <Folder className="w-3 h-3" /> {f.name}
-              </button>
-            ))}
-            <button onClick={() => setMovingTopic(null)} className="w-full text-left px-2 py-1.5 hover:bg-red-50 text-red-600 rounded">Cancel</button>
-          </div>
-        )}
+        {/* Move modal is rendered once at root level */}
       </div>
     );
   };
@@ -1174,6 +1195,212 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
           </div>
         </div>
       )}
+
+      {/* ======================== MOVE TO FOLDER MODAL ======================== */}
+      {movingTopic && (() => {
+        const isBulk = movingTopic === '__bulk__';
+        const topicBeingMoved = isBulk ? null : topics.find(t => t.id === movingTopic);
+        const currentFolderId = topicBeingMoved?.folder_id || null;
+        const currentFolderName = currentFolderId ? folders.find(f => f.id === currentFolderId)?.name : null;
+        const moveLabel = isBulk ? `${selectedTopics.size} topic${selectedTopics.size !== 1 ? 's' : ''}` : (topicBeingMoved?.title || 'Topic');
+
+        // Build a flat list of folders with depth for indentation
+        const flatFolderList: Array<{ folder: FolderType; depth: number; path: string }> = [];
+        const buildFlatList = (parentId: string | null, depth: number, pathPrefix: string) => {
+          const children = folders.filter(f => f.parent_id === parentId).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+          for (const f of children) {
+            const path = pathPrefix ? `${pathPrefix} / ${f.name}` : f.name;
+            flatFolderList.push({ folder: f, depth, path });
+            buildFlatList(f.id, depth + 1, path);
+          }
+        };
+        buildFlatList(null, 0, '');
+
+        // Filter by search
+        const searchLower = moveFolderSearch.toLowerCase();
+        const filteredFolderList = searchLower
+          ? flatFolderList.filter(f => f.folder.name.toLowerCase().includes(searchLower) || f.path.toLowerCase().includes(searchLower))
+          : flatFolderList;
+
+        const handleSelect = (folderId: string | null) => {
+          if (isBulk) bulkMoveToFolder(folderId);
+          else moveTopicToFolder(movingTopic, folderId);
+        };
+
+        const handleCreateAndMove = async () => {
+          if (!moveNewFolderName.trim()) return;
+          const res = await fetch('/api/folders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: moveNewFolderName.trim() }),
+          });
+          const data = await res.json();
+          if (!res.ok) { toast.error(data.error); return; }
+          setFolders(prev => [...prev, data.folder]);
+          setExpandedFolders(prev => new Set([...prev, data.folder.id]));
+          handleSelect(data.folder.id);
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={closeMoveModal}>
+            <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-md mx-4 max-h-[70vh] flex flex-col animate-fade-in" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="p-4 border-b border-gray-100">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center">
+                      <FolderKanban className="w-4.5 h-4.5 text-amber-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900">Move to folder</h3>
+                      <p className="text-[11px] text-gray-500 truncate max-w-[250px]">{moveLabel}</p>
+                    </div>
+                  </div>
+                  <button onClick={closeMoveModal} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                {/* Search */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={moveFolderSearch}
+                    onChange={e => setMoveFolderSearch(e.target.value)}
+                    placeholder="Search folders..."
+                    autoFocus
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300 placeholder:text-gray-400 transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Current folder indicator */}
+              {currentFolderName && !isBulk && (
+                <div className="px-4 py-2 bg-blue-50/50 border-b border-blue-100 flex items-center gap-2 text-xs">
+                  <Folder className="w-3.5 h-3.5 text-blue-500" />
+                  <span className="text-blue-600">Currently in: <span className="font-semibold">{currentFolderName}</span></span>
+                </div>
+              )}
+
+              {/* Folder list */}
+              <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+                {/* No folder option */}
+                <button
+                  onClick={() => handleSelect(null)}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-3 transition-all group/item ${
+                    currentFolderId === null && !isBulk
+                      ? 'bg-blue-50 border border-blue-200 text-blue-700'
+                      : 'hover:bg-gray-50 text-gray-700 border border-transparent'
+                  }`}
+                >
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${currentFolderId === null && !isBulk ? 'bg-blue-100' : 'bg-gray-100 group-hover/item:bg-gray-200'}`}>
+                    <Inbox className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium">No folder</span>
+                    <span className="text-[10px] text-gray-400 ml-2">Unorganized</span>
+                  </div>
+                  {currentFolderId === null && !isBulk && (
+                    <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-600 rounded-full font-medium">Current</span>
+                  )}
+                </button>
+
+                {/* Divider */}
+                {filteredFolderList.length > 0 && <div className="h-px bg-gray-100 my-1 mx-2" />}
+
+                {/* Folder options with hierarchy */}
+                {filteredFolderList.map(({ folder: f, depth, path }) => {
+                  const isCurrentFolder = currentFolderId === f.id && !isBulk;
+                  const topicCount = topics.filter(t => t.folder_id === f.id).length;
+                  const customColorMap: Record<string, string> = {
+                    red: 'text-red-500', blue: 'text-blue-500', green: 'text-green-500',
+                    purple: 'text-purple-500', amber: 'text-amber-500', gray: 'text-gray-500',
+                  };
+                  const folderColorMap: Record<string, string> = { work: 'text-blue-500', personal: 'text-green-500', career: 'text-purple-500' };
+                  const fColor = f.color ? (customColorMap[f.color] || 'text-amber-500')
+                    : f.area ? folderColorMap[f.area] || 'text-amber-500' : 'text-amber-500';
+
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => handleSelect(f.id)}
+                      className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-3 transition-all group/item ${
+                        isCurrentFolder
+                          ? 'bg-blue-50 border border-blue-200 text-blue-700'
+                          : 'hover:bg-gray-50 text-gray-700 border border-transparent'
+                      }`}
+                      style={{ paddingLeft: `${12 + depth * 20}px` }}
+                    >
+                      {/* Depth guide lines */}
+                      {depth > 0 && (
+                        <div className="flex items-center gap-0 absolute" style={{ left: `${8 + (depth - 1) * 20}px` }}>
+                          <div className="w-3 h-px bg-gray-200" />
+                        </div>
+                      )}
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${isCurrentFolder ? 'bg-blue-100' : 'bg-gray-100 group-hover/item:bg-gray-200'}`}>
+                        <Folder className={`w-3.5 h-3.5 ${fColor}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium block truncate">{f.name}</span>
+                        {depth > 0 && searchLower && (
+                          <span className="text-[10px] text-gray-400 block truncate">{path}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {f.area && (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${areaColors[f.area] || 'bg-gray-100 text-gray-600'}`}>
+                            {f.area}
+                          </span>
+                        )}
+                        <span className="text-[10px] text-gray-400">{topicCount}</span>
+                        {isCurrentFolder && (
+                          <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-600 rounded-full font-medium">Current</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+
+                {/* Empty state */}
+                {filteredFolderList.length === 0 && moveFolderSearch && (
+                  <div className="py-6 text-center text-sm text-gray-400">
+                    No folders matching &ldquo;{moveFolderSearch}&rdquo;
+                  </div>
+                )}
+              </div>
+
+              {/* Footer: Create new folder inline */}
+              <div className="p-3 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl">
+                {moveInlineNewFolder ? (
+                  <div className="flex items-center gap-2">
+                    <FolderPlus className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <input
+                      value={moveNewFolderName}
+                      onChange={e => setMoveNewFolderName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleCreateAndMove(); if (e.key === 'Escape') { setMoveInlineNewFolder(false); setMoveNewFolderName(''); } }}
+                      placeholder="New folder name..."
+                      autoFocus
+                      className="flex-1 text-sm px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
+                    />
+                    <button onClick={handleCreateAndMove} disabled={!moveNewFolderName.trim()}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                      Create & Move
+                    </button>
+                    <button onClick={() => { setMoveInlineNewFolder(false); setMoveNewFolderName(''); }}
+                      className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg transition-colors">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => setMoveInlineNewFolder(true)}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-700 hover:bg-white flex items-center gap-2 transition-colors border border-dashed border-gray-200 hover:border-gray-300">
+                    <FolderPlus className="w-4 h-4" /> Create new folder & move here
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ======================== AREA SELECTION VIEW ======================== */}
       {!selectedArea ? (
@@ -1841,6 +2068,10 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                     </div>
                   )}
                 </div>
+                <button onClick={() => setMovingTopic('__bulk__')} disabled={bulkActionLoading}
+                  className="px-3 py-1.5 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg text-xs font-medium hover:bg-orange-100 disabled:opacity-50 transition-colors flex items-center gap-1">
+                  <FolderKanban className="w-3 h-3" /> Move to Folder
+                </button>
                 <button onClick={handleAiAnalyzeAll} disabled={aiAnalyzeAllLoading || bulkActionLoading}
                   className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:bg-emerald-100 disabled:opacity-50 transition-colors flex items-center gap-1">
                   {aiAnalyzeAllLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
