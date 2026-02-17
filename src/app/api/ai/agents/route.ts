@@ -206,21 +206,59 @@ Return JSON: { "action_items": [{ "task": "description", "assignee": "person nam
 
       case 'suggest_topics': {
         // AI suggests new topics based on uncategorized activity
+        // Fetch MORE items for better pattern detection
         const { data: recentItems } = await supabase.from('topic_items').select('title, source, snippet, body')
-          .eq('user_id', user.id).order('created_at', { ascending: false }).limit(30);
-        const { data: topics } = await supabase.from('topics').select('title, description')
-          .eq('user_id', user.id).eq('status', 'active');
+          .eq('user_id', user.id).order('created_at', { ascending: false }).limit(50);
+        // Get ALL topics (active + completed + archived) to avoid duplicating any
+        const { data: allTopics } = await supabase.from('topics').select('title, description, status')
+          .eq('user_id', user.id);
+
+        // Client sends titles to exclude (previously suggested/dismissed)
+        const excludeTitles: string[] = context.exclude_titles || [];
+        const existingTopicTitles = (allTopics || []).map((t: { title: string }) => t.title);
+        const allExcluded = [...existingTopicTitles, ...excludeTitles];
 
         const { data } = await callClaudeJSON<{ suggestions: Array<{ title: string; description: string; area: string; reason: string }> }>(
-          'Based on recent activity patterns from ALL sources (email, calendar, drive, slack, notion, notes, links), suggest 3-5 new topics the user should create to organize their work. Avoid duplicating existing topics. Return JSON: { "suggestions": [{ "title": "...", "description": "...", "area": "work|personal|career", "reason": "..." }] }',
-          `Existing topics:\n${(topics || []).map((t: { title: string }) => `- ${t.title}`).join('\n')}\n\nRecent items:\n${(recentItems || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
+          `Based on recent activity patterns from ALL sources (email, calendar, drive, slack, notion, notes, links), suggest 5-8 new topics the user should create to organize their work.
+
+CRITICAL RULES:
+1. You MUST NOT suggest any topic that duplicates or is very similar to the EXCLUDED TOPICS list below. Check titles carefully — no synonyms, rephrasing, or close variants.
+2. Each suggestion must be UNIQUE — do not repeat yourself within the same response.
+3. Suggestions should be specific and actionable (e.g., "Q1 Budget Review" not "Finance").
+4. Focus on patterns you see in the recent items that aren't covered by existing topics.
+5. If an item is already linked to an existing topic, skip it.
+
+Return JSON: { "suggestions": [{ "title": "...", "description": "...", "area": "work|personal|career", "reason": "Why this topic would help organize their work" }] }`,
+          `=== EXCLUDED TOPICS (DO NOT SUGGEST THESE OR SIMILAR) ===
+${allExcluded.map((t: string) => `• ${t}`).join('\n')}
+
+=== RECENT UNORGANIZED ITEMS ===
+${(recentItems || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
             const content = i.body || i.snippet || '';
             const preview = content.length > 200 ? content.substring(0, 200) + '...' : content;
             return `[${i.source}] ${i.title}${preview ? ': ' + preview : ''}`;
           }).join('\n')}`
         );
 
-        result = { suggestions: data.suggestions };
+        // Server-side dedup: filter out any suggestions that match existing/excluded titles
+        const lowerExcluded = new Set(allExcluded.map((t: string) => t.toLowerCase().trim()));
+        const filtered = (data.suggestions || []).filter(s => {
+          const lower = s.title.toLowerCase().trim();
+          // Exact match check
+          if (lowerExcluded.has(lower)) return false;
+          // Fuzzy check: if suggestion contains an existing topic name or vice versa
+          for (const existing of lowerExcluded) {
+            if (lower.includes(existing) || existing.includes(lower)) return false;
+            // Check if >60% of words overlap
+            const sWords = new Set(lower.split(/\s+/));
+            const eWords = new Set(existing.split(/\s+/));
+            const overlap = [...sWords].filter(w => eWords.has(w) && w.length > 2).length;
+            if (overlap > 0 && overlap / Math.min(sWords.size, eWords.size) > 0.6) return false;
+          }
+          return true;
+        });
+
+        result = { suggestions: filtered };
         break;
       }
 

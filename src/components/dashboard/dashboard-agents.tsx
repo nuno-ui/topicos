@@ -1,7 +1,7 @@
 'use client';
 import { useState, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { Brain, Sparkles, BarChart3, Loader2, X, Clock, CheckCircle2 } from 'lucide-react';
+import { Brain, Sparkles, BarChart3, Loader2, X, Clock, CheckCircle2, ChevronDown, Trash2 } from 'lucide-react';
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -15,18 +15,69 @@ function timeAgo(date: Date): string {
 
 const MIN_INTERVAL_MS = 30_000; // 30 seconds rate limit between runs of same agent
 
+interface Suggestion {
+  title: string;
+  description: string;
+  area: string;
+  reason: string;
+}
+
 export function DashboardAgents() {
   const [loading, setLoading] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [briefing, setBriefing] = useState<string | null>(null);
   const [showBriefing, setShowBriefing] = useState(false);
   const [review, setReview] = useState<string | null>(null);
   const [showReview, setShowReview] = useState(false);
-  const [suggestions, setSuggestions] = useState<Array<{ title: string; description: string; area: string; reason: string }>>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const lastRunRef = useRef<Record<string, Date>>({});
   const [lastRun, setLastRun] = useState<Record<string, Date>>({});
   const [justCompleted, setJustCompleted] = useState<string | null>(null);
   const completedTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Track ALL titles we've ever seen/dismissed/created to prevent duplicates across loads
+  const seenTitlesRef = useRef<Set<string>>(new Set());
+  const [dismissedTitles, setDismissedTitles] = useState<Set<string>>(new Set());
+
+  const getExcludeTitles = useCallback(() => {
+    return [
+      ...Array.from(seenTitlesRef.current),
+      ...Array.from(dismissedTitles),
+    ];
+  }, [dismissedTitles]);
+
+  const deduplicateSuggestions = useCallback((newSuggestions: Suggestion[], existingSuggestions: Suggestion[]): Suggestion[] => {
+    const existingLower = new Set(existingSuggestions.map(s => s.title.toLowerCase().trim()));
+    const result: Suggestion[] = [];
+
+    for (const s of newSuggestions) {
+      const lower = s.title.toLowerCase().trim();
+      // Skip if we already have this exact title
+      if (existingLower.has(lower)) continue;
+      // Skip if it was dismissed
+      if (dismissedTitles.has(lower)) continue;
+
+      // Fuzzy check against existing
+      let isDuplicate = false;
+      for (const existing of existingLower) {
+        // Check containment
+        if (lower.includes(existing) || existing.includes(lower)) { isDuplicate = true; break; }
+        // Check word overlap
+        const sWords = new Set(lower.split(/\s+/).filter(w => w.length > 2));
+        const eWords = new Set(existing.split(/\s+/).filter(w => w.length > 2));
+        if (sWords.size > 0 && eWords.size > 0) {
+          const overlap = [...sWords].filter(w => eWords.has(w)).length;
+          if (overlap / Math.min(sWords.size, eWords.size) > 0.6) { isDuplicate = true; break; }
+        }
+      }
+      if (isDuplicate) continue;
+
+      existingLower.add(lower);
+      result.push(s);
+    }
+    return result;
+  }, [dismissedTitles]);
 
   const runAgent = useCallback(async (agent: string) => {
     // Rate-limit: prevent running the same agent within 30s
@@ -38,10 +89,17 @@ export function DashboardAgents() {
 
     setLoading(agent);
     try {
+      const agentContext: Record<string, unknown> = {};
+
+      // For suggest_topics, include exclude_titles to prevent duplicates
+      if (agent === 'suggest_topics') {
+        agentContext.exclude_titles = getExcludeTitles();
+      }
+
       const res = await fetch('/api/ai/agents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent, context: {} }),
+        body: JSON.stringify({ agent, context: agentContext }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Agent failed');
@@ -53,11 +111,18 @@ export function DashboardAgents() {
           setShowBriefing(true);
           toast.success('Daily briefing generated');
           break;
-        case 'suggest_topics':
-          setSuggestions(result.suggestions || []);
+        case 'suggest_topics': {
+          const newSuggestions = result.suggestions || [];
+          // Deduplicate against current visible suggestions
+          const unique = deduplicateSuggestions(newSuggestions, suggestions);
+          // Track all seen titles
+          unique.forEach(s => seenTitlesRef.current.add(s.title.toLowerCase().trim()));
+          // Replace existing suggestions on first load
+          setSuggestions(unique);
           setShowSuggestions(true);
-          toast.success(`${result.suggestions?.length || 0} topic suggestions`);
+          toast.success(`${unique.length} topic suggestion${unique.length !== 1 ? 's' : ''}`);
           break;
+        }
         case 'weekly_review':
           setReview(result.review || 'No review content available.');
           setShowReview(true);
@@ -76,9 +141,50 @@ export function DashboardAgents() {
       toast.error(err instanceof Error ? err.message : 'Agent failed');
     }
     setLoading(null);
-  }, []);
+  }, [getExcludeTitles, deduplicateSuggestions, suggestions]);
 
-  const createSuggestedTopic = async (s: { title: string; description: string; area: string }) => {
+  const loadMoreSuggestions = useCallback(async () => {
+    setLoadingMore(true);
+    try {
+      // Build exclude list from all seen + dismissed + current visible suggestions
+      const allExclude = [
+        ...getExcludeTitles(),
+        ...suggestions.map(s => s.title),
+      ];
+      // Deduplicate the exclude list itself
+      const uniqueExclude = [...new Set(allExclude)];
+
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: 'suggest_topics',
+          context: { exclude_titles: uniqueExclude },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load more');
+
+      const newSuggestions: Suggestion[] = data.result?.suggestions || [];
+      // Deduplicate against everything currently visible
+      const unique = deduplicateSuggestions(newSuggestions, suggestions);
+
+      if (unique.length === 0) {
+        toast.info('No more new suggestions available right now');
+      } else {
+        // Track all seen titles
+        unique.forEach(s => seenTitlesRef.current.add(s.title.toLowerCase().trim()));
+        // Append to existing suggestions
+        setSuggestions(prev => [...prev, ...unique]);
+        toast.success(`${unique.length} more suggestion${unique.length !== 1 ? 's' : ''} loaded`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load more');
+    }
+    setLoadingMore(false);
+  }, [getExcludeTitles, suggestions, deduplicateSuggestions]);
+
+  const createSuggestedTopic = async (s: Suggestion) => {
     try {
       const res = await fetch('/api/topics', {
         method: 'POST',
@@ -86,11 +192,20 @@ export function DashboardAgents() {
         body: JSON.stringify({ title: s.title, description: s.description, area: s.area }),
       });
       if (!res.ok) throw new Error('Failed');
+      // Track created title so it won't appear again
+      seenTitlesRef.current.add(s.title.toLowerCase().trim());
       setSuggestions(prev => prev.filter(p => p.title !== s.title));
       toast.success(`Created "${s.title}"`);
     } catch {
       toast.error('Failed to create topic');
     }
+  };
+
+  const dismissSuggestion = (s: Suggestion) => {
+    const lower = s.title.toLowerCase().trim();
+    seenTitlesRef.current.add(lower);
+    setDismissedTitles(prev => new Set([...prev, lower]));
+    setSuggestions(prev => prev.filter(p => p.title !== s.title));
   };
 
   const renderMarkdown = (text: string) => {
@@ -213,6 +328,9 @@ export function DashboardAgents() {
                 <Sparkles className="w-3.5 h-3.5" />
               </div>
               Suggested Topics
+              <span className="text-[10px] font-normal text-blue-500 bg-blue-100 px-1.5 py-0.5 rounded-full">
+                {suggestions.length}
+              </span>
             </h3>
             <button onClick={() => setShowSuggestions(false)} className="p-1 text-blue-400 hover:text-blue-600 hover:bg-blue-100 rounded-lg transition-colors">
               <X className="w-4 h-4" />
@@ -220,18 +338,55 @@ export function DashboardAgents() {
           </div>
           <div className="space-y-2">
             {suggestions.map((s, i) => (
-              <div key={i} className="flex items-start gap-3 p-3 bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100">
+              <div key={`${s.title}-${i}`} className="flex items-start gap-3 p-3 bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 group/card">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">{s.title}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-gray-900">{s.title}</p>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                      s.area === 'work' ? 'bg-blue-100 text-blue-700' :
+                      s.area === 'personal' ? 'bg-green-100 text-green-700' :
+                      'bg-purple-100 text-purple-700'
+                    }`}>
+                      {s.area}
+                    </span>
+                  </div>
                   <p className="text-xs text-gray-500 mt-0.5">{s.description}</p>
                   <p className="text-xs text-blue-600 mt-1 italic">{s.reason}</p>
                 </div>
-                <button onClick={() => createSuggestedTopic(s)}
-                  className="px-3 py-1.5 brand-gradient text-white rounded-lg text-xs font-medium hover:opacity-90 transition-all flex-shrink-0 shadow-sm">
-                  Create
-                </button>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => dismissSuggestion(s)}
+                    title="Dismiss suggestion"
+                    className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover/card:opacity-100">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => createSuggestedTopic(s)}
+                    className="px-3 py-1.5 brand-gradient text-white rounded-lg text-xs font-medium hover:opacity-90 transition-all shadow-sm">
+                    Create
+                  </button>
+                </div>
               </div>
             ))}
+          </div>
+
+          {/* Load More button */}
+          <div className="mt-3 flex justify-center">
+            <button
+              onClick={loadMoreSuggestions}
+              disabled={loadingMore || !!loading}
+              className="flex items-center gap-2 px-4 py-2 text-xs font-medium text-blue-700 bg-white/80 hover:bg-white border border-blue-200 rounded-lg transition-all hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+              {loadingMore ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Loading more...
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                  Load more suggestions
+                </>
+              )}
+            </button>
           </div>
         </div>
       )}
