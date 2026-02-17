@@ -31,7 +31,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   try {
     const body = await request.json();
-    const { name, email, organization, role, notes, area } = body;
+    const { name, email, organization, role, notes, area, is_favorite } = body;
 
     // Validate fields if provided
     if (name !== undefined && (typeof name !== 'string' || name.trim().length === 0)) {
@@ -55,6 +55,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.metadata !== undefined) updateData.metadata = body.metadata;
     if (body.last_interaction_at !== undefined) updateData.last_interaction_at = body.last_interaction_at;
     if (body.interaction_count !== undefined) updateData.interaction_count = body.interaction_count;
+    if (body.is_favorite !== undefined) updateData.is_favorite = !!body.is_favorite;
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });

@@ -40,7 +40,18 @@ import {
   Tag,
   Flame,
   CalendarDays,
+  Star,
+  Plus,
+  Scroll,
+  FileText,
+  ChevronRight,
+  MessageCircle,
+  Briefcase,
+  ClipboardList,
+  Database,
+  BookOpen,
 } from 'lucide-react';
+import { SourceIconCircle, getSourceLabel, getSourceBorderColor } from '@/components/ui/source-icon';
 
 // ============================
 // Types
@@ -70,6 +81,7 @@ interface ContactData {
   role: string | null;
   area: string | null;
   notes: string | null;
+  is_favorite?: boolean;
   last_interaction_at: string | null;
   interaction_count: number;
   metadata: Record<string, unknown>;
@@ -78,10 +90,42 @@ interface ContactData {
   contact_topic_links?: ContactTopicLink[];
 }
 
+interface ContactItemData {
+  id: string;
+  contact_id: string;
+  source: string;
+  title: string;
+  snippet: string;
+  body: string | null;
+  url: string;
+  occurred_at: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+interface MeetingPrepData {
+  relationship_summary?: string;
+  suggested_agenda?: string[];
+  talking_points?: string[];
+  pending_items?: Array<{ item: string; topic: string }>;
+  preparation_notes?: string;
+  recent_topics?: string[];
+}
+
+interface PendingItemData {
+  task: string;
+  topic: string;
+  priority: string;
+  source: string;
+  status: string;
+  context: string;
+}
+
 interface ContactDetailProps {
   contact: ContactData;
   relatedItems: Record<string, unknown>[];
   allTopics: Array<{ id: string; title: string; status: string; area: string }>;
+  initialContactItems?: ContactItemData[];
 }
 
 // ============================
@@ -198,9 +242,45 @@ const ROLE_OPTIONS = ['Owner', 'Stakeholder', 'Decision Maker', 'Contributor', '
 // Component
 // ============================
 
-export function ContactDetail({ contact: initialContact, relatedItems, allTopics }: ContactDetailProps) {
+export function ContactDetail({ contact: initialContact, relatedItems, allTopics, initialContactItems = [] }: ContactDetailProps) {
   const router = useRouter();
   const [contact, setContact] = useState(initialContact);
+
+  // Favorite state
+  const [isFavorite, setIsFavorite] = useState(initialContact.is_favorite ?? false);
+  const [togglingFav, setTogglingFav] = useState(false);
+
+  // Contact items state (direct attachments)
+  const [contactItems, setContactItems] = useState<ContactItemData[]>(initialContactItems);
+  const [showContactItems, setShowContactItems] = useState(true);
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [addItemSource, setAddItemSource] = useState<'manual' | 'document' | 'link' | 'notion'>('manual');
+  const [addItemTitle, setAddItemTitle] = useState('');
+  const [addItemBody, setAddItemBody] = useState('');
+  const [addItemUrl, setAddItemUrl] = useState('');
+  const [savingItem, setSavingItem] = useState(false);
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editItemTitle, setEditItemTitle] = useState('');
+  const [editItemBody, setEditItemBody] = useState('');
+
+  // Knowledge Base state
+  const [showKB, setShowKB] = useState(false);
+  const [kbItems, setKbItems] = useState<Array<Record<string, unknown>>>([]);
+  const [kbLoading, setKbLoading] = useState(false);
+  const [kbLoaded, setKbLoaded] = useState(false);
+  const [kbSourceFilter, setKbSourceFilter] = useState('');
+  const [kbSearch, setKbSearch] = useState('');
+  const [kbStats, setKbStats] = useState<Record<string, unknown> | null>(null);
+
+  // AI Assistant state
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
+  const [aiQuestion, setAiQuestion] = useState('');
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState<string | null>(null);
+  const [meetingPrep, setMeetingPrep] = useState<MeetingPrepData | null>(null);
+  const [pendingItems, setPendingItems] = useState<PendingItemData[] | null>(null);
+  const [dossier, setDossier] = useState<string | null>(null);
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -679,6 +759,182 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
     }
   };
 
+  // Favorite toggle
+  const toggleFavorite = async () => {
+    const newVal = !isFavorite;
+    setIsFavorite(newVal);
+    setTogglingFav(true);
+    try {
+      const res = await fetch(`/api/contacts/${contact.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_favorite: newVal }),
+      });
+      if (!res.ok) throw new Error('Failed');
+      toast.success(newVal ? 'Added to favorites' : 'Removed from favorites');
+    } catch {
+      setIsFavorite(!newVal);
+      toast.error('Failed to update favorite');
+    }
+    setTogglingFav(false);
+  };
+
+  // Contact items CRUD
+  const addContactItem = async () => {
+    if (!addItemTitle.trim()) { toast.error('Title is required'); return; }
+    setSavingItem(true);
+    try {
+      const res = await fetch(`/api/contacts/${contact.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: addItemSource,
+          title: addItemTitle.trim(),
+          body: addItemBody.trim() || null,
+          url: addItemUrl.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      setContactItems(prev => [data.item, ...prev]);
+      setAddItemTitle('');
+      setAddItemBody('');
+      setAddItemUrl('');
+      setShowAddItem(false);
+      toast.success('Item added');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add item');
+    }
+    setSavingItem(false);
+  };
+
+  const deleteContactItem = async (itemId: string) => {
+    if (!confirm('Delete this item?')) return;
+    try {
+      const res = await fetch(`/api/contacts/${contact.id}/items/${itemId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed');
+      setContactItems(prev => prev.filter(i => i.id !== itemId));
+      toast.success('Item deleted');
+    } catch { toast.error('Failed to delete item'); }
+  };
+
+  const saveEditItem = async (itemId: string) => {
+    try {
+      const res = await fetch(`/api/contacts/${contact.id}/items/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: editItemTitle.trim(), body: editItemBody.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      setContactItems(prev => prev.map(i => i.id === itemId ? { ...i, ...data.item } : i));
+      setEditingItemId(null);
+      toast.success('Item updated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update');
+    }
+  };
+
+  // Knowledge Base loader
+  const loadKnowledgeBase = async () => {
+    if (kbLoaded) return;
+    setKbLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (kbSourceFilter) params.set('source', kbSourceFilter);
+      if (kbSearch) params.set('search', kbSearch);
+      const res = await fetch(`/api/contacts/${contact.id}/knowledge-base?${params}`);
+      const data = await res.json();
+      if (res.ok) {
+        setKbItems(data.allItems || []);
+        setKbStats(data.stats || null);
+        setKbLoaded(true);
+      }
+    } catch { toast.error('Failed to load knowledge base'); }
+    setKbLoading(false);
+  };
+
+  // AI Assistant actions
+  const askAI = async () => {
+    if (!aiQuestion.trim()) return;
+    setAiLoading('ask');
+    setAiAnswer(null);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'contact_ask', context: { contact_id: contact.id, question: aiQuestion } }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setAiAnswer(data.result.answer);
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'AI failed'); }
+    setAiLoading(null);
+  };
+
+  const runMeetingPrep = async () => {
+    setAiLoading('meeting_prep');
+    setMeetingPrep(null);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'contact_meeting_prep', context: { contact_id: contact.id } }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setMeetingPrep(data.result as MeetingPrepData);
+      toast.success('Meeting prep ready');
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'AI failed'); }
+    setAiLoading(null);
+  };
+
+  const runPendingItems = async () => {
+    setAiLoading('pending_items');
+    setPendingItems(null);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'contact_pending_items', context: { contact_id: contact.id } }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setPendingItems((data.result.pending_items || []) as PendingItemData[]);
+      toast.success(`${data.result.pending_items?.length || 0} pending items found`);
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'AI failed'); }
+    setAiLoading(null);
+  };
+
+  const runDossier = async () => {
+    setAiLoading('dossier');
+    setDossier(null);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'contact_dossier', context: { contact_id: contact.id } }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDossier(data.result.dossier);
+      toast.success('Dossier generated');
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'AI failed'); }
+    setAiLoading(null);
+  };
+
+  // Simple markdown renderer for AI responses
+  const renderMd = (text: string) => {
+    return text.split('\n').map((line, i) => {
+      if (line.startsWith('## ')) return <h3 key={i} className="font-bold text-gray-900 mt-4 mb-1.5 text-sm">{line.replace('## ', '')}</h3>;
+      if (line.startsWith('# ')) return <h2 key={i} className="font-bold text-gray-900 mt-3 mb-1 text-base">{line.replace('# ', '')}</h2>;
+      if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-sm text-gray-700 mt-0.5 list-disc">{line.slice(2)}</li>;
+      if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-semibold text-gray-800 mt-2 text-sm">{line.replace(/\*\*/g, '')}</p>;
+      if (line.trim() === '') return <br key={i} />;
+      return <p key={i} className="text-sm text-gray-700 mt-1">{line}</p>;
+    });
+  };
+
   // ============================
   // Render
   // ============================
@@ -1047,15 +1303,30 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                       </div>
                     )}
                   </div>
-                  <button
-                    onClick={startEdit}
-                    className="px-4 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90 flex items-center gap-2 shadow-sm transition-all"
-                    style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}
-                    title="Edit contact"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                    Edit
-                  </button>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={toggleFavorite}
+                      disabled={togglingFav}
+                      className={cn(
+                        'p-2.5 rounded-xl border transition-all',
+                        isFavorite
+                          ? 'bg-amber-50 border-amber-200 text-amber-500 hover:bg-amber-100'
+                          : 'bg-white border-gray-200 text-gray-300 hover:text-amber-400 hover:border-amber-200 hover:bg-amber-50'
+                      )}
+                      title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                    >
+                      <Star className={cn('w-4 h-4', isFavorite && 'fill-amber-400')} />
+                    </button>
+                    <button
+                      onClick={startEdit}
+                      className="px-4 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90 flex items-center gap-2 shadow-sm transition-all"
+                      style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}
+                      title="Edit contact"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                      Edit
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2236,6 +2507,482 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
           </div>
         )}
         </div>
+      </div>
+
+      {/* ============================
+          Items & Documents (Direct Contact Attachments)
+          ============================ */}
+      <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm overflow-hidden">
+        <button
+          onClick={() => setShowContactItems(!showContactItems)}
+          className="w-full p-4 flex items-center justify-between hover:bg-gray-50/50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center">
+              <Scroll className="w-4 h-4 text-orange-600" />
+            </div>
+            <div className="text-left">
+              <h3 className="text-sm font-semibold text-gray-900">Items & Documents</h3>
+              <p className="text-xs text-gray-500">Notes, conversation logs, links & documents</p>
+            </div>
+            {contactItems.length > 0 && (
+              <span className="text-[10px] font-medium bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">{contactItems.length}</span>
+            )}
+          </div>
+          {showContactItems ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+        </button>
+
+        {showContactItems && (
+          <div className="px-4 pb-4 space-y-3">
+            {/* Add Item Button & Form */}
+            {!showAddItem ? (
+              <button
+                onClick={() => setShowAddItem(true)}
+                className="w-full p-3 border border-dashed border-gray-200 rounded-xl text-sm text-gray-500 hover:text-orange-600 hover:border-orange-300 hover:bg-orange-50/50 transition-all flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Add note, document, or link
+              </button>
+            ) : (
+              <div className="p-4 border border-orange-200 bg-orange-50/30 rounded-xl space-y-3">
+                {/* Source type tabs */}
+                <div className="flex gap-1">
+                  {([['manual', 'Note', StickyNote], ['document', 'Document', Scroll], ['link', 'Link', LinkIcon], ['notion', 'Notion', BookOpen]] as const).map(([src, label, Icon]) => (
+                    <button
+                      key={src}
+                      onClick={() => setAddItemSource(src as 'manual' | 'document' | 'link' | 'notion')}
+                      className={cn(
+                        'px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all',
+                        addItemSource === src ? 'bg-orange-500 text-white shadow-sm' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+                      )}
+                    >
+                      <Icon className="w-3 h-3" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <input
+                  value={addItemTitle}
+                  onChange={e => setAddItemTitle(e.target.value)}
+                  placeholder={addItemSource === 'document' ? 'Document title (e.g., 1:1 Meeting Notes - Jan 2025)' : addItemSource === 'link' ? 'Link title' : 'Note title'}
+                  className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/40 focus:border-orange-400"
+                />
+
+                {(addItemSource === 'link' || addItemSource === 'notion') && (
+                  <input
+                    value={addItemUrl}
+                    onChange={e => setAddItemUrl(e.target.value)}
+                    placeholder={addItemSource === 'notion' ? 'Notion page URL' : 'URL'}
+                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/40 focus:border-orange-400"
+                  />
+                )}
+
+                {(addItemSource === 'manual' || addItemSource === 'document') && (
+                  <div>
+                    <textarea
+                      value={addItemBody}
+                      onChange={e => setAddItemBody(e.target.value)}
+                      placeholder={addItemSource === 'document'
+                        ? 'Paste your conversation history, meeting notes, or any document here.\nMarkdown formatting is supported.\n\nTip: Use ## for headers, - for lists, **bold** for emphasis.'
+                        : 'Write your note...'}
+                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/40 focus:border-orange-400 resize-y leading-relaxed"
+                      rows={addItemSource === 'document' ? 10 : 4}
+                    />
+                    {addItemSource === 'document' && (
+                      <p className="text-[10px] text-gray-400 mt-1">Markdown supported. Great for meeting agendas, conversation histories, and long-form notes.</p>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={addContactItem}
+                    disabled={savingItem}
+                    className="px-4 py-2 brand-gradient text-white rounded-xl text-xs font-semibold hover:opacity-90 flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                  >
+                    {savingItem ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                    Add {addItemSource === 'document' ? 'Document' : addItemSource === 'link' ? 'Link' : addItemSource === 'notion' ? 'Notion Page' : 'Note'}
+                  </button>
+                  <button onClick={() => { setShowAddItem(false); setAddItemTitle(''); setAddItemBody(''); setAddItemUrl(''); }} className="px-3 py-2 text-xs text-gray-500 hover:text-gray-700">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Item cards */}
+            {contactItems.length === 0 && !showAddItem && (
+              <p className="text-xs text-gray-400 text-center py-3">No items yet. Add notes, documents, or links directly to this contact.</p>
+            )}
+            {contactItems.map(item => (
+              <div key={item.id} className={cn('border rounded-xl overflow-hidden transition-all', `border-l-[3px] ${getSourceBorderColor(item.source)}`)}>
+                <div
+                  className="flex items-start gap-3 p-3 cursor-pointer hover:bg-gray-50/50"
+                  onClick={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
+                >
+                  <SourceIconCircle source={item.source} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
+                      <span className="text-[10px] text-gray-400 flex-shrink-0">{getSourceLabel(item.source)}</span>
+                    </div>
+                    {item.snippet && expandedItemId !== item.id && (
+                      <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.snippet}</p>
+                    )}
+                    <p className="text-[10px] text-gray-400 mt-1">{formatRelativeDate(item.occurred_at)}</p>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {item.url && (
+                      <a href={item.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="p-1.5 text-gray-300 hover:text-blue-500 rounded-lg transition-colors">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                    <button onClick={e => { e.stopPropagation(); setEditingItemId(item.id); setEditItemTitle(item.title); setEditItemBody(item.body || ''); }} className="p-1.5 text-gray-300 hover:text-blue-500 rounded-lg transition-colors">
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); deleteContactItem(item.id); }} className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Expanded body */}
+                {expandedItemId === item.id && item.body && editingItemId !== item.id && (
+                  <div className="px-4 pb-4 border-t border-gray-100">
+                    <div className="prose prose-sm max-w-none mt-3 text-gray-700 whitespace-pre-wrap text-sm leading-relaxed">
+                      {renderMd(item.body)}
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline edit */}
+                {editingItemId === item.id && (
+                  <div className="px-4 pb-4 border-t border-gray-100 space-y-2 mt-2">
+                    <input value={editItemTitle} onChange={e => setEditItemTitle(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+                    <textarea value={editItemBody} onChange={e => setEditItemBody(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-y" rows={6} />
+                    <div className="flex gap-2">
+                      <button onClick={() => saveEditItem(item.id)} className="px-3 py-1.5 brand-gradient text-white rounded-lg text-xs font-medium"><Save className="w-3 h-3 inline mr-1" />Save</button>
+                      <button onClick={() => setEditingItemId(null)} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ============================
+          Knowledge Base (Unified View)
+          ============================ */}
+      <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm overflow-hidden">
+        <button
+          onClick={() => { setShowKB(!showKB); if (!kbLoaded && !showKB) loadKnowledgeBase(); }}
+          className="w-full p-4 flex items-center justify-between hover:bg-gray-50/50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)' }}>
+              <Database className="w-4 h-4 text-white" />
+            </div>
+            <div className="text-left">
+              <h3 className="text-sm font-semibold text-gray-900">Knowledge Base</h3>
+              <p className="text-xs text-gray-500">Everything about this contact in one place</p>
+            </div>
+          </div>
+          {showKB ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+        </button>
+
+        {showKB && (
+          <div className="px-4 pb-4 space-y-3">
+            {kbLoading && (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+                <span className="ml-2 text-sm text-gray-500">Loading knowledge base...</span>
+              </div>
+            )}
+
+            {kbLoaded && kbStats && (
+              <>
+                {/* Stats bar */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs font-medium text-gray-700 bg-gray-100 px-2.5 py-1 rounded-full">
+                    {(kbStats as Record<string, unknown>).total as number} items
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {(kbStats as Record<string, unknown>).linkedTopics as number} linked topics
+                  </span>
+                  {Object.entries((kbStats as Record<string, unknown>).bySource as Record<string, number> || {}).map(([src, count]) => (
+                    <span key={src} className="text-[10px] text-gray-500 bg-gray-50 px-2 py-0.5 rounded-full border border-gray-100">
+                      {getSourceLabel(src)}: {count}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Source filter chips */}
+                <div className="flex gap-1 flex-wrap">
+                  <button
+                    onClick={() => { setKbSourceFilter(''); setKbLoaded(false); loadKnowledgeBase(); }}
+                    className={cn('px-2.5 py-1 rounded-full text-[10px] font-medium transition-all', !kbSourceFilter ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}
+                  >All</button>
+                  {['gmail', 'calendar', 'slack', 'drive', 'notion', 'document', 'manual', 'link'].map(src => (
+                    <button
+                      key={src}
+                      onClick={() => { setKbSourceFilter(src); setKbLoaded(false); setTimeout(loadKnowledgeBase, 0); }}
+                      className={cn('px-2.5 py-1 rounded-full text-[10px] font-medium transition-all', kbSourceFilter === src ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}
+                    >{getSourceLabel(src)}</button>
+                  ))}
+                </div>
+
+                {/* Search */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    value={kbSearch}
+                    onChange={e => setKbSearch(e.target.value)}
+                    placeholder="Search knowledge base..."
+                    className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    onKeyDown={e => { if (e.key === 'Enter') { setKbLoaded(false); loadKnowledgeBase(); }}}
+                  />
+                </div>
+
+                {/* Items timeline */}
+                <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                  {kbItems.filter(item => {
+                    if (!kbSearch) return true;
+                    const q = kbSearch.toLowerCase();
+                    return `${item.title || ''} ${item.snippet || ''}`.toLowerCase().includes(q);
+                  }).map((item, i) => (
+                    <div key={`kb-${i}`} className={cn('flex items-start gap-3 p-3 rounded-xl border border-gray-100 hover:bg-gray-50/50 transition-colors', `border-l-[3px] ${getSourceBorderColor(item.source as string)}`)}>
+                      <SourceIconCircle source={item.source as string} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-gray-900 truncate">{item.title as string}</p>
+                          <span className={cn(
+                            'text-[9px] px-1.5 py-0.5 rounded-full font-medium',
+                            item._origin === 'direct' ? 'bg-orange-100 text-orange-700' :
+                            item._origin === 'topic' ? 'bg-blue-100 text-blue-700' :
+                            'bg-gray-100 text-gray-600'
+                          )}>
+                            {item._originLabel as string || getSourceLabel(item.source as string)}
+                          </span>
+                        </div>
+                        {(item.snippet as string) && (
+                          <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.snippet as string}</p>
+                        )}
+                        <p className="text-[10px] text-gray-400 mt-1">{formatRelativeDate((item.occurred_at || item.created_at) as string)}</p>
+                      </div>
+                      {(item.url as string) && (
+                        <a href={item.url as string} target="_blank" rel="noopener noreferrer" className="p-1 text-gray-300 hover:text-blue-500 rounded transition-colors flex-shrink-0">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                  {kbItems.length === 0 && (
+                    <p className="text-xs text-gray-400 text-center py-6">No items found. Link topics and add items to build this contact&apos;s knowledge base.</p>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ============================
+          AI Assistant
+          ============================ */}
+      <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm overflow-hidden">
+        <button
+          onClick={() => setShowAIAssistant(!showAIAssistant)}
+          className="w-full p-4 flex items-center justify-between hover:bg-gray-50/50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
+              <MessageCircle className="w-4 h-4 text-white" />
+            </div>
+            <div className="text-left">
+              <h3 className="text-sm font-semibold text-gray-900">AI Assistant</h3>
+              <p className="text-xs text-gray-500">Ask questions, prepare meetings, find pending items</p>
+            </div>
+          </div>
+          {showAIAssistant ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+        </button>
+
+        {showAIAssistant && (
+          <div className="px-4 pb-4 space-y-4">
+            {/* Quick Actions */}
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={runMeetingPrep}
+                disabled={!!aiLoading}
+                className="px-3.5 py-2 text-xs font-medium rounded-xl border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 flex items-center gap-1.5 transition-all disabled:opacity-50"
+              >
+                {aiLoading === 'meeting_prep' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Briefcase className="w-3.5 h-3.5" />}
+                Prepare Meeting
+              </button>
+              <button
+                onClick={runPendingItems}
+                disabled={!!aiLoading}
+                className="px-3.5 py-2 text-xs font-medium rounded-xl border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 flex items-center gap-1.5 transition-all disabled:opacity-50"
+              >
+                {aiLoading === 'pending_items' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardList className="w-3.5 h-3.5" />}
+                Pending Items
+              </button>
+              <button
+                onClick={runDossier}
+                disabled={!!aiLoading}
+                className="px-3.5 py-2 text-xs font-medium rounded-xl border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 flex items-center gap-1.5 transition-all disabled:opacity-50"
+              >
+                {aiLoading === 'dossier' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                Full Dossier
+              </button>
+            </div>
+
+            {/* Ask AI */}
+            <div className="flex gap-2">
+              <input
+                value={aiQuestion}
+                onChange={e => setAiQuestion(e.target.value)}
+                placeholder={`Ask anything about ${contact.name}...`}
+                className="flex-1 px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-400"
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askAI(); }}}
+              />
+              <button
+                onClick={askAI}
+                disabled={!!aiLoading || !aiQuestion.trim()}
+                className="px-4 py-2.5 text-white rounded-xl text-sm font-semibold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
+              >
+                {aiLoading === 'ask' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                Ask
+              </button>
+            </div>
+
+            {/* AI Answer */}
+            {aiAnswer && (
+              <div className="p-4 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl border border-purple-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                  <span className="text-xs font-semibold text-purple-800">AI Answer</span>
+                </div>
+                <div className="prose prose-sm max-w-none">{renderMd(aiAnswer)}</div>
+              </div>
+            )}
+
+            {/* Meeting Prep */}
+            {meetingPrep && (
+              <div className="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border border-purple-200 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Briefcase className="w-4 h-4 text-purple-600" />
+                  <span className="text-sm font-semibold text-purple-800">Meeting Preparation</span>
+                  <button onClick={() => setMeetingPrep(null)} className="ml-auto p-1 text-purple-400 hover:text-purple-600"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                {meetingPrep.relationship_summary && (
+                  <p className="text-sm text-gray-700">{meetingPrep.relationship_summary}</p>
+                )}
+                {(meetingPrep.suggested_agenda ?? []).length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-purple-700 mb-1">Suggested Agenda</p>
+                    <ul className="space-y-1">
+                      {meetingPrep.suggested_agenda!.map((item, i) => (
+                        <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                          <span className="text-purple-400 font-bold">{i + 1}.</span> {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {(meetingPrep.talking_points ?? []).length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-purple-700 mb-1">Talking Points</p>
+                    <ul className="space-y-1">
+                      {meetingPrep.talking_points!.map((item, i) => (
+                        <li key={i} className="text-sm text-gray-700 flex items-start gap-1.5">
+                          <ChevronRight className="w-3 h-3 text-purple-400 mt-0.5 flex-shrink-0" /> {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {(meetingPrep.pending_items ?? []).length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-purple-700 mb-1">Pending Items</p>
+                    {meetingPrep.pending_items!.map((item, i) => (
+                      <div key={i} className="text-sm text-gray-700 flex items-start gap-1.5 mt-1">
+                        <AlertTriangle className="w-3 h-3 text-amber-500 mt-0.5 flex-shrink-0" />
+                        <span>{item.item} <span className="text-xs text-gray-400">({item.topic})</span></span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {meetingPrep.preparation_notes && (
+                  <div className="p-3 bg-white/60 rounded-lg">
+                    <p className="text-xs font-semibold text-purple-700 mb-1">Notes</p>
+                    <p className="text-sm text-gray-700">{meetingPrep.preparation_notes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Pending Items */}
+            {pendingItems && (
+              <div className="p-4 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-200 space-y-2">
+                <div className="flex items-center gap-2">
+                  <ClipboardList className="w-4 h-4 text-amber-600" />
+                  <span className="text-sm font-semibold text-amber-800">Pending Items ({pendingItems.length})</span>
+                  <button onClick={() => setPendingItems(null)} className="ml-auto p-1 text-amber-400 hover:text-amber-600"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                {pendingItems.length === 0 && <p className="text-sm text-gray-500">No pending items found.</p>}
+                {pendingItems.map((item, i) => (
+                  <div key={i} className="flex items-start gap-3 p-2.5 bg-white/70 rounded-lg">
+                    <div className={cn(
+                      'w-2 h-2 rounded-full mt-1.5 flex-shrink-0',
+                      item.priority === 'high' ? 'bg-red-500' : item.priority === 'medium' ? 'bg-amber-500' : 'bg-gray-400'
+                    )} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-900">{item.task}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-gray-500">{item.topic}</span>
+                        <span className={cn(
+                          'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                          item.status === 'blocked' ? 'bg-red-100 text-red-700' :
+                          item.status === 'in-progress' ? 'bg-blue-100 text-blue-700' :
+                          'bg-gray-100 text-gray-600'
+                        )}>{item.status}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Dossier */}
+            {dossier && (
+              <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
+                <div className="flex items-center gap-2 mb-3">
+                  <FileText className="w-4 h-4 text-blue-600" />
+                  <span className="text-sm font-semibold text-blue-800">Contact Dossier</span>
+                  <button onClick={() => setDossier(null)} className="ml-auto p-1 text-blue-400 hover:text-blue-600"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                <div className="prose prose-sm max-w-none max-h-[500px] overflow-y-auto">{renderMd(dossier)}</div>
+              </div>
+            )}
+
+            {/* Loading indicator */}
+            {aiLoading && (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-5 h-5 animate-spin text-purple-500" />
+                <span className="ml-2 text-sm text-gray-500">
+                  {aiLoading === 'meeting_prep' ? 'Preparing meeting briefing...' :
+                   aiLoading === 'pending_items' ? 'Scanning for pending items...' :
+                   aiLoading === 'dossier' ? 'Generating full dossier...' :
+                   'Thinking...'}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ============================

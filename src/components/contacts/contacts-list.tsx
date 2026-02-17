@@ -7,7 +7,7 @@ import {
   Edit3, Save, Trash2, Sparkles, Brain, UserPlus, Network, Wand2, ExternalLink,
   Clock, TrendingUp, TrendingDown, Activity,
   Upload, LayoutList, Building2, CheckSquare, Square, Filter, ArrowRight,
-  ChevronDown, Download, Hash, ArrowUp, ArrowDown, AlertCircle
+  ChevronDown, Download, Hash, ArrowUp, ArrowDown, AlertCircle, Star
 } from 'lucide-react';
 
 interface Contact {
@@ -23,6 +23,7 @@ interface Contact {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  is_favorite?: boolean;
   contact_topic_links?: Array<{
     topic_id: string;
     role: string | null;
@@ -642,6 +643,23 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
     setCreating(false);
   };
 
+  const toggleFavorite = async (e: React.MouseEvent, contactId: string, currentValue: boolean) => {
+    e.stopPropagation();
+    // Optimistic update
+    setContacts(prev => prev.map(c => c.id === contactId ? { ...c, is_favorite: !currentValue } : c));
+    try {
+      const res = await fetch(`/api/contacts/${contactId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_favorite: !currentValue }),
+      });
+      if (!res.ok) throw new Error('Failed');
+    } catch {
+      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, is_favorite: currentValue } : c));
+      toast.error('Failed to update favorite');
+    }
+  };
+
   const startEdit = (c: Contact) => {
     setEditingContact(c.id);
     setEditName(c.name);
@@ -893,8 +911,15 @@ export function ContactsList({ initialContacts }: { initialContacts: Contact[] }
 
             {/* Main content */}
             <div className="flex-1 min-w-0">
-              {/* Row 1: Name + Area badge + Activity trend */}
+              {/* Row 1: Name + Star + Area badge + Activity trend */}
               <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={(e) => toggleFavorite(e, c.id, !!c.is_favorite)}
+                  className="p-1 rounded-md transition-colors hover:bg-amber-50"
+                  title={c.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+                >
+                  <Star className={`w-3.5 h-3.5 ${c.is_favorite ? 'fill-amber-400 text-amber-400' : 'text-gray-300 hover:text-amber-400'}`} />
+                </button>
                 <span className="font-semibold text-sm text-gray-900 group-hover:text-blue-700 transition-colors truncate">
                   <HighlightText text={c.name} query={searchQuery} />
                 </span>

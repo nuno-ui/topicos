@@ -6,6 +6,7 @@ import {
   LogOut, Keyboard, Command, Sparkles, Inbox,
   PanelLeftClose, PanelLeftOpen, Menu, X,
   Plus, ChevronDown, StickyNote, UserPlus, FilePlus,
+  Star, Users as UsersIcon,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
@@ -159,6 +160,7 @@ export function Sidebar({ user }: { user: User }) {
   const [topicsCount, setTopicsCount] = useState(0);
   const [dashboardAlerts, setDashboardAlerts] = useState(0);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [favoriteContacts, setFavoriteContacts] = useState<Array<{ id: string; name: string; organization: string | null }>>([]);
 
   // Collapsed state persisted in localStorage
   const [collapsed, setCollapsed] = useState(false);
@@ -248,6 +250,18 @@ export function Sidebar({ user }: { user: User }) {
     const interval = setInterval(fetchDashboardAlerts, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [user.id, followUpCount]);
+
+  // Fetch favorite contacts for People section
+  useEffect(() => {
+    const loadFavorites = async () => {
+      try {
+        const res = await fetch('/api/contacts?favorites=true&limit=8');
+        const data = await res.json();
+        if (data.contacts) setFavoriteContacts(data.contacts.slice(0, 8));
+      } catch { /* ignore */ }
+    };
+    loadFavorites();
+  }, []);
 
   const handleLogout = async () => {
     const supabase = createClient();
@@ -475,6 +489,42 @@ export function Sidebar({ user }: { user: User }) {
           );
         })}
       </nav>
+
+      {/* Favorite People */}
+      {favoriteContacts.length > 0 && (
+        <div className={cn('px-3 py-2 border-t border-gray-100', collapsed && !isMobile ? 'px-2' : '')}>
+          {!(collapsed && !isMobile) && (
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 mb-1.5">People</p>
+          )}
+          <div className="space-y-0.5">
+            {favoriteContacts.map(c => {
+              const personInitials = c.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+              return (
+                <Link
+                  key={c.id}
+                  href={`/contacts/${c.id}`}
+                  onClick={() => isMobile && setMobileOpen(false)}
+                  className={cn(
+                    'flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors',
+                    collapsed && !isMobile ? 'justify-center px-2' : ''
+                  )}
+                  title={c.name}
+                >
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center flex-shrink-0">
+                    <span className="text-[9px] font-bold text-white">{personInitials}</span>
+                  </div>
+                  {!(collapsed && !isMobile) && (
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium truncate">{c.name}</p>
+                      {c.organization && <p className="text-[10px] text-gray-400 truncate">{c.organization}</p>}
+                    </div>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Keyboard shortcuts hint */}
       {(!collapsed || isMobile) ? (

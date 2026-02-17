@@ -72,12 +72,28 @@ export interface Contact {
   role: string | null;
   area: 'personal' | 'career' | 'work' | null;
   notes: string | null;
+  is_favorite: boolean;
   last_interaction_at: string | null;
   interaction_count: number;
   metadata: ContactMetadata;
   created_at: string;
   updated_at: string;
   contact_topic_links?: ContactTopicLink[];
+}
+
+export interface ContactItem {
+  id: string;
+  user_id: string;
+  contact_id: string;
+  source: 'manual' | 'link' | 'document' | 'notion';
+  title: string;
+  snippet: string;
+  body: string | null;
+  url: string;
+  occurred_at: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ContactTopicLink {

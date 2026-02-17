@@ -1,7 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { sourceLabel, formatRelativeDate, getTopicHealthScore, getDaysUntil, formatSmartDate, decodeHtmlEntities } from '@/lib/utils';
-import { Zap, Clock, FolderKanban, Newspaper, PieChart, Mail, Calendar, FileText, MessageSquare, BookOpen, StickyNote, Link2, File, Search, Users, Plus, Sparkles, Paperclip, TrendingUp, TrendingDown, ArrowRight, Brain, Flame, LinkIcon, CheckCircle2, Circle, Rocket, AlertTriangle } from 'lucide-react';
+import { Zap, Clock, FolderKanban, Newspaper, PieChart, Mail, Calendar, FileText, MessageSquare, BookOpen, StickyNote, Link2, File, Search, Users, Plus, Sparkles, Paperclip, TrendingUp, TrendingDown, ArrowRight, Brain, Flame, LinkIcon, CheckCircle2, Circle, Rocket, AlertTriangle, Star, Heart } from 'lucide-react';
 import { DashboardAgents } from '@/components/dashboard/dashboard-agents';
 import { ClientGreeting, ClientDate } from '@/components/dashboard/client-date';
 
@@ -95,6 +95,7 @@ export default async function DashboardPage() {
   let itemsPrior7Res: { count: number | null; error: any } = { count: 0, error: null };
   let streakItemsRes: { data: any[] | null; error: any } = { data: null, error: null };
   let contactsCountRes: { count: number | null; error: any } = { count: 0, error: null };
+  let favoriteContactsRes: { data: any[] | null; error: any } = { data: null, error: null };
 
   try {
     const results = await Promise.all([
@@ -158,6 +159,14 @@ export default async function DashboardPage() {
         .from('contacts')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user!.id),
+      // Favorite contacts for "Your People" card
+      supabase
+        .from('contacts')
+        .select('id, name, email, organization, last_interaction_at, is_favorite')
+        .eq('user_id', user!.id)
+        .eq('is_favorite', true)
+        .order('last_interaction_at', { ascending: false })
+        .limit(6),
     ]);
 
     topicsRes = results[0] as any;
@@ -171,6 +180,7 @@ export default async function DashboardPage() {
     itemsPrior7Res = results[8];
     streakItemsRes = results[9];
     contactsCountRes = results[10];
+    favoriteContactsRes = results[11];
   } catch (error) {
     // If the entire Promise.all fails, all variables remain at their safe defaults
     console.error('Dashboard data fetch failed:', error);
@@ -187,6 +197,7 @@ export default async function DashboardPage() {
   const itemsPrior7 = itemsPrior7Res.count ?? 0;
   const streakItems = streakItemsRes.data ?? [];
   const contactsCount = contactsCountRes.count ?? 0;
+  const favoriteContacts = favoriteContactsRes.data ?? [];
   const hasGoogle = googleAccounts.length > 0;
   const hasSlack = slackAccounts.length > 0;
   const hasNotion = notionAccounts.length > 0;
@@ -536,6 +547,49 @@ export default async function DashboardPage() {
                   </Link>
                 </div>
               ))}
+          </div>
+        </div>
+      )}
+
+      {/* Favorite Contacts */}
+      {(favoriteContacts || []).length > 0 && (
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+              <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
+              Your People
+            </h2>
+            <Link href="/contacts" className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+              View all →
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {(favoriteContacts || []).map((c: any) => {
+              const initials = c.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+              const daysAgo = c.last_interaction_at ? Math.floor((Date.now() - new Date(c.last_interaction_at).getTime()) / (1000 * 60 * 60 * 24)) : null;
+              return (
+                <Link
+                  key={c.id}
+                  href={`/contacts/${c.id}`}
+                  className="p-3 bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+                      <span className="text-xs font-bold text-white">{initials}</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-900 truncate group-hover:text-blue-600 transition-colors">{c.name}</p>
+                      {c.organization && <p className="text-[10px] text-gray-500 truncate">{c.organization}</p>}
+                      {daysAgo !== null && (
+                        <p className="text-[10px] text-gray-400 mt-0.5">
+                          {daysAgo === 0 ? 'Active today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo}d ago`}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </div>
       )}

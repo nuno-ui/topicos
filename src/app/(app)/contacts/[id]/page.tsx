@@ -36,7 +36,7 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
   if (!contact) notFound();
 
   // Run stats update and items fetch in parallel - don't let stats failure break the page
-  const [, relatedItems, topicsRes] = await Promise.all([
+  const [, relatedItems, topicsRes, contactItemsRes] = await Promise.all([
     updateContactStats(supabase, user!.id, { id: contact.id, name: contact.name, email: contact.email }).catch(() => null),
     getContactItems(supabase, user!.id, { id: contact.id, name: contact.name, email: contact.email }, 50).catch(() => []),
     supabase
@@ -45,6 +45,12 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
       .eq('user_id', user!.id)
       .eq('status', 'active')
       .order('updated_at', { ascending: false }),
+    supabase
+      .from('contact_items')
+      .select('*')
+      .eq('contact_id', id)
+      .eq('user_id', user!.id)
+      .order('occurred_at', { ascending: false }),
   ]);
 
   return (
@@ -54,6 +60,7 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
         contact={contact}
         relatedItems={relatedItems as Record<string, unknown>[]}
         allTopics={topicsRes.data ?? []}
+        initialContactItems={contactItemsRes.data ?? []}
       />
     </div>
   );

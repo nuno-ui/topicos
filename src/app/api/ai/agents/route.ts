@@ -1415,6 +1415,299 @@ ${(allTopics || []).map((t: Record<string, unknown>) => {
         break;
       }
 
+      // ============ CONTACT KNOWLEDGE BASE AGENTS ============
+
+      case 'contact_ask': {
+        // AI answers questions about a contact using their full knowledge base
+        const { contact_id, question } = context;
+        if (!contact_id || !question) return NextResponse.json({ error: 'contact_id and question required' }, { status: 400 });
+
+        const { data: contactData } = await supabase.from('contacts').select('*').eq('id', contact_id).eq('user_id', user.id).single();
+        if (!contactData) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
+        // Gather knowledge base: contact_items + topic_items from linked topics
+        const { data: contactItems } = await supabase.from('contact_items').select('*').eq('contact_id', contact_id).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(30);
+
+        const { data: topicLinks } = await supabase.from('contact_topic_links').select('topic_id, topics(title)').eq('contact_id', contact_id).eq('user_id', user.id);
+        const linkedTopicIds = (topicLinks || []).map((l: Record<string, unknown>) => l.topic_id as string);
+
+        let topicItemsCtx = '';
+        if (linkedTopicIds.length > 0) {
+          const { data: topicItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topic_id, metadata').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(40);
+          const topicTitleMap: Record<string, string> = {};
+          for (const l of (topicLinks || [])) {
+            const t = (l.topics as unknown) as { title: string } | null;
+            if (t) topicTitleMap[l.topic_id as string] = t.title;
+          }
+          topicItemsCtx = (topicItems || []).map((i: Record<string, unknown>) => {
+            const body = (i.body as string) || (i.snippet as string) || '';
+            const preview = body.length > 1500 ? body.substring(0, 1500) + '...' : body;
+            return `[${i.source} — Topic: ${topicTitleMap[i.topic_id as string] || 'Unknown'}] ${i.title} (${i.occurred_at})\n${preview}`;
+          }).join('\n\n');
+        }
+
+        const contactItemsCtx = (contactItems || []).map((i: Record<string, unknown>) => {
+          const body = (i.body as string) || (i.snippet as string) || '';
+          const preview = body.length > 1500 ? body.substring(0, 1500) + '...' : body;
+          return `[Direct ${i.source}] ${i.title} (${i.occurred_at})\n${preview}`;
+        }).join('\n\n');
+
+        inputSummary = `Ask about ${contactData.name}: ${question}`;
+        const { text } = await callClaude(
+          `You are an AI assistant with access to a complete knowledge base about a specific person. Answer the user's question based ONLY on the provided context. Cite specific items (emails, documents, notes, meetings) when making claims. If the information is not in the context, say so clearly. Be concise but thorough.`,
+          `=== CONTACT PROFILE ===
+Name: ${contactData.name}
+Email: ${contactData.email || 'N/A'}
+Organization: ${contactData.organization || 'N/A'}
+Role: ${contactData.role || 'N/A'}
+Notes: ${contactData.notes || 'None'}
+
+=== DIRECT CONTACT ITEMS (notes, documents, links attached to this contact) ===
+${contactItemsCtx || 'None'}
+
+=== TOPIC ITEMS (from ${linkedTopicIds.length} linked topics) ===
+${topicItemsCtx || 'None'}
+
+=== QUESTION ===
+${question}`
+        );
+
+        result = { answer: text, sources_used: (contactItems?.length || 0) + (linkedTopicIds.length > 0 ? 40 : 0) };
+        break;
+      }
+
+      case 'contact_meeting_prep': {
+        // AI prepares a briefing for meeting with a contact
+        const { contact_id: meetContactId } = context;
+        if (!meetContactId) return NextResponse.json({ error: 'contact_id required' }, { status: 400 });
+
+        const { data: contactData } = await supabase.from('contacts').select('*').eq('id', meetContactId).eq('user_id', user.id).single();
+        if (!contactData) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
+        const { data: contactItems } = await supabase.from('contact_items').select('*').eq('contact_id', meetContactId).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(20);
+
+        const { data: topicLinks } = await supabase.from('contact_topic_links').select('topic_id, role, topics(title, status, due_date, priority, summary, notes)').eq('contact_id', meetContactId).eq('user_id', user.id);
+        const linkedTopicIds = (topicLinks || []).map((l: Record<string, unknown>) => l.topic_id as string);
+
+        let topicItemsCtx = '';
+        if (linkedTopicIds.length > 0) {
+          const { data: topicItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topic_id').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(30);
+          topicItemsCtx = (topicItems || []).map((i: Record<string, unknown>) => {
+            const body = (i.body as string) || (i.snippet as string) || '';
+            const preview = body.length > 1000 ? body.substring(0, 1000) + '...' : body;
+            return `[${i.source}] ${i.title} (${i.occurred_at}): ${preview}`;
+          }).join('\n');
+        }
+
+        const topicsCtx = (topicLinks || []).map((l: Record<string, unknown>) => {
+          const t = l.topics as Record<string, unknown> | null;
+          if (!t) return '';
+          return `- ${t.title} (status: ${t.status}, priority: ${t.priority || 'N/A'}, due: ${t.due_date || 'N/A'}, role: ${l.role || 'N/A'})\n  Summary: ${(t.summary as string || 'No summary').substring(0, 300)}\n  Notes: ${(t.notes as string || 'None').substring(0, 200)}`;
+        }).filter(Boolean).join('\n');
+
+        const contactItemsCtx = (contactItems || []).map((i: Record<string, unknown>) => {
+          const body = (i.body as string) || (i.snippet as string) || '';
+          const preview = body.length > 800 ? body.substring(0, 800) + '...' : body;
+          return `[${i.source}] ${i.title} (${i.occurred_at}): ${preview}`;
+        }).join('\n');
+
+        inputSummary = `Meeting prep for ${contactData.name}`;
+        const { data: prepData } = await callClaudeJSON<{
+          relationship_summary: string;
+          recent_topics: Array<{ topic: string; summary: string; last_activity: string }>;
+          pending_items: Array<{ item: string; topic: string; status: string }>;
+          suggested_agenda: string[];
+          talking_points: string[];
+          preparation_notes: string;
+        }>(
+          `You are an executive assistant preparing a meeting briefing. Analyze ALL available data about this contact and generate a comprehensive, actionable meeting preparation document.
+
+Return JSON: {
+  "relationship_summary": "2-3 sentence overview of the relationship and recent dynamics",
+  "recent_topics": [{ "topic": "topic name", "summary": "what's happening", "last_activity": "when" }],
+  "pending_items": [{ "item": "what needs to be done", "topic": "related topic", "status": "pending|in-progress|blocked" }],
+  "suggested_agenda": ["agenda item 1", "agenda item 2", ...],
+  "talking_points": ["key point to bring up 1", ...],
+  "preparation_notes": "any additional context or warnings the user should know"
+}`,
+          `=== CONTACT ===
+Name: ${contactData.name}
+Email: ${contactData.email || 'N/A'}
+Organization: ${contactData.organization || 'N/A'}
+Role: ${contactData.role || 'N/A'}
+Last Interaction: ${contactData.last_interaction_at || 'N/A'}
+Interactions: ${contactData.interaction_count}
+Notes: ${contactData.notes || 'None'}
+
+=== LINKED TOPICS (${(topicLinks || []).length}) ===
+${topicsCtx || 'None'}
+
+=== DIRECT ITEMS (notes, documents) ===
+${contactItemsCtx || 'None'}
+
+=== RECENT COMMUNICATIONS ===
+${topicItemsCtx || 'None'}`
+        );
+
+        result = prepData;
+        break;
+      }
+
+      case 'contact_pending_items': {
+        // AI extracts all pending/open items across all contexts for a contact
+        const { contact_id: pendingContactId } = context;
+        if (!pendingContactId) return NextResponse.json({ error: 'contact_id required' }, { status: 400 });
+
+        const { data: contactData } = await supabase.from('contacts').select('name, email').eq('id', pendingContactId).eq('user_id', user.id).single();
+        if (!contactData) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
+        const { data: contactItems } = await supabase.from('contact_items').select('title, source, body, snippet, occurred_at').eq('contact_id', pendingContactId).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(20);
+
+        const { data: topicLinks } = await supabase.from('contact_topic_links').select('topic_id, topics(title, status, due_date, priority)').eq('contact_id', pendingContactId).eq('user_id', user.id);
+        const linkedTopicIds = (topicLinks || []).map((l: Record<string, unknown>) => l.topic_id as string);
+        const topicTitleMap: Record<string, string> = {};
+        for (const l of (topicLinks || [])) {
+          const t = (l.topics as unknown) as { title: string } | null;
+          if (t) topicTitleMap[l.topic_id as string] = t.title;
+        }
+
+        let topicItemsCtx = '';
+        if (linkedTopicIds.length > 0) {
+          const { data: topicItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topic_id').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(40);
+          topicItemsCtx = (topicItems || []).map((i: Record<string, unknown>) => {
+            const body = (i.body as string) || (i.snippet as string) || '';
+            const preview = body.length > 1000 ? body.substring(0, 1000) + '...' : body;
+            return `[${i.source} — ${topicTitleMap[i.topic_id as string] || 'Topic'}] ${i.title} (${i.occurred_at}): ${preview}`;
+          }).join('\n');
+        }
+
+        const contactItemsCtx = (contactItems || []).map((i: Record<string, unknown>) => {
+          const body = (i.body as string) || (i.snippet as string) || '';
+          return `[Direct ${i.source}] ${i.title} (${i.occurred_at}): ${body.substring(0, 500)}`;
+        }).join('\n');
+
+        inputSummary = `Pending items for ${contactData.name}`;
+        const { data: pendingData } = await callClaudeJSON<{
+          pending_items: Array<{ task: string; topic: string; priority: 'high' | 'medium' | 'low'; source: string; status: string; context: string }>;
+        }>(
+          `Analyze ALL communications and documents related to this contact. Extract every pending task, commitment, follow-up, open question, or unresolved item.
+
+Look for:
+- Explicit commitments ("I'll send you...", "Let me check...")
+- Implicit promises or action items
+- Unanswered questions
+- Follow-ups mentioned but not completed
+- Deadlines or time-sensitive items
+
+Return JSON: { "pending_items": [{ "task": "description", "topic": "related topic name or 'General'", "priority": "high|medium|low", "source": "where this was found", "status": "pending|in-progress|blocked", "context": "brief context why this is pending" }] }`,
+          `Contact: ${contactData.name} (${contactData.email || 'no email'})
+
+=== DIRECT ITEMS ===
+${contactItemsCtx || 'None'}
+
+=== TOPIC ITEMS (${linkedTopicIds.length} linked topics) ===
+${topicItemsCtx || 'None'}`
+        );
+
+        result = pendingData;
+        break;
+      }
+
+      case 'contact_dossier': {
+        // AI generates a comprehensive dossier about a contact
+        const { contact_id: dossierContactId } = context;
+        if (!dossierContactId) return NextResponse.json({ error: 'contact_id required' }, { status: 400 });
+
+        const { data: contactData } = await supabase.from('contacts').select('*').eq('id', dossierContactId).eq('user_id', user.id).single();
+        if (!contactData) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
+        const { data: contactItems } = await supabase.from('contact_items').select('*').eq('contact_id', dossierContactId).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(30);
+
+        const { data: topicLinks } = await supabase.from('contact_topic_links').select('topic_id, role, topics(title, status, due_date, priority, summary, area)').eq('contact_id', dossierContactId).eq('user_id', user.id);
+        const linkedTopicIds = (topicLinks || []).map((l: Record<string, unknown>) => l.topic_id as string);
+
+        let topicItemsCtx = '';
+        if (linkedTopicIds.length > 0) {
+          const { data: topicItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topic_id, metadata').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(60);
+          const topicTitleMap: Record<string, string> = {};
+          for (const l of (topicLinks || [])) {
+            const t = (l.topics as unknown) as { title: string } | null;
+            if (t) topicTitleMap[l.topic_id as string] = t.title;
+          }
+          topicItemsCtx = (topicItems || []).map((i: Record<string, unknown>) => {
+            const body = (i.body as string) || (i.snippet as string) || '';
+            const preview = body.length > 1500 ? body.substring(0, 1500) + '...' : body;
+            return `[${i.source} — ${topicTitleMap[i.topic_id as string] || 'Topic'}] ${i.title} (${i.occurred_at})\n${preview}`;
+          }).join('\n\n');
+        }
+
+        const topicsCtx = (topicLinks || []).map((l: Record<string, unknown>) => {
+          const t = l.topics as Record<string, unknown> | null;
+          if (!t) return '';
+          return `- ${t.title} (${t.status}, area: ${t.area || 'N/A'}, role: ${l.role || 'N/A'}, due: ${t.due_date || 'N/A'})\n  ${(t.summary as string || 'No summary').substring(0, 200)}`;
+        }).filter(Boolean).join('\n');
+
+        const contactItemsCtx = (contactItems || []).map((i: Record<string, unknown>) => {
+          const body = (i.body as string) || (i.snippet as string) || '';
+          const preview = body.length > 1500 ? body.substring(0, 1500) + '...' : body;
+          return `[${i.source}] ${i.title} (${i.occurred_at})\n${preview}`;
+        }).join('\n\n');
+
+        inputSummary = `Full dossier for ${contactData.name}`;
+        const { text } = await callClaude(
+          `You are an executive intelligence analyst. Generate a COMPREHENSIVE dossier about this contact based on ALL available data. Use markdown formatting.
+
+Structure:
+## Profile Summary
+Brief overview of who this person is and the relationship.
+
+## Communication History
+Chronological summary of key interactions, organized by timeframe.
+
+## Key Discussion Themes
+Major topics and themes discussed with this person.
+
+## Decisions & Agreements
+Key decisions made together, agreements reached.
+
+## Outstanding Items
+Tasks, follow-ups, or commitments that are still open.
+
+## Relationship Trajectory
+How the relationship has evolved over time, current status, trajectory.
+
+## Key Documents
+Important documents, notes, or artifacts related to this person.
+
+## Strategic Notes
+Any important observations or recommendations for managing this relationship.
+
+Be specific — cite dates, document names, and concrete details. Don't make up information.`,
+          `=== CONTACT PROFILE ===
+Name: ${contactData.name}
+Email: ${contactData.email || 'N/A'}
+Organization: ${contactData.organization || 'N/A'}
+Role: ${contactData.role || 'N/A'}
+Area: ${contactData.area || 'N/A'}
+Created: ${contactData.created_at}
+Last Interaction: ${contactData.last_interaction_at || 'Never'}
+Total Interactions: ${contactData.interaction_count}
+Notes: ${contactData.notes || 'None'}
+
+=== LINKED TOPICS (${(topicLinks || []).length}) ===
+${topicsCtx || 'None'}
+
+=== DIRECT CONTACT ITEMS (notes, documents, links) ===
+${contactItemsCtx || 'None'}
+
+=== ALL COMMUNICATIONS (from linked topics) ===
+${topicItemsCtx || 'None'}`
+        );
+
+        result = { dossier: text };
+        break;
+      }
+
       default:
         return NextResponse.json({ error: `Unknown agent: ${agent}` }, { status: 400 });
     }

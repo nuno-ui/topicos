@@ -20,6 +20,8 @@ export async function GET(request: Request) {
       .select('*, contact_topic_links(topic_id, role, topics(title, status, area))')
       .eq('user_id', user.id);
 
+    const favorites = searchParams.get('favorites');
+    if (favorites === 'true') query = query.eq('is_favorite', true);
     if (area && area !== 'all') query = query.eq('area', area);
     if (search) {
       // Escape special ilike characters to prevent pattern injection
@@ -27,8 +29,11 @@ export async function GET(request: Request) {
       query = query.or(`name.ilike.%${safeSearch}%,email.ilike.%${safeSearch}%,organization.ilike.%${safeSearch}%`);
     }
 
-    const validSorts = ['name', 'created_at', 'updated_at', 'interaction_count', 'last_interaction_at', 'organization'];
+    const validSorts = ['name', 'created_at', 'updated_at', 'interaction_count', 'last_interaction_at', 'organization', 'is_favorite'];
     const sortField = validSorts.includes(sortBy) ? sortBy : 'name';
+    if (sortBy === 'favorites_first') {
+      query = query.order('is_favorite', { ascending: false });
+    }
     query = query.order(sortField, { ascending: sortDir }).limit(limit);
 
     const { data, error } = await query;

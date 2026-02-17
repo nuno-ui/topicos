@@ -1,5 +1,5 @@
 'use client';
-import { Mail, Calendar, FileText, MessageSquare, BookOpen, StickyNote, Link2, File } from 'lucide-react';
+import { Mail, Calendar, FileText, MessageSquare, BookOpen, StickyNote, Link2, File, Scroll } from 'lucide-react';
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   gmail: Mail,
@@ -9,6 +9,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   notion: BookOpen,
   manual: StickyNote,
   link: Link2,
+  document: Scroll,
 };
 
 const colorMap: Record<string, string> = {
@@ -19,6 +20,7 @@ const colorMap: Record<string, string> = {
   notion: 'text-gray-700',
   manual: 'text-green-500',
   link: 'text-cyan-500',
+  document: 'text-orange-500',
 };
 
 const labelMap: Record<string, string> = {
@@ -29,6 +31,7 @@ const labelMap: Record<string, string> = {
   notion: 'Notion',
   manual: 'Note',
   link: 'Link',
+  document: 'Document',
 };
 
 const badgeBgMap: Record<string, string> = {
@@ -39,6 +42,7 @@ const badgeBgMap: Record<string, string> = {
   notion: 'bg-gray-50 text-gray-700 border-gray-200',
   manual: 'bg-green-50 text-green-700 border-green-200',
   link: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+  document: 'bg-orange-50 text-orange-700 border-orange-200',
 };
 
 export function SourceIcon({ source, className = 'w-4 h-4' }: { source: string; className?: string }) {
@@ -72,6 +76,7 @@ const circleBgMap: Record<string, string> = {
   notion: 'bg-gray-100',
   manual: 'bg-green-100',
   link: 'bg-cyan-100',
+  document: 'bg-orange-100',
 };
 
 /** Source icon with a colored circular background */
@@ -107,6 +112,7 @@ export function getSourceBorderColor(source: string): string {
     notion: 'border-l-gray-400',
     manual: 'border-l-green-400',
     link: 'border-l-cyan-400',
+    document: 'border-l-orange-400',
   };
   return borders[source] || 'border-l-gray-300';
 }
