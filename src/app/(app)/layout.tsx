@@ -1,8 +1,12 @@
 import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { Sidebar } from '@/components/layout/sidebar';
 import { CommandPalette } from '@/components/ui/command-palette';
 import { FeedbackButton } from '@/components/feedback/feedback-button';
+import { RouteProgress } from '@/components/ui/route-progress';
+import { BackToTop } from '@/components/ui/back-to-top';
+import { MobileFAB } from '@/components/ui/mobile-fab';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabaseClient();
@@ -11,6 +15,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex flex-col min-h-dvh bg-gray-50">
+      <Suspense fallback={null}>
+        <RouteProgress />
+      </Suspense>
       {/* Skip to content – accessibility */}
       <a
         href="#main-content"
@@ -28,6 +35,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
       <CommandPalette />
       <FeedbackButton />
+      <BackToTop />
+      <MobileFAB />
     </div>
   );
 }

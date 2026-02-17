@@ -1,5 +1,6 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { ContactDetail } from '@/components/contacts/contact-detail';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { notFound } from 'next/navigation';
 import { getContactItems, updateContactStats } from '@/lib/contacts/interaction-stats';
 import type { Metadata } from 'next';
@@ -48,6 +49,7 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="p-4 md:p-8 max-w-5xl animate-page-enter">
+      <Breadcrumbs currentLabel={contact.name} />
       <ContactDetail
         contact={contact}
         relatedItems={relatedItems as Record<string, unknown>[]}

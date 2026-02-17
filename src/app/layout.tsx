@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { Toaster } from 'sonner';
+import { NetworkStatus } from '@/components/ui/network-status';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -45,6 +46,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
       </head>
       <body className="antialiased">
+        <NetworkStatus />
         {children}
         <Toaster
           position="top-right"
