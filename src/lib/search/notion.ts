@@ -118,7 +118,7 @@ export async function searchNotion(
 export async function getNotionPageContent(
   accessToken: string,
   pageId: string,
-  maxBlocks: number = 100
+  maxBlocks: number = 500
 ): Promise<string> {
   try {
     const headers = {
@@ -145,98 +145,101 @@ export async function getNotionPageContent(
       cursor = data.next_cursor;
     }
 
-    const textParts: string[] = [];
-
-    for (const block of allBlocks) {
+    // Helper to extract text from a block at given indentation depth
+    const extractBlockText = (block: Record<string, unknown>, depth: number = 0): string => {
       const type = block.type as string;
       const blockData = block[type] as Record<string, unknown> | undefined;
-      if (!blockData) continue;
+      if (!blockData) return '';
 
-      // Extract rich text content
       const richTexts = blockData.rich_text as Array<{ plain_text: string }> | undefined;
       const text = richTexts ? richTexts.map(rt => rt.plain_text).join('') : '';
+      const indent = '  '.repeat(depth);
 
       switch (type) {
-        case 'paragraph':
-          if (text) textParts.push(text);
-          break;
-        case 'heading_1':
-          if (text) textParts.push('\n# ' + text);
-          break;
-        case 'heading_2':
-          if (text) textParts.push('\n## ' + text);
-          break;
-        case 'heading_3':
-          if (text) textParts.push('\n### ' + text);
-          break;
-        case 'bulleted_list_item':
-          if (text) textParts.push('• ' + text);
-          break;
-        case 'numbered_list_item':
-          if (text) textParts.push('- ' + text);
-          break;
+        case 'paragraph': return text ? indent + text : '';
+        case 'heading_1': return text ? '\n# ' + text : '';
+        case 'heading_2': return text ? '\n## ' + text : '';
+        case 'heading_3': return text ? '\n### ' + text : '';
+        case 'bulleted_list_item': return text ? indent + '• ' + text : '';
+        case 'numbered_list_item': return text ? indent + '- ' + text : '';
         case 'to_do': {
           const checked = (blockData.checked as boolean) ? '☑' : '☐';
-          if (text) textParts.push(checked + ' ' + text);
-          break;
+          return text ? indent + checked + ' ' + text : '';
         }
-        case 'toggle':
-          if (text) textParts.push('▸ ' + text);
-          break;
+        case 'toggle': return text ? indent + '▸ ' + text : '';
         case 'code': {
           const lang = (blockData.language as string) || '';
-          if (text) textParts.push('```' + lang + '\n' + text + '\n```');
-          break;
+          return text ? indent + '```' + lang + '\n' + text + '\n```' : '';
         }
-        case 'quote':
-          if (text) textParts.push('> ' + text);
-          break;
+        case 'quote': return text ? indent + '> ' + text : '';
         case 'callout': {
           const icon = (blockData.icon as Record<string, string>)?.emoji || '💡';
-          if (text) textParts.push(icon + ' ' + text);
-          break;
+          return text ? indent + icon + ' ' + text : '';
         }
-        case 'divider':
-          textParts.push('---');
-          break;
+        case 'divider': return '---';
         case 'table_row': {
           const cells = blockData.cells as Array<Array<{ plain_text: string }>> | undefined;
           if (cells) {
             const row = cells.map(cell => cell.map(c => c.plain_text).join('')).join(' | ');
-            textParts.push('| ' + row + ' |');
+            return indent + '| ' + row + ' |';
           }
-          break;
+          return '';
         }
         case 'bookmark': {
           const bookmarkUrl = (blockData.url as string) || '';
-          textParts.push('[Bookmark: ' + bookmarkUrl + ']' + (text ? ' ' + text : ''));
-          break;
+          return indent + '[Bookmark: ' + bookmarkUrl + ']' + (text ? ' ' + text : '');
         }
         case 'embed': {
           const embedUrl = (blockData.url as string) || '';
-          textParts.push('[Embed: ' + embedUrl + ']');
-          break;
+          return indent + '[Embed: ' + embedUrl + ']';
         }
-        case 'image':
-        case 'video':
-        case 'file':
-        case 'pdf': {
+        case 'image': case 'video': case 'file': case 'pdf': {
           const fileData = (blockData.file as Record<string, string>) || (blockData.external as Record<string, string>) || {};
-          textParts.push('[' + type + ': ' + (fileData.url || 'attached') + ']' + (text ? ' ' + text : ''));
-          break;
+          return indent + '[' + type + ': ' + (fileData.url || 'attached') + ']' + (text ? ' ' + text : '');
         }
-        default:
-          // For any other block type with text
-          if (text) textParts.push(text);
-          break;
+        default: return text ? indent + text : '';
+      }
+    };
+
+    // Fetch children of a block (for nested content like toggles, nested bullets)
+    const fetchChildren = async (blockId: string, depth: number): Promise<string[]> => {
+      if (depth > 3) return []; // Max nesting depth to avoid infinite recursion
+      try {
+        const childRes = await fetch(NOTION_API + '/blocks/' + blockId + '/children?page_size=100', { headers });
+        const childData = await childRes.json();
+        if (!childData.results) return [];
+        const parts: string[] = [];
+        for (const child of childData.results) {
+          const line = extractBlockText(child, depth);
+          if (line) parts.push(line);
+          if (child.has_children) {
+            const nested = await fetchChildren(child.id, depth + 1);
+            parts.push(...nested);
+          }
+        }
+        return parts;
+      } catch {
+        return [];
+      }
+    };
+
+    const textParts: string[] = [];
+
+    for (const block of allBlocks) {
+      const line = extractBlockText(block, 0);
+      if (line) textParts.push(line);
+      // Fetch nested children (toggles, nested bullets, etc.)
+      if (block.has_children) {
+        const children = await fetchChildren(block.id as string, 1);
+        textParts.push(...children);
       }
     }
 
     const fullContent = textParts.join('\n');
 
-    // Truncate to 15,000 chars for AI token limits
-    if (fullContent.length > 15000) {
-      return fullContent.substring(0, 15000) + '\n\n[... content truncated at 15,000 characters]';
+    // Truncate to 120,000 chars (large pages like 1:1 logs need full content for AI analysis)
+    if (fullContent.length > 120000) {
+      return fullContent.substring(0, 120000) + '\n\n[... content truncated at 120,000 characters]';
     }
 
     return fullContent;

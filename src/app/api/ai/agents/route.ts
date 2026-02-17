@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { callClaude, callClaudeJSON } from '@/lib/ai/provider';
 import { getTopicNoteContext } from '@/lib/ai/note-context';
-import { enrichTopicItems } from '@/lib/search/content';
+import { enrichTopicItems, enrichItemContent, forceReenrichItem } from '@/lib/search/content';
 
 export async function POST(request: Request) {
   try {
@@ -1418,43 +1418,86 @@ ${(allTopics || []).map((t: Record<string, unknown>) => {
       // ============ CONTACT KNOWLEDGE BASE AGENTS ============
 
       case 'contact_ask': {
-        // AI answers questions about a contact using their full knowledge base
-        const { contact_id, question } = context;
+        // AI answers questions about a contact using their FULL knowledge base
+        // Supports large documents (Notion 1:1 logs, etc.) with up to 120K chars
+        const { contact_id, question, time_filter } = context;
         if (!contact_id || !question) return NextResponse.json({ error: 'contact_id and question required' }, { status: 400 });
 
         const { data: contactData } = await supabase.from('contacts').select('*').eq('id', contact_id).eq('user_id', user.id).single();
         if (!contactData) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
 
         // Gather knowledge base: contact_items + topic_items from linked topics
-        const { data: contactItems } = await supabase.from('contact_items').select('*').eq('contact_id', contact_id).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(30);
+        const { data: contactItems } = await supabase.from('contact_items').select('*').eq('contact_id', contact_id).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(50);
 
         const { data: topicLinks } = await supabase.from('contact_topic_links').select('topic_id, topics(title)').eq('contact_id', contact_id).eq('user_id', user.id);
         const linkedTopicIds = (topicLinks || []).map((l: Record<string, unknown>) => l.topic_id as string);
 
+        // Re-enrich items that have truncated content (old 15K limit)
+        const itemsToReenrich = (contactItems || []).filter((i: Record<string, unknown>) => {
+          const body = (i.body as string) || '';
+          return body.includes('[... content truncated at 15,000 characters]') || (i.source === 'notion' && body.length > 14000 && body.length < 16000);
+        });
+        for (const item of itemsToReenrich) {
+          try {
+            const enriched = await forceReenrichItem(user.id, item as { id: string; source: string; source_account_id: string | null; external_id: string; body: string | null; metadata: Record<string, unknown> });
+            if (enriched.body) {
+              // Update the in-memory item
+              (item as Record<string, unknown>).body = enriched.body;
+            }
+          } catch (e) { console.warn('Re-enrich failed:', e); }
+        }
+
         let topicItemsCtx = '';
         if (linkedTopicIds.length > 0) {
-          const { data: topicItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topic_id, metadata').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(40);
+          const { data: topicItems } = await supabase.from('topic_items').select('id, title, source, snippet, body, occurred_at, topic_id, metadata, source_account_id, external_id').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(60);
+
+          // Re-enrich truncated topic items too
+          for (const item of (topicItems || [])) {
+            const body = (item.body as string) || '';
+            if (body.includes('[... content truncated at 15,000 characters]') || (item.source === 'notion' && body.length > 14000 && body.length < 16000)) {
+              try {
+                const enriched = await forceReenrichItem(user.id, { id: item.id as string, topic_id: item.topic_id as string, source: item.source as string, source_account_id: item.source_account_id as string | null, external_id: item.external_id as string, body: null, metadata: item.metadata as Record<string, unknown> });
+                if (enriched.body) item.body = enriched.body;
+              } catch (e) { console.warn('Re-enrich topic item failed:', e); }
+            }
+          }
+
           const topicTitleMap: Record<string, string> = {};
           for (const l of (topicLinks || [])) {
             const t = (l.topics as unknown) as { title: string } | null;
             if (t) topicTitleMap[l.topic_id as string] = t.title;
           }
+
+          // Use much larger preview for comprehensive analysis
           topicItemsCtx = (topicItems || []).map((i: Record<string, unknown>) => {
             const body = (i.body as string) || (i.snippet as string) || '';
-            const preview = body.length > 1500 ? body.substring(0, 1500) + '...' : body;
+            // Allow up to 15K per item for large docs, 3K for smaller items
+            const maxPreview = body.length > 5000 ? 15000 : 3000;
+            const preview = body.length > maxPreview ? body.substring(0, maxPreview) + '...' : body;
             return `[${i.source} — Topic: ${topicTitleMap[i.topic_id as string] || 'Unknown'}] ${i.title} (${i.occurred_at})\n${preview}`;
           }).join('\n\n');
         }
 
+        // For contact items, allow full content for large docs
         const contactItemsCtx = (contactItems || []).map((i: Record<string, unknown>) => {
           const body = (i.body as string) || (i.snippet as string) || '';
-          const preview = body.length > 1500 ? body.substring(0, 1500) + '...' : body;
+          const maxPreview = body.length > 5000 ? 30000 : 3000;
+          const preview = body.length > maxPreview ? body.substring(0, maxPreview) + '...' : body;
           return `[Direct ${i.source}] ${i.title} (${i.occurred_at})\n${preview}`;
         }).join('\n\n');
 
+        // Time filter hint for the AI
+        const timeFilterHint = time_filter ? `\nIMPORTANT: Focus specifically on items from the ${time_filter}. Prioritize recent data matching this timeframe.` : '';
+
         inputSummary = `Ask about ${contactData.name}: ${question}`;
         const { text } = await callClaude(
-          `You are an AI assistant with access to a complete knowledge base about a specific person. Answer the user's question based ONLY on the provided context. Cite specific items (emails, documents, notes, meetings) when making claims. If the information is not in the context, say so clearly. Be concise but thorough.`,
+          `You are an AI assistant with access to a COMPLETE knowledge base about a specific person, including potentially very large documents like 1:1 meeting notes spanning months/years. Answer the user's question based ONLY on the provided context. Be thorough and cite specific dates, items, and sources when making claims. If the information is not in the context, say so clearly.
+
+When analyzing large documents with meeting notes:
+- Look for date headers, timestamps, or chronological markers
+- Extract specific items, decisions, and action items
+- Identify patterns and recurring themes
+- Track commitments and follow-ups across meetings${timeFilterHint}`,
           `=== CONTACT PROFILE ===
 Name: ${contactData.name}
 Email: ${contactData.email || 'N/A'}
@@ -1469,32 +1512,45 @@ ${contactItemsCtx || 'None'}
 ${topicItemsCtx || 'None'}
 
 === QUESTION ===
-${question}`
+${question}`,
+          { maxTokens: 8192 }
         );
 
-        result = { answer: text, sources_used: (contactItems?.length || 0) + (linkedTopicIds.length > 0 ? 40 : 0) };
+        result = { answer: text, sources_used: (contactItems?.length || 0) + (linkedTopicIds.length > 0 ? 60 : 0) };
         break;
       }
 
       case 'contact_meeting_prep': {
-        // AI prepares a briefing for meeting with a contact
+        // AI prepares a briefing for meeting with a contact — uses full content from large docs
         const { contact_id: meetContactId } = context;
         if (!meetContactId) return NextResponse.json({ error: 'contact_id required' }, { status: 400 });
 
         const { data: contactData } = await supabase.from('contacts').select('*').eq('id', meetContactId).eq('user_id', user.id).single();
         if (!contactData) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
 
-        const { data: contactItems } = await supabase.from('contact_items').select('*').eq('contact_id', meetContactId).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(20);
+        const { data: contactItems } = await supabase.from('contact_items').select('*').eq('contact_id', meetContactId).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(30);
+
+        // Re-enrich truncated Notion items
+        for (const item of (contactItems || [])) {
+          const body = (item.body as string) || '';
+          if (body.includes('[... content truncated at 15,000 characters]') || (item.source === 'notion' && body.length > 14000 && body.length < 16000)) {
+            try {
+              const enriched = await forceReenrichItem(user.id, item as { id: string; source: string; source_account_id: string | null; external_id: string; body: string | null; metadata: Record<string, unknown> });
+              if (enriched.body) (item as Record<string, unknown>).body = enriched.body;
+            } catch (e) { console.warn('Re-enrich failed:', e); }
+          }
+        }
 
         const { data: topicLinks } = await supabase.from('contact_topic_links').select('topic_id, role, topics(title, status, due_date, priority, summary, notes)').eq('contact_id', meetContactId).eq('user_id', user.id);
         const linkedTopicIds = (topicLinks || []).map((l: Record<string, unknown>) => l.topic_id as string);
 
         let topicItemsCtx = '';
         if (linkedTopicIds.length > 0) {
-          const { data: topicItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topic_id').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(30);
+          const { data: topicItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topic_id').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(50);
           topicItemsCtx = (topicItems || []).map((i: Record<string, unknown>) => {
             const body = (i.body as string) || (i.snippet as string) || '';
-            const preview = body.length > 1000 ? body.substring(0, 1000) + '...' : body;
+            const maxPreview = body.length > 5000 ? 12000 : 2000;
+            const preview = body.length > maxPreview ? body.substring(0, maxPreview) + '...' : body;
             return `[${i.source}] ${i.title} (${i.occurred_at}): ${preview}`;
           }).join('\n');
         }
@@ -1502,12 +1558,13 @@ ${question}`
         const topicsCtx = (topicLinks || []).map((l: Record<string, unknown>) => {
           const t = l.topics as Record<string, unknown> | null;
           if (!t) return '';
-          return `- ${t.title} (status: ${t.status}, priority: ${t.priority || 'N/A'}, due: ${t.due_date || 'N/A'}, role: ${l.role || 'N/A'})\n  Summary: ${(t.summary as string || 'No summary').substring(0, 300)}\n  Notes: ${(t.notes as string || 'None').substring(0, 200)}`;
+          return `- ${t.title} (status: ${t.status}, priority: ${t.priority || 'N/A'}, due: ${t.due_date || 'N/A'}, role: ${l.role || 'N/A'})\n  Summary: ${(t.summary as string || 'No summary').substring(0, 500)}\n  Notes: ${(t.notes as string || 'None').substring(0, 300)}`;
         }).filter(Boolean).join('\n');
 
         const contactItemsCtx = (contactItems || []).map((i: Record<string, unknown>) => {
           const body = (i.body as string) || (i.snippet as string) || '';
-          const preview = body.length > 800 ? body.substring(0, 800) + '...' : body;
+          const maxPreview = body.length > 5000 ? 25000 : 2000;
+          const preview = body.length > maxPreview ? body.substring(0, maxPreview) + '...' : body;
           return `[${i.source}] ${i.title} (${i.occurred_at}): ${preview}`;
         }).join('\n');
 
@@ -1520,7 +1577,13 @@ ${question}`
           talking_points: string[];
           preparation_notes: string;
         }>(
-          `You are an executive assistant preparing a meeting briefing. Analyze ALL available data about this contact and generate a comprehensive, actionable meeting preparation document.
+          `You are an executive assistant preparing a meeting briefing. Analyze ALL available data about this contact including large documents like 1:1 meeting notes.
+
+When analyzing large meeting note documents, pay special attention to:
+- Most recent entries (last 2-4 weeks) for current priorities
+- Any open action items, follow-ups, or commitments
+- Recurring themes and blockers
+- Decisions that were made or deferred
 
 Return JSON: {
   "relationship_summary": "2-3 sentence overview of the relationship and recent dynamics",
@@ -1542,11 +1605,12 @@ Notes: ${contactData.notes || 'None'}
 === LINKED TOPICS (${(topicLinks || []).length}) ===
 ${topicsCtx || 'None'}
 
-=== DIRECT ITEMS (notes, documents) ===
+=== DIRECT ITEMS (notes, documents — may include large 1:1 meeting logs) ===
 ${contactItemsCtx || 'None'}
 
 === RECENT COMMUNICATIONS ===
-${topicItemsCtx || 'None'}`
+${topicItemsCtx || 'None'}`,
+          { maxTokens: 8192 }
         );
 
         result = prepData;
@@ -1554,14 +1618,25 @@ ${topicItemsCtx || 'None'}`
       }
 
       case 'contact_pending_items': {
-        // AI extracts all pending/open items across all contexts for a contact
-        const { contact_id: pendingContactId } = context;
+        // AI extracts all pending/open items — uses full content from large docs
+        const { contact_id: pendingContactId, time_filter: pendingTimeFilter } = context;
         if (!pendingContactId) return NextResponse.json({ error: 'contact_id required' }, { status: 400 });
 
         const { data: contactData } = await supabase.from('contacts').select('name, email').eq('id', pendingContactId).eq('user_id', user.id).single();
         if (!contactData) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
 
-        const { data: contactItems } = await supabase.from('contact_items').select('title, source, body, snippet, occurred_at').eq('contact_id', pendingContactId).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(20);
+        const { data: contactItems } = await supabase.from('contact_items').select('*').eq('contact_id', pendingContactId).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(30);
+
+        // Re-enrich truncated items
+        for (const item of (contactItems || [])) {
+          const body = (item.body as string) || '';
+          if (body.includes('[... content truncated at 15,000 characters]') || (item.source === 'notion' && body.length > 14000 && body.length < 16000)) {
+            try {
+              const enriched = await forceReenrichItem(user.id, item as { id: string; source: string; source_account_id: string | null; external_id: string; body: string | null; metadata: Record<string, unknown> });
+              if (enriched.body) (item as Record<string, unknown>).body = enriched.body;
+            } catch (e) { console.warn('Re-enrich failed:', e); }
+          }
+        }
 
         const { data: topicLinks } = await supabase.from('contact_topic_links').select('topic_id, topics(title, status, due_date, priority)').eq('contact_id', pendingContactId).eq('user_id', user.id);
         const linkedTopicIds = (topicLinks || []).map((l: Record<string, unknown>) => l.topic_id as string);
@@ -1573,24 +1648,35 @@ ${topicItemsCtx || 'None'}`
 
         let topicItemsCtx = '';
         if (linkedTopicIds.length > 0) {
-          const { data: topicItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topic_id').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(40);
+          const { data: topicItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topic_id').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(60);
           topicItemsCtx = (topicItems || []).map((i: Record<string, unknown>) => {
             const body = (i.body as string) || (i.snippet as string) || '';
-            const preview = body.length > 1000 ? body.substring(0, 1000) + '...' : body;
+            const maxPreview = body.length > 5000 ? 12000 : 2000;
+            const preview = body.length > maxPreview ? body.substring(0, maxPreview) + '...' : body;
             return `[${i.source} — ${topicTitleMap[i.topic_id as string] || 'Topic'}] ${i.title} (${i.occurred_at}): ${preview}`;
           }).join('\n');
         }
 
         const contactItemsCtx = (contactItems || []).map((i: Record<string, unknown>) => {
           const body = (i.body as string) || (i.snippet as string) || '';
-          return `[Direct ${i.source}] ${i.title} (${i.occurred_at}): ${body.substring(0, 500)}`;
+          const maxPreview = body.length > 5000 ? 25000 : 2000;
+          const preview = body.length > maxPreview ? body.substring(0, maxPreview) + '...' : body;
+          return `[Direct ${i.source}] ${i.title} (${i.occurred_at}): ${preview}`;
         }).join('\n');
+
+        const timeHint = pendingTimeFilter ? `\nIMPORTANT: Focus specifically on items from the ${pendingTimeFilter}. Still list older items if they remain unresolved, but prioritize recent ones.` : '';
 
         inputSummary = `Pending items for ${contactData.name}`;
         const { data: pendingData } = await callClaudeJSON<{
           pending_items: Array<{ task: string; topic: string; priority: 'high' | 'medium' | 'low'; source: string; status: string; context: string }>;
         }>(
-          `Analyze ALL communications and documents related to this contact. Extract every pending task, commitment, follow-up, open question, or unresolved item.
+          `Analyze ALL communications and documents related to this contact including large meeting note documents. Extract every pending task, commitment, follow-up, open question, or unresolved item.
+
+When analyzing large 1:1 meeting notes:
+- Scan through ALL meeting dates for action items
+- Look for items prefixed with action markers (TODO, AI:, @name, follow-up, etc.)
+- Track items that were discussed but never resolved in later meetings
+- Note decisions that require follow-up actions
 
 Look for:
 - Explicit commitments ("I'll send you...", "Let me check...")
@@ -1598,15 +1684,17 @@ Look for:
 - Unanswered questions
 - Follow-ups mentioned but not completed
 - Deadlines or time-sensitive items
+- Blockers waiting on someone${timeHint}
 
-Return JSON: { "pending_items": [{ "task": "description", "topic": "related topic name or 'General'", "priority": "high|medium|low", "source": "where this was found", "status": "pending|in-progress|blocked", "context": "brief context why this is pending" }] }`,
+Return JSON: { "pending_items": [{ "task": "description", "topic": "related topic name or 'General'", "priority": "high|medium|low", "source": "where this was found (include date if available)", "status": "pending|in-progress|blocked", "context": "brief context why this is pending" }] }`,
           `Contact: ${contactData.name} (${contactData.email || 'no email'})
 
-=== DIRECT ITEMS ===
+=== DIRECT ITEMS (may include large 1:1 meeting logs) ===
 ${contactItemsCtx || 'None'}
 
 === TOPIC ITEMS (${linkedTopicIds.length} linked topics) ===
-${topicItemsCtx || 'None'}`
+${topicItemsCtx || 'None'}`,
+          { maxTokens: 8192 }
         );
 
         result = pendingData;
@@ -1705,6 +1793,152 @@ ${topicItemsCtx || 'None'}`
         );
 
         result = { dossier: text };
+        break;
+      }
+
+      case 'contact_deep_analysis': {
+        // AI performs deep analysis on a specific aspect of the contact relationship
+        // Supports: pending_decisions, blockers, concerns_shared, concerns_received, hot_projects, feedback_given, feedback_received
+        const { contact_id: deepContactId, analysis_type, time_filter: deepTimeFilter } = context;
+        if (!deepContactId || !analysis_type) return NextResponse.json({ error: 'contact_id and analysis_type required' }, { status: 400 });
+
+        const { data: contactData } = await supabase.from('contacts').select('*').eq('id', deepContactId).eq('user_id', user.id).single();
+        if (!contactData) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
+        // Fetch ALL contact items with full content
+        const { data: contactItems } = await supabase.from('contact_items').select('*').eq('contact_id', deepContactId).eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(50);
+
+        // Re-enrich truncated items
+        for (const item of (contactItems || [])) {
+          const body = (item.body as string) || '';
+          if (body.includes('[... content truncated at 15,000 characters]') || (item.source === 'notion' && body.length > 14000 && body.length < 16000)) {
+            try {
+              const enriched = await forceReenrichItem(user.id, item as { id: string; source: string; source_account_id: string | null; external_id: string; body: string | null; metadata: Record<string, unknown> });
+              if (enriched.body) (item as Record<string, unknown>).body = enriched.body;
+            } catch (e) { console.warn('Re-enrich failed:', e); }
+          }
+        }
+
+        const { data: topicLinks } = await supabase.from('contact_topic_links').select('topic_id, role, topics(title, status, due_date, priority)').eq('contact_id', deepContactId).eq('user_id', user.id);
+        const linkedTopicIds = (topicLinks || []).map((l: Record<string, unknown>) => l.topic_id as string);
+        const topicTitleMap: Record<string, string> = {};
+        for (const l of (topicLinks || [])) {
+          const t = (l.topics as unknown) as { title: string } | null;
+          if (t) topicTitleMap[l.topic_id as string] = t.title;
+        }
+
+        let topicItemsCtx = '';
+        if (linkedTopicIds.length > 0) {
+          const { data: topicItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topic_id').eq('user_id', user.id).in('topic_id', linkedTopicIds).order('occurred_at', { ascending: false }).limit(60);
+          topicItemsCtx = (topicItems || []).map((i: Record<string, unknown>) => {
+            const body = (i.body as string) || (i.snippet as string) || '';
+            const maxPreview = body.length > 5000 ? 12000 : 2000;
+            const preview = body.length > maxPreview ? body.substring(0, maxPreview) + '...' : body;
+            return `[${i.source} — ${topicTitleMap[i.topic_id as string] || 'Topic'}] ${i.title} (${i.occurred_at}): ${preview}`;
+          }).join('\n');
+        }
+
+        const contactItemsCtx = (contactItems || []).map((i: Record<string, unknown>) => {
+          const body = (i.body as string) || (i.snippet as string) || '';
+          const maxPreview = body.length > 5000 ? 30000 : 2000;
+          const preview = body.length > maxPreview ? body.substring(0, maxPreview) + '...' : body;
+          return `[Direct ${i.source}] ${i.title} (${i.occurred_at}): ${preview}`;
+        }).join('\n\n');
+
+        const timeHint = deepTimeFilter ? `\nTIME FILTER: Focus on the ${deepTimeFilter}. Still include older items if relevant but prioritize this timeframe.` : '';
+
+        // Analysis-type-specific prompts
+        const analysisPrompts: Record<string, { system: string; outputFormat: string }> = {
+          pending_decisions: {
+            system: `Analyze all communications and documents to find PENDING DECISIONS — things that need to be decided but haven't been finalized yet. Look for:
+- Questions raised but not answered
+- Options discussed without a clear conclusion
+- Items marked for "later discussion"
+- Proposals waiting for approval
+- Strategic choices being debated${timeHint}`,
+            outputFormat: `{ "items": [{ "decision": "what needs to be decided", "context": "background and options discussed", "last_discussed": "when/where", "urgency": "high|medium|low", "blockers": "what's preventing the decision" }] }`,
+          },
+          blockers: {
+            system: `Analyze all communications to find BLOCKERS — things that are preventing progress, waiting on someone, or stuck. Look for:
+- Items explicitly called out as blocked
+- Dependencies on other people or teams
+- Resource constraints mentioned
+- Approvals needed
+- Technical or process obstacles
+- Things waiting on external parties${timeHint}`,
+            outputFormat: `{ "items": [{ "blocker": "what is blocked", "blocked_by": "who/what is causing the block", "impact": "what is affected", "since": "when this was first mentioned", "urgency": "high|medium|low", "suggested_action": "possible resolution" }] }`,
+          },
+          concerns_shared: {
+            system: `Analyze all communications to find CONCERNS OR FEEDBACK YOU SHARED WITH this person. Look for:
+- Worries or risks you raised
+- Feedback you gave about their work, projects, or team
+- Issues you escalated to them
+- Suggestions you made for improvement
+- Disagreements or pushback you expressed${timeHint}`,
+            outputFormat: `{ "items": [{ "concern": "what you shared", "context": "when and why", "their_response": "how they responded if mentioned", "resolved": true/false, "date": "when" }] }`,
+          },
+          concerns_received: {
+            system: `Analyze all communications to find CONCERNS OR FEEDBACK THIS PERSON SHARED WITH YOU. Look for:
+- Worries or risks they raised
+- Feedback they gave about your work, projects, or team
+- Issues they escalated to you
+- Suggestions they made
+- Disagreements or pushback they expressed
+- Frustrations or complaints they mentioned${timeHint}`,
+            outputFormat: `{ "items": [{ "concern": "what they shared", "context": "when and why", "your_response": "how you responded if mentioned", "resolved": true/false, "date": "when" }] }`,
+          },
+          hot_projects: {
+            system: `Analyze all communications to identify the HOTTEST PROJECTS AND TASKS being discussed — the things getting the most attention, urgency, or energy. Look for:
+- Projects mentioned frequently or recently
+- Tasks with deadlines approaching
+- Items discussed with urgency or emphasis
+- New initiatives or launches
+- Projects with active progress or changes${timeHint}`,
+            outputFormat: `{ "items": [{ "project": "project or task name", "status": "description of current state", "heat_level": "critical|high|medium", "last_discussed": "when", "key_points": ["point 1", "point 2"], "next_steps": "what's coming next" }] }`,
+          },
+          feedback_given: {
+            system: `Analyze all communications to find FEEDBACK YOU GAVE to this person — both positive and constructive. Look for:
+- Praise or recognition you gave
+- Constructive criticism or improvement suggestions
+- Performance-related discussions
+- Career advice or guidance
+- Process improvement suggestions${timeHint}`,
+            outputFormat: `{ "items": [{ "feedback": "what you said", "type": "positive|constructive|neutral", "topic": "related project or area", "date": "when", "context": "situation" }] }`,
+          },
+          feedback_received: {
+            system: `Analyze all communications to find FEEDBACK THIS PERSON GAVE YOU — both positive and constructive. Look for:
+- Praise or recognition from them
+- Constructive criticism or suggestions
+- Performance-related comments
+- Career advice from them
+- Observations about your work or leadership${timeHint}`,
+            outputFormat: `{ "items": [{ "feedback": "what they said", "type": "positive|constructive|neutral", "topic": "related project or area", "date": "when", "context": "situation" }] }`,
+          },
+        };
+
+        const prompt = analysisPrompts[analysis_type];
+        if (!prompt) return NextResponse.json({ error: `Unknown analysis_type: ${analysis_type}. Valid: ${Object.keys(analysisPrompts).join(', ')}` }, { status: 400 });
+
+        inputSummary = `Deep analysis (${analysis_type}) for ${contactData.name}`;
+        const { data: analysisData } = await callClaudeJSON<{ items: unknown[] }>(
+          `${prompt.system}
+
+When analyzing large documents (like 1:1 meeting notes spanning months), scan through ALL content chronologically. Don't skip older entries — they may contain unresolved items.
+
+Return JSON: ${prompt.outputFormat}
+
+If no relevant items are found, return { "items": [] }.`,
+          `Contact: ${contactData.name} (${contactData.email || 'N/A'}, ${contactData.organization || 'N/A'}, ${contactData.role || 'N/A'})
+
+=== DIRECT CONTACT ITEMS (may include large meeting logs) ===
+${contactItemsCtx || 'None'}
+
+=== TOPIC ITEMS (${linkedTopicIds.length} linked topics) ===
+${topicItemsCtx || 'None'}`,
+          { maxTokens: 8192 }
+        );
+
+        result = { analysis_type, ...analysisData };
         break;
       }
 

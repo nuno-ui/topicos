@@ -102,7 +102,7 @@ export async function enrichItemContent(
           console.warn(`[Content Enrichment] Notion account ${item.source_account_id} not found for item ${item.id}`);
           return { body: '' };
         }
-        const notionContent = await getNotionPageContent(notionAccount.access_token, item.external_id, 100);
+        const notionContent = await getNotionPageContent(notionAccount.access_token, item.external_id, 500);
         if (!notionContent) {
           console.warn(`[Content Enrichment] Notion page ${item.external_id} returned empty content`);
         }
@@ -214,6 +214,41 @@ export async function enrichAndCacheItemContent(
     }
   } else if (!result.body) {
     console.warn(`[Content Enrichment] No content returned for ${item.source} item ${item.id} (external_id: ${item.external_id})`);
+  }
+
+  return result;
+}
+
+/**
+ * Force re-enrich a single item by clearing its cached body first.
+ * Use this when content limits have been increased and cached data is stale/truncated.
+ */
+export async function forceReenrichItem(
+  userId: string,
+  item: {
+    id: string;
+    topic_id?: string;
+    source: string;
+    source_account_id: string | null;
+    external_id: string;
+    body?: string | null;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<EnrichedContent> {
+  // Clear cached body to force re-fetch
+  const freshItem = { ...item, body: null };
+  const result = await enrichItemContent(userId, freshItem);
+
+  if (result.body) {
+    const supabase = createServiceClient();
+    const updateData: Record<string, unknown> = { body: result.body };
+    if (result.extra_metadata) {
+      updateData.metadata = { ...(item.metadata || {}), ...result.extra_metadata };
+    }
+
+    // Update in the appropriate table
+    const table = item.topic_id ? 'topic_items' : 'contact_items';
+    await supabase.from(table).update(updateData).eq('id', item.id);
   }
 
   return result;

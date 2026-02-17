@@ -281,6 +281,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
   const [meetingPrep, setMeetingPrep] = useState<MeetingPrepData | null>(null);
   const [pendingItems, setPendingItems] = useState<PendingItemData[] | null>(null);
   const [dossier, setDossier] = useState<string | null>(null);
+  const [deepAnalysis, setDeepAnalysis] = useState<{ analysis_type: string; items: Record<string, unknown>[] } | null>(null);
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -919,6 +920,23 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       if (!res.ok) throw new Error(data.error);
       setDossier(data.result.dossier);
       toast.success('Dossier generated');
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'AI failed'); }
+    setAiLoading(null);
+  };
+
+  const runDeepAnalysis = async (analysisType: string, timeFilter?: string) => {
+    setAiLoading('deep_' + analysisType);
+    setDeepAnalysis(null);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'contact_deep_analysis', context: { contact_id: contact.id, analysis_type: analysisType, time_filter: timeFilter } }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDeepAnalysis(data.result as { analysis_type: string; items: Record<string, unknown>[] });
+      toast.success(`Found ${data.result.items?.length || 0} items`);
     } catch (err) { toast.error(err instanceof Error ? err.message : 'AI failed'); }
     setAiLoading(null);
   };
@@ -2839,7 +2857,49 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               </button>
             </div>
 
-            {/* Ask AI */}
+            {/* Deep Analysis Presets */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Deep Analysis</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { type: 'pending_decisions', label: 'Pending Decisions', icon: '🤔', color: 'border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100' },
+                  { type: 'blockers', label: 'Blockers', icon: '🚧', color: 'border-red-200 text-red-700 bg-red-50 hover:bg-red-100' },
+                  { type: 'hot_projects', label: 'Hot Projects', icon: '🔥', color: 'border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100' },
+                  { type: 'concerns_shared', label: 'Concerns I Shared', icon: '💬', color: 'border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100' },
+                  { type: 'concerns_received', label: 'Their Concerns', icon: '👂', color: 'border-teal-200 text-teal-700 bg-teal-50 hover:bg-teal-100' },
+                  { type: 'feedback_given', label: 'Feedback I Gave', icon: '📝', color: 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100' },
+                  { type: 'feedback_received', label: 'Feedback Received', icon: '📨', color: 'border-cyan-200 text-cyan-700 bg-cyan-50 hover:bg-cyan-100' },
+                ].map(preset => (
+                  <button
+                    key={preset.type}
+                    onClick={() => runDeepAnalysis(preset.type)}
+                    disabled={!!aiLoading}
+                    className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border flex items-center gap-1 transition-all disabled:opacity-50 ${preset.color}`}
+                  >
+                    {aiLoading === 'deep_' + preset.type ? <Loader2 className="w-3 h-3 animate-spin" /> : <span>{preset.icon}</span>}
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              {/* Time filter for presets */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-gray-400">Time scope:</span>
+                {['past week', 'past month', 'past 3 months', 'past 6 months', 'all time'].map(tf => (
+                  <button
+                    key={tf}
+                    onClick={() => {
+                      const activeType = deepAnalysis?.analysis_type;
+                      if (activeType) runDeepAnalysis(activeType, tf);
+                    }}
+                    className="text-[10px] px-2 py-0.5 rounded-full border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                  >
+                    {tf}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Ask AI - free form */}
             <div className="flex gap-2">
               <input
                 value={aiQuestion}
@@ -2969,6 +3029,54 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               </div>
             )}
 
+            {/* Deep Analysis Results */}
+            {deepAnalysis && deepAnalysis.items && deepAnalysis.items.length > 0 && (
+              <div className="p-4 bg-gradient-to-br from-gray-50 to-slate-50 rounded-xl border border-gray-200 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">
+                    {deepAnalysis.analysis_type === 'pending_decisions' ? '🤔' :
+                     deepAnalysis.analysis_type === 'blockers' ? '🚧' :
+                     deepAnalysis.analysis_type === 'hot_projects' ? '🔥' :
+                     deepAnalysis.analysis_type === 'concerns_shared' ? '💬' :
+                     deepAnalysis.analysis_type === 'concerns_received' ? '👂' :
+                     deepAnalysis.analysis_type === 'feedback_given' ? '📝' :
+                     deepAnalysis.analysis_type === 'feedback_received' ? '📨' : '🔍'}
+                  </span>
+                  <span className="text-sm font-semibold text-gray-800">
+                    {deepAnalysis.analysis_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} ({deepAnalysis.items.length})
+                  </span>
+                  <button onClick={() => setDeepAnalysis(null)} className="ml-auto p-1 text-gray-400 hover:text-gray-600"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                  {deepAnalysis.items.map((item, i) => {
+                    const keys = Object.keys(item).filter(k => k !== 'type');
+                    const mainKey = keys[0] || '';
+                    const mainValue = String(item[mainKey] || '');
+                    const meta = keys.slice(1).map(k => ({ key: k, value: String(item[k] || '') })).filter(m => m.value && m.value !== 'undefined');
+
+                    return (
+                      <div key={i} className="p-3 bg-white rounded-lg border border-gray-100 space-y-1">
+                        <p className="text-sm text-gray-900 font-medium">{mainValue}</p>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {meta.map(m => (
+                            <span key={m.key} className="text-[11px] text-gray-500">
+                              <span className="font-medium text-gray-600">{m.key.replace(/_/g, ' ')}:</span> {m.value.length > 120 ? m.value.substring(0, 120) + '...' : m.value}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {deepAnalysis && deepAnalysis.items && deepAnalysis.items.length === 0 && (
+              <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 text-center">
+                <p className="text-sm text-gray-500">No items found for this analysis type.</p>
+                <button onClick={() => setDeepAnalysis(null)} className="mt-2 text-xs text-gray-400 hover:text-gray-600">Dismiss</button>
+              </div>
+            )}
+
             {/* Loading indicator */}
             {aiLoading && (
               <div className="flex items-center justify-center py-4">
@@ -2977,6 +3085,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                   {aiLoading === 'meeting_prep' ? 'Preparing meeting briefing...' :
                    aiLoading === 'pending_items' ? 'Scanning for pending items...' :
                    aiLoading === 'dossier' ? 'Generating full dossier...' :
+                   aiLoading?.startsWith('deep_') ? `Analyzing ${aiLoading.replace('deep_', '').replace(/_/g, ' ')}... (this may take a moment for large documents)` :
                    'Thinking...'}
                 </span>
               </div>
