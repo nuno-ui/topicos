@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { NoteEditor } from './note-editor';
 import { NoteCard } from './note-card';
+import { TopicTimeline } from './topic-timeline';
 import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp, Eye, EyeOff, Pin, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Layers, GitBranch, Compass, Award, Target, MoreHorizontal, ChevronRight, Info, Calendar, FolderOpen, Check, CircleDot } from 'lucide-react';
 
 interface TopicItem {
@@ -82,7 +83,7 @@ interface LinkedContact {
   } | null;
 }
 
-type SectionTab = 'items' | 'intelligence' | 'search' | 'details' | 'contacts' | 'notes' | 'activity';
+type SectionTab = 'items' | 'intelligence' | 'search' | 'details' | 'contacts' | 'notes' | 'timeline';
 
 const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion', 'manual', 'link'] as const;
 
@@ -1513,7 +1514,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
             { key: 'details' as SectionTab, label: 'Details', icon: <Info className="w-3.5 h-3.5" />, count: 0 },
             { key: 'contacts' as SectionTab, label: 'Contacts', icon: <Users className="w-3.5 h-3.5" />, count: linkedContacts.length },
             { key: 'notes' as SectionTab, label: 'Notes', icon: <StickyNote className="w-3.5 h-3.5" />, count: notes.trim() ? 1 : 0 },
-            { key: 'activity' as SectionTab, label: 'Activity', icon: <Clock className="w-3.5 h-3.5" />, count: 0 },
+            { key: 'timeline' as SectionTab, label: 'Timeline', icon: <Clock className="w-3.5 h-3.5" />, count: items.length + linkedContacts.length },
           ]).map(tab => (
             <button
               key={tab.key}
@@ -2420,64 +2421,9 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
         </div>
       )}
 
-      {/* ===== ACTIVITY TAB ===== */}
-      {activeSection === 'activity' && (
-        <div id="section-activity" className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover-lift">
-          <div className="px-5 py-3 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-blue-500" />
-              Activity
-            </h2>
-          </div>
-          <div className="p-5">
-            <div className="relative pl-6 space-y-4">
-              {/* Created */}
-              <div className="relative">
-                <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-blue-400 ring-2 ring-white" />
-                <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
-                <p className="text-xs font-medium text-gray-700">Topic created</p>
-                <p className="text-[11px] text-gray-400">{formatSmartDate(topic.created_at)}</p>
-              </div>
-              {/* Last updated */}
-              {topic.updated_at !== topic.created_at && (
-                <div className="relative">
-                  <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-green-400 ring-2 ring-white" />
-                  <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
-                  <p className="text-xs font-medium text-gray-700">Last updated</p>
-                  <p className="text-[11px] text-gray-400">{formatSmartDate(topic.updated_at)}</p>
-                </div>
-              )}
-              {/* Linked items count */}
-              <div className="relative">
-                <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-purple-400 ring-2 ring-white" />
-                <div className="absolute -left-[18px] top-4 w-0.5 h-full bg-gray-200" />
-                <p className="text-xs font-medium text-gray-700">{items.length} linked item{items.length !== 1 ? 's' : ''}</p>
-                <p className="text-[11px] text-gray-400">
-                  {Object.entries(sourceCounts).map(([src, count]) => `${count} ${sourceLabel(src).toLowerCase()}`).join(', ') || 'No items yet'}
-                </p>
-              </div>
-              {/* Linked contacts count */}
-              <div className="relative">
-                <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-teal-400 ring-2 ring-white" />
-                <p className="text-xs font-medium text-gray-700">
-                  {(() => {
-                    const contactNames = new Set<string>();
-                    items.forEach(item => {
-                      const from = item.metadata?.from;
-                      if (from && typeof from === 'string') {
-                        contactNames.add(from.split('<')[0].trim().toLowerCase());
-                      }
-                    });
-                    (topic.stakeholders || []).forEach(s => contactNames.add(s.toLowerCase()));
-                    if (topic.owner) contactNames.add(topic.owner.toLowerCase());
-                    return `${contactNames.size} linked contact${contactNames.size !== 1 ? 's' : ''}`;
-                  })()}
-                </p>
-                <p className="text-[11px] text-gray-400">From communications and stakeholders</p>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* ===== TIMELINE TAB ===== */}
+      {activeSection === 'timeline' && (
+        <TopicTimeline topic={topic} items={items} linkedContacts={linkedContacts} />
       )}
       {/* ===== AGENT RESULTS - shown regardless of active tab ===== */}
 
