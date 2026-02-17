@@ -3,7 +3,9 @@ import { useState, useMemo } from 'react';
 import {
   Clock, Calendar, Users, Layers, Link2, Target, Compass,
   Brain, StickyNote, RefreshCw, CircleDot,
-  ChevronDown, ChevronUp, ExternalLink
+  ChevronDown, ChevronUp, ExternalLink, Mail, MessageSquare,
+  FileText, Globe, Pencil, Zap, AlertTriangle, CheckCircle2,
+  ArrowRight
 } from 'lucide-react';
 import { SourceIcon } from '@/components/ui/source-icon';
 import {
@@ -101,16 +103,43 @@ const FILTERS: Array<{ key: TimelineFilter; label: string; icon: React.ReactNode
 
 // --- Helpers ---
 
-function getSourceDotColor(source: string): string {
+function getSourceColor(source: string): { dot: string; bg: string; text: string; border: string; gradient: string } {
   switch (source) {
-    case 'gmail': return 'bg-red-400';
-    case 'calendar': return 'bg-blue-400';
-    case 'drive': return 'bg-amber-400';
-    case 'slack': return 'bg-purple-400';
-    case 'notion': return 'bg-gray-500';
-    case 'manual': return 'bg-green-400';
-    case 'link': return 'bg-cyan-400';
-    default: return 'bg-gray-400';
+    case 'gmail': return { dot: 'bg-red-400', bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', gradient: 'from-red-500 to-rose-400' };
+    case 'calendar': return { dot: 'bg-blue-400', bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', gradient: 'from-blue-500 to-indigo-400' };
+    case 'drive': return { dot: 'bg-amber-400', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', gradient: 'from-amber-500 to-yellow-400' };
+    case 'slack': return { dot: 'bg-purple-400', bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', gradient: 'from-purple-500 to-violet-400' };
+    case 'notion': return { dot: 'bg-gray-500', bg: 'bg-gray-50', text: 'text-gray-700', border: 'border-gray-200', gradient: 'from-gray-500 to-slate-400' };
+    case 'manual': return { dot: 'bg-green-400', bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200', gradient: 'from-green-500 to-emerald-400' };
+    case 'link': return { dot: 'bg-cyan-400', bg: 'bg-cyan-50', text: 'text-cyan-700', border: 'border-cyan-200', gradient: 'from-cyan-500 to-teal-400' };
+    default: return { dot: 'bg-gray-400', bg: 'bg-gray-50', text: 'text-gray-700', border: 'border-gray-200', gradient: 'from-gray-400 to-slate-400' };
+  }
+}
+
+function getSourceIcon(source: string) {
+  switch (source) {
+    case 'gmail': return <Mail className="w-3.5 h-3.5" />;
+    case 'calendar': return <Calendar className="w-3.5 h-3.5" />;
+    case 'drive': return <FileText className="w-3.5 h-3.5" />;
+    case 'slack': return <MessageSquare className="w-3.5 h-3.5" />;
+    case 'notion': return <FileText className="w-3.5 h-3.5" />;
+    case 'manual': return <Pencil className="w-3.5 h-3.5" />;
+    case 'link': return <Globe className="w-3.5 h-3.5" />;
+    default: return <Layers className="w-3.5 h-3.5" />;
+  }
+}
+
+function getEventIcon(type: TimelineEventType) {
+  switch (type) {
+    case 'topic_created': return <Zap className="w-3.5 h-3.5" />;
+    case 'topic_updated': return <RefreshCw className="w-3.5 h-3.5" />;
+    case 'item_linked': return <Link2 className="w-3.5 h-3.5" />;
+    case 'contact_linked': return <Users className="w-3.5 h-3.5" />;
+    case 'milestone_start': return <CheckCircle2 className="w-3.5 h-3.5" />;
+    case 'milestone_due': return <AlertTriangle className="w-3.5 h-3.5" />;
+    case 'notes_updated': return <StickyNote className="w-3.5 h-3.5" />;
+    case 'ai_analysis': return <Brain className="w-3.5 h-3.5" />;
+    default: return <CircleDot className="w-3.5 h-3.5" />;
   }
 }
 
@@ -128,6 +157,17 @@ function getDateGroup(timestamp: string): DateGroup {
   if (date >= weekAgo) return 'This Week';
   if (date >= monthAgo) return 'This Month';
   return 'Earlier';
+}
+
+function getGroupStyle(group: DateGroup): { headerColor: string; lineColor: string; bgAccent: string } {
+  switch (group) {
+    case 'Upcoming': return { headerColor: 'text-blue-600', lineColor: 'from-blue-300', bgAccent: 'bg-blue-50' };
+    case 'Today': return { headerColor: 'text-emerald-600', lineColor: 'from-emerald-300', bgAccent: 'bg-emerald-50' };
+    case 'Yesterday': return { headerColor: 'text-amber-600', lineColor: 'from-amber-200', bgAccent: 'bg-amber-50' };
+    case 'This Week': return { headerColor: 'text-violet-500', lineColor: 'from-violet-200', bgAccent: 'bg-violet-50' };
+    case 'This Month': return { headerColor: 'text-gray-500', lineColor: 'from-gray-200', bgAccent: 'bg-gray-50' };
+    default: return { headerColor: 'text-gray-400', lineColor: 'from-gray-200', bgAccent: 'bg-gray-50' };
+  }
 }
 
 function buildTimelineEvents(topic: Topic, items: TopicItem[], contacts: LinkedContact[]): TimelineEvent[] {
@@ -179,7 +219,7 @@ function buildTimelineEvents(topic: Topic, items: TopicItem[], contacts: LinkedC
       type: 'milestone_due',
       category: 'milestones',
       timestamp: topic.due_date,
-      title: isOverdue ? 'Due date (Overdue)' : 'Due date',
+      title: isOverdue ? 'Due date (Overdue!)' : 'Due date',
       description: new Date(topic.due_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
       dotColor: isOverdue ? 'bg-red-500' : 'bg-amber-400',
       isFuture: !isOverdue,
@@ -188,15 +228,14 @@ function buildTimelineEvents(topic: Topic, items: TopicItem[], contacts: LinkedC
 
   // Item events
   items.forEach((item) => {
-    // Original occurrence
     events.push({
       id: `item-${item.id}`,
       type: 'item_occurred',
       category: 'items',
       timestamp: item.occurred_at,
       title: decodeHtmlEntities(item.title),
-      description: item.snippet ? decodeHtmlEntities(item.snippet).substring(0, 150) : undefined,
-      dotColor: getSourceDotColor(item.source),
+      description: item.snippet ? decodeHtmlEntities(item.snippet).substring(0, 200) : undefined,
+      dotColor: getSourceColor(item.source).dot,
       source: item.source,
       url: item.url,
       metadata: item.metadata,
@@ -226,7 +265,7 @@ function buildTimelineEvents(topic: Topic, items: TopicItem[], contacts: LinkedC
       category: 'contacts',
       timestamp: lc.created_at,
       title: `Contact linked: ${lc.contacts?.name || 'Unknown'}`,
-      description: [lc.role, lc.contacts?.organization].filter(Boolean).join(' · ') || lc.contacts?.email || undefined,
+      description: [lc.role, lc.contacts?.organization, lc.contacts?.role].filter(Boolean).join(' · ') || lc.contacts?.email || undefined,
       dotColor: 'bg-teal-400',
     });
   });
@@ -252,7 +291,7 @@ function buildTimelineEvents(topic: Topic, items: TopicItem[], contacts: LinkedC
       category: 'system',
       timestamp: topic.updated_at,
       title: 'AI analysis generated',
-      description: topic.summary.substring(0, 120) + (topic.summary.length > 120 ? '...' : ''),
+      description: topic.summary.substring(0, 150) + (topic.summary.length > 150 ? '...' : ''),
       dotColor: 'bg-purple-400',
     });
   }
@@ -278,6 +317,39 @@ function groupEvents(events: TimelineEvent[]): Map<DateGroup, TimelineEvent[]> {
   return groups;
 }
 
+// --- Source breakdown mini-chart ---
+function SourceBreakdown({ items }: { items: TopicItem[] }) {
+  const breakdown = useMemo(() => {
+    const counts: Record<string, number> = {};
+    items.forEach(i => { counts[i.source] = (counts[i.source] || 0) + 1; });
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([source, count]) => ({ source, count, pct: Math.round((count / items.length) * 100) }));
+  }, [items]);
+
+  if (breakdown.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2">
+      {/* Stacked bar */}
+      <div className="flex h-2 rounded-full overflow-hidden flex-1 max-w-[200px]">
+        {breakdown.map(({ source, pct }) => (
+          <div key={source} className={`${getSourceColor(source).dot} transition-all`} style={{ width: `${Math.max(pct, 3)}%` }} />
+        ))}
+      </div>
+      {/* Labels */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {breakdown.slice(0, 5).map(({ source, count }) => (
+          <span key={source} className={`inline-flex items-center gap-1 text-[10px] font-medium ${getSourceColor(source).text}`}>
+            {getSourceIcon(source)}
+            {count}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // --- Component ---
 
 interface TopicTimelineProps {
@@ -289,6 +361,7 @@ interface TopicTimelineProps {
 export function TopicTimeline({ topic, items, linkedContacts }: TopicTimelineProps) {
   const [activeFilter, setActiveFilter] = useState<TimelineFilter>('all');
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<DateGroup>>(new Set());
 
   const allEvents = useMemo(() => buildTimelineEvents(topic, items, linkedContacts), [topic, items, linkedContacts]);
 
@@ -314,196 +387,306 @@ export function TopicTimeline({ topic, items, linkedContacts }: TopicTimelinePro
     });
   };
 
+  const toggleGroup = (group: DateGroup) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  };
+
   return (
-    <div id="section-timeline" className="scroll-mt-8 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
-            <Clock className="w-3.5 h-3.5 text-white" />
-          </span>
-          <h2 className="text-base font-bold text-gray-900">Timeline</h2>
-          <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{allEvents.length}</span>
+    <div id="section-timeline" className="scroll-mt-8 space-y-5">
+      {/* Header + Stats */}
+      <div className="bg-gradient-to-r from-blue-50 via-purple-50/30 to-transparent rounded-xl p-4 border border-blue-100/50">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-sm">
+              <Clock className="w-4 h-4 text-white" />
+            </span>
+            <div>
+              <h2 className="text-base font-bold text-gray-900">Timeline</h2>
+              <p className="text-[11px] text-gray-500">{allEvents.length} events across all sources</p>
+            </div>
+          </div>
         </div>
+
+        {/* Source breakdown bar */}
+        <SourceBreakdown items={items} />
       </div>
 
-      {/* Filter bar */}
-      <div className="flex gap-1 border-b border-gray-100 overflow-x-auto pb-px">
-        {FILTERS.map(filter => (
-          <button
-            key={filter.key}
-            onClick={() => setActiveFilter(filter.key)}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-all relative whitespace-nowrap ${
-              activeFilter === filter.key ? 'text-gray-900 tab-active' : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {filter.icon}
-            {filter.label}
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-              activeFilter === filter.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
-            }`}>
-              {filter.key === 'all' ? allEvents.length : (categoryCounts[filter.key] || 0)}
-            </span>
-          </button>
-        ))}
+      {/* Filter pills */}
+      <div className="flex gap-1.5 overflow-x-auto pb-px">
+        {FILTERS.map(filter => {
+          const count = filter.key === 'all' ? allEvents.length : (categoryCounts[filter.key] || 0);
+          const isActive = activeFilter === filter.key;
+          return (
+            <button
+              key={filter.key}
+              onClick={() => setActiveFilter(filter.key)}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-full transition-all whitespace-nowrap border ${
+                isActive
+                  ? 'bg-gray-900 text-white border-gray-900 shadow-sm'
+                  : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {filter.icon}
+              {filter.label}
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'
+              }`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Timeline groups */}
       {filteredEvents.length > 0 ? (
         <div className="space-y-6">
-          {GROUP_ORDER.filter(group => groupedEvents.has(group)).map(group => (
-            <div key={group} className="animate-fade-in">
-              {/* Group header */}
-              <div className="flex items-center gap-2 mb-3">
-                <span className={`text-xs font-semibold uppercase tracking-wider ${
-                  group === 'Upcoming' ? 'text-blue-500' :
-                  group === 'Today' ? 'text-emerald-600' :
-                  group === 'Yesterday' ? 'text-amber-600' :
-                  'text-gray-400'
-                }`}>
-                  {group}
-                </span>
-                <div className="flex-1 h-px bg-gray-100" />
-                <span className="text-[10px] text-gray-400">
-                  {groupedEvents.get(group)!.length} event{groupedEvents.get(group)!.length !== 1 ? 's' : ''}
-                </span>
-              </div>
+          {GROUP_ORDER.filter(group => groupedEvents.has(group)).map(group => {
+            const style = getGroupStyle(group);
+            const events = groupedEvents.get(group)!;
+            const isCollapsed = collapsedGroups.has(group);
 
-              {/* Events */}
-              <div className="relative pl-6 space-y-1">
-                {/* Vertical line */}
-                <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-gray-200 via-gray-200 to-transparent" />
+            return (
+              <div key={group} className="animate-fade-in">
+                {/* Group header — clickable to collapse */}
+                <button
+                  onClick={() => toggleGroup(group)}
+                  className="flex items-center gap-2 mb-3 w-full group/header"
+                >
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider ${style.headerColor} ${style.bgAccent}`}>
+                    {group === 'Upcoming' && <ArrowRight className="w-3 h-3" />}
+                    {group === 'Today' && <Zap className="w-3 h-3" />}
+                    {group}
+                  </span>
+                  <div className={`flex-1 h-px bg-gradient-to-r ${style.lineColor} to-transparent`} />
+                  <span className="text-[10px] text-gray-400 group-hover/header:text-gray-600 transition-colors">
+                    {events.length} event{events.length !== 1 ? 's' : ''}
+                    {isCollapsed ? ' ▸' : ' ▾'}
+                  </span>
+                </button>
 
-                {groupedEvents.get(group)!.map((event) => {
-                  const isItem = event.type === 'item_occurred';
-                  const isExpanded = expandedEvents.has(event.id);
+                {/* Events */}
+                {!isCollapsed && (
+                  <div className="relative pl-7 space-y-1.5">
+                    {/* Vertical line */}
+                    <div className={`absolute left-[13px] top-2 bottom-2 w-[2px] bg-gradient-to-b ${style.lineColor} via-gray-100 to-transparent rounded-full`} />
 
-                  return (
-                    <div key={event.id} className={`relative group ${event.isFuture ? 'opacity-70' : ''}`}>
-                      {/* Dot */}
-                      <div className={`absolute -left-6 top-3 w-3 h-3 rounded-full ${event.dotColor} ring-2 ring-white z-10 ${
-                        event.type === 'milestone_due' && event.title.includes('Overdue') ? 'animate-pulse-dot' : ''
-                      }`} />
+                    {events.map((event) => {
+                      const isItem = event.type === 'item_occurred';
+                      const isExpanded = expandedEvents.has(event.id);
+                      const isMilestone = event.category === 'milestones';
+                      const isContact = event.type === 'contact_linked';
+                      const colors = event.source ? getSourceColor(event.source) : null;
 
-                      {/* Event card */}
-                      <div
-                        className={`ml-2 p-3 rounded-lg transition-all ${
-                          isItem
-                            ? `bg-white border border-gray-100 hover:border-gray-200 hover:shadow-sm cursor-pointer ${
-                                event.source ? `border-l-[3px] ${sourceBorderClass(event.source)}` : ''
-                              }`
-                            : 'hover:bg-gray-50/50 rounded-lg'
-                        }`}
-                        onClick={isItem ? () => toggleExpand(event.id) : undefined}
-                      >
-                        <div className="flex items-start gap-2.5">
-                          {/* Icon */}
-                          {isItem && event.source ? (
-                            <span className={`mt-0.5 flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center ${sourceIconBgClass(event.source)}`}>
-                              <SourceIcon source={event.source} className="w-3.5 h-3.5" />
-                            </span>
-                          ) : (
-                            <span className="mt-0.5 flex-shrink-0 w-5 h-5 flex items-center justify-center text-gray-400">
-                              {event.type === 'topic_created' && <CircleDot className="w-3.5 h-3.5" />}
-                              {event.type === 'topic_updated' && <RefreshCw className="w-3.5 h-3.5" />}
-                              {event.type === 'item_linked' && <Link2 className="w-3.5 h-3.5" />}
-                              {event.type === 'contact_linked' && <Users className="w-3.5 h-3.5" />}
-                              {event.type === 'milestone_start' && <Calendar className="w-3.5 h-3.5" />}
-                              {event.type === 'milestone_due' && <Target className="w-3.5 h-3.5" />}
-                              {event.type === 'notes_updated' && <StickyNote className="w-3.5 h-3.5" />}
-                              {event.type === 'ai_analysis' && <Brain className="w-3.5 h-3.5" />}
-                            </span>
-                          )}
+                      return (
+                        <div key={event.id} className={`relative group ${event.isFuture ? 'opacity-75' : ''}`}>
+                          {/* Dot — larger for milestones, source-colored for items */}
+                          <div className={`absolute -left-7 z-10 flex items-center justify-center ${
+                            isMilestone
+                              ? `top-2.5 w-4 h-4 rounded-full ${event.dotColor} ring-3 ring-white shadow-sm`
+                              : isItem
+                                ? `top-3 w-3.5 h-3.5 rounded-full ${event.dotColor} ring-2 ring-white`
+                                : `top-3 w-2.5 h-2.5 rounded-full ${event.dotColor} ring-2 ring-white`
+                          } ${
+                            event.type === 'milestone_due' && event.title.includes('Overdue') ? 'animate-pulse' : ''
+                          }`} />
 
-                          {/* Content */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {event.url ? (
-                                <a
-                                  href={event.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-sm font-medium text-gray-900 hover:text-blue-600 truncate transition-colors"
-                                  onClick={e => e.stopPropagation()}
-                                >
-                                  {event.title}
-                                </a>
-                              ) : (
-                                <span className={`text-sm font-medium truncate ${
-                                  event.isFuture ? 'text-blue-600' :
-                                  event.type === 'milestone_due' && event.title.includes('Overdue') ? 'text-red-600' :
-                                  event.type === 'topic_created' ? 'text-blue-700' :
-                                  'text-gray-800'
+                          {/* Event card */}
+                          <div
+                            className={`ml-2 rounded-xl transition-all ${
+                              isMilestone
+                                ? `p-3.5 border-2 ${event.title.includes('Overdue') ? 'border-red-200 bg-red-50/50' : 'border-amber-200 bg-amber-50/30'} shadow-sm`
+                                : isItem
+                                  ? `p-3 bg-white border ${colors?.border || 'border-gray-100'} hover:shadow-md cursor-pointer border-l-[3px] ${sourceBorderClass(event.source!)}`
+                                  : isContact
+                                    ? 'p-3 bg-teal-50/40 border border-teal-100 rounded-xl'
+                                    : 'p-2.5 hover:bg-gray-50/50 rounded-lg'
+                            }`}
+                            onClick={isItem ? () => toggleExpand(event.id) : undefined}
+                          >
+                            <div className="flex items-start gap-2.5">
+                              {/* Icon */}
+                              {isItem && event.source ? (
+                                <span className={`mt-0.5 flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center bg-gradient-to-br ${colors?.gradient || 'from-gray-400 to-slate-400'} shadow-sm`}>
+                                  <span className="text-white">{getSourceIcon(event.source)}</span>
+                                </span>
+                              ) : isMilestone ? (
+                                <span className={`mt-0.5 flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center ${
+                                  event.title.includes('Overdue') ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'
                                 }`}>
-                                  {event.title}
+                                  {getEventIcon(event.type)}
+                                </span>
+                              ) : isContact ? (
+                                <span className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-xl bg-teal-100 flex items-center justify-center text-teal-600">
+                                  <Users className="w-4 h-4" />
+                                </span>
+                              ) : (
+                                <span className="mt-0.5 flex-shrink-0 w-6 h-6 flex items-center justify-center text-gray-400">
+                                  {getEventIcon(event.type)}
                                 </span>
                               )}
-                              {event.source && isItem && (
-                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${sourceIconBgClass(event.source)}`}>
-                                  <SourceIcon source={event.source} className="w-2.5 h-2.5" />
-                                  {sourceLabel(event.source)}
+
+                              {/* Content */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {event.url ? (
+                                    <a
+                                      href={event.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-sm font-semibold text-gray-900 hover:text-blue-600 truncate transition-colors"
+                                      onClick={e => e.stopPropagation()}
+                                    >
+                                      {event.title}
+                                    </a>
+                                  ) : (
+                                    <span className={`text-sm font-semibold truncate ${
+                                      event.isFuture ? 'text-blue-600' :
+                                      event.title.includes('Overdue') ? 'text-red-600' :
+                                      event.type === 'topic_created' ? 'text-blue-700' :
+                                      isContact ? 'text-teal-700' :
+                                      'text-gray-900'
+                                    }`}>
+                                      {event.title}
+                                    </span>
+                                  )}
+                                  {event.source && isItem && (
+                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 ${colors?.bg || 'bg-gray-50'} ${colors?.text || 'text-gray-600'}`}>
+                                      <SourceIcon source={event.source} className="w-2.5 h-2.5" />
+                                      {sourceLabel(event.source)}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Description/snippet — show more for expanded, truncate for collapsed */}
+                                {event.description && !isExpanded && (
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">{event.description}</p>
+                                )}
+
+                                {/* Metadata pills for items */}
+                                {isItem && event.metadata && !isExpanded && (
+                                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                    {typeof event.metadata.from === 'string' && (
+                                      <span className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                                        <span className="font-medium">From</span> {event.metadata.from.split('<')[0].trim().substring(0, 30)}
+                                      </span>
+                                    )}
+                                    {typeof event.metadata.channel_name === 'string' && (
+                                      <span className="inline-flex items-center gap-1 text-[10px] text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">
+                                        #{event.metadata.channel_name}
+                                      </span>
+                                    )}
+                                    {Array.isArray(event.metadata.attendees) && event.metadata.attendees.length > 0 && (
+                                      <span className="inline-flex items-center gap-1 text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                                        <Users className="w-2.5 h-2.5" /> {event.metadata.attendees.length} attendees
+                                      </span>
+                                    )}
+                                    {event.metadata.has_attachments === true && (
+                                      <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+                                        📎 {typeof event.metadata.attachment_count === 'number' ? String(event.metadata.attachment_count) : ''} files
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Timestamp */}
+                                <span className="text-[10px] text-gray-400 mt-1.5 inline-flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {formatSmartDate(event.timestamp)}
+                                </span>
+                              </div>
+
+                              {/* Expand indicator */}
+                              {isItem && (
+                                <span className="text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0 mt-1">
+                                  {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                                 </span>
                               )}
                             </div>
-                            {event.description && !isExpanded && (
-                              <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{event.description}</p>
-                            )}
-                            <span className="text-[11px] text-gray-400 mt-1 inline-flex items-center gap-1">
-                              <Clock className="w-2.5 h-2.5" />
-                              {formatSmartDate(event.timestamp)}
-                            </span>
-                          </div>
 
-                          {/* Expand indicator */}
-                          {isItem && (
-                            <span className="text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0 mt-1">
-                              {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                            </span>
-                          )}
+                            {/* Expanded details */}
+                            {isExpanded && isItem && (
+                              <div className="mt-3 ml-10 p-3.5 bg-gray-50 rounded-xl border border-gray-100 text-xs text-gray-600 animate-fade-in space-y-2">
+                                {event.metadata && typeof event.metadata.from === 'string' && (
+                                  <div className="flex items-start gap-2">
+                                    <span className="font-semibold text-gray-700 w-16 flex-shrink-0">From:</span>
+                                    <span>{event.metadata.from}</span>
+                                  </div>
+                                )}
+                                {event.metadata && typeof event.metadata.to === 'string' && (
+                                  <div className="flex items-start gap-2">
+                                    <span className="font-semibold text-gray-700 w-16 flex-shrink-0">To:</span>
+                                    <span>{event.metadata.to}</span>
+                                  </div>
+                                )}
+                                {event.metadata && typeof event.metadata.cc === 'string' && (
+                                  <div className="flex items-start gap-2">
+                                    <span className="font-semibold text-gray-700 w-16 flex-shrink-0">CC:</span>
+                                    <span>{event.metadata.cc}</span>
+                                  </div>
+                                )}
+                                {event.metadata && typeof event.metadata.channel_name === 'string' && (
+                                  <div className="flex items-start gap-2">
+                                    <span className="font-semibold text-gray-700 w-16 flex-shrink-0">Channel:</span>
+                                    <span className="text-purple-600 font-medium">#{event.metadata.channel_name}</span>
+                                  </div>
+                                )}
+                                {event.metadata && typeof event.metadata.username === 'string' && (
+                                  <div className="flex items-start gap-2">
+                                    <span className="font-semibold text-gray-700 w-16 flex-shrink-0">User:</span>
+                                    <span>@{event.metadata.username}</span>
+                                  </div>
+                                )}
+                                {event.metadata && Array.isArray(event.metadata.attendees) && (
+                                  <div className="flex items-start gap-2">
+                                    <span className="font-semibold text-gray-700 w-16 flex-shrink-0">Attendees:</span>
+                                    <span>{event.metadata.attendees.map((a: unknown) =>
+                                      typeof a === 'string' ? a : (a as Record<string, unknown>)?.email || (a as Record<string, unknown>)?.displayName || ''
+                                    ).filter(Boolean).join(', ')}</span>
+                                  </div>
+                                )}
+                                {event.metadata && event.metadata.has_attachments === true && (
+                                  <div className="flex items-start gap-2">
+                                    <span className="font-semibold text-gray-700 w-16 flex-shrink-0">Files:</span>
+                                    <span>{Array.isArray(event.metadata.attachment_names) ? (event.metadata.attachment_names as string[]).join(', ') : 'Attached files'}</span>
+                                  </div>
+                                )}
+                                {event.description && (
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <p className="text-gray-500 leading-relaxed line-clamp-6">{event.description}</p>
+                                  </div>
+                                )}
+                                {event.url && (
+                                  <a href={event.url} target="_blank" rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 text-blue-500 hover:text-blue-600 mt-1 font-semibold bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">
+                                    <ExternalLink className="w-3 h-3" /> Open in source
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-
-                        {/* Expanded details */}
-                        {isExpanded && isItem && (
-                          <div className="mt-2.5 ml-9 p-3 bg-gray-50 rounded-lg border border-gray-100 text-xs text-gray-600 animate-fade-in space-y-1.5">
-                            {event.metadata && typeof event.metadata.from === 'string' && (
-                              <p><span className="font-medium text-gray-700">From:</span> {event.metadata.from.split('<')[0].trim()}</p>
-                            )}
-                            {event.metadata && typeof event.metadata.to === 'string' && (
-                              <p><span className="font-medium text-gray-700">To:</span> {event.metadata.to.split('<')[0].trim()}</p>
-                            )}
-                            {event.metadata && typeof event.metadata.channel_name === 'string' && (
-                              <p><span className="font-medium text-gray-700">Channel:</span> #{event.metadata.channel_name}</p>
-                            )}
-                            {event.metadata && Array.isArray(event.metadata.attendees) && (
-                              <p><span className="font-medium text-gray-700">Attendees:</span> {event.metadata.attendees.length}</p>
-                            )}
-                            {event.description && (
-                              <p className="mt-1 text-gray-500 line-clamp-4">{event.description}</p>
-                            )}
-                            {event.url && (
-                              <a href={event.url} target="_blank" rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-blue-500 hover:text-blue-600 mt-1 font-medium">
-                                <ExternalLink className="w-3 h-3" /> Open in source
-                              </a>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         /* Empty state */
-        <div className="py-12 bg-gradient-to-b from-white to-gray-50/50 rounded-xl border border-dashed border-gray-200 text-center">
-          <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center mx-auto mb-3">
-            <Clock className="w-6 h-6 text-blue-400" />
+        <div className="py-16 bg-gradient-to-b from-white to-gray-50/50 rounded-2xl border border-dashed border-gray-200 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center mx-auto mb-4">
+            <Clock className="w-7 h-7 text-blue-500" />
           </div>
-          <h3 className="text-gray-700 text-sm font-semibold mb-1">No timeline events</h3>
-          <p className="text-gray-400 text-xs">
+          <h3 className="text-gray-700 text-sm font-bold mb-1.5">No timeline events</h3>
+          <p className="text-gray-400 text-xs max-w-[280px] mx-auto">
             {activeFilter !== 'all'
               ? 'No events match this filter. Try selecting "All".'
               : 'Link items and contacts to build your topic timeline.'}

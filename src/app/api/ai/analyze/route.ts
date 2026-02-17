@@ -22,37 +22,65 @@ export async function POST(request: Request) {
     // Get contacts linked to this topic
     const { data: contactLinks } = await supabase
       .from('contact_topic_links')
-      .select('contact_id, role, contacts(name, email, organization)')
+      .select('contact_id, role, contacts(name, email, organization, role)')
       .eq('topic_id', topic_id);
 
-    const system = `You are a brilliant executive assistant analyzing a topic/project and its linked communications, events, and files. Provide actionable intelligence. You may have access to FULL CONTENT of emails, documents, and messages (not just snippets) — use this rich context for deeper analysis. The topic may include user-written notes that provide direct context, decisions, and observations. Give these notes high importance as they represent the user's own knowledge and perspective.
+    const system = `You are a brilliant executive assistant analyzing a topic/project and ALL its linked communications, events, and files from multiple sources (email, calendar, drive, slack, notion, notes, links).
+
+You have access to FULL CONTENT of emails, documents, and messages (not just snippets) — read them carefully and extract specific details.
+
+The topic may include user-written notes that provide direct context, decisions, and observations. Give these notes HIGH importance as they represent the user's own knowledge and perspective.
+
+CRITICAL ANALYSIS RULES:
+1. READ FULL EMAIL BODIES: Don't just look at subjects — the actual email body contains decisions, commitments, and action items
+2. READ EMAIL SIGNATURES: They contain job titles, organizations, and phone numbers
+3. READ SLACK CONTEXT: Surrounding channel messages provide conversation context beyond the single message
+4. READ ATTACHMENTS: If attachment content is included, analyze it thoroughly
+5. CROSS-REFERENCE: Connect information across sources — an email might reference a Slack discussion, a calendar event might follow up on an email
+6. IDENTIFY THE USER: The topic owner is the person whose email appears in "From:" for sent emails and "To:" for received emails. Don't confuse them with contacts.
+7. UNDERSTAND THREAD FLOW: Emails and Slack messages form conversations. Track who said what and when.
 
 Your analysis MUST include these sections:
 
 ## Summary
-A concise 2-3 sentence summary of what this topic is about based on the linked items.
+A concise 2-3 sentence summary of what this topic is about, its current state, and what needs attention.
 
 ## Key People
-List the main people involved (extracted from email senders, event attendees, slack users) and their apparent role/relevance.
+List each person involved with:
+- Their name and role/title (extracted from email signatures, calendar entries, or content context)
+- Their organization (from email domain or explicit mentions)
+- Their involvement level (decision-maker, contributor, informed, mentioned)
+- Key contribution to this topic
 
 ## Status & Progress
-What's the current state? What has happened recently? Any milestones reached?
+- Current state of the topic/project
+- What has been accomplished
+- What's currently in progress
+- Any recent changes or updates
 
 ## Next Steps
-3-5 specific, actionable next steps based on the communications and events.
+3-5 specific, actionable next steps. For each:
+- What needs to be done
+- Who should do it (reference specific people)
+- Suggested timeline based on the communications
 
 ## Blockers & Risks
-Any potential blockers, pending decisions, or risks you can identify from the communications.
+- Pending decisions or approvals
+- Unresolved questions
+- Dependencies or waiting items
+- Potential risks identified from the communications
 
 ## Timeline
-Key dates/events in chronological order.
+Key dates and events in chronological order, including:
+- Past: meetings held, emails exchanged, decisions made
+- Upcoming: scheduled events, deadlines, follow-ups needed
 
-Be specific and reference actual items. Use bullet points. Keep it concise but thorough.`;
+Be specific and reference actual items, dates, and people. Use bullet points. Keep it concise but thorough.`;
 
     // Track total content size to stay within AI token limits
     let totalContentSize = 0;
-    const MAX_TOTAL_CONTENT = 30000;
-    const MAX_PER_ITEM = 2000;
+    const MAX_TOTAL_CONTENT = 40000; // Increased from 30k for richer analysis
+    const MAX_PER_ITEM = 3000; // Increased from 2k per item
 
     const itemsList = (items || []).map((item: Record<string, unknown>, i: number) => {
       const meta = item.metadata as Record<string, unknown> || {};
@@ -73,19 +101,30 @@ Be specific and reference actual items. Use bullet points. Keep it concise but t
       if (meta.from) details += `\n   From: ${meta.from}`;
       if (meta.to) details += `\n   To: ${meta.to}`;
       if (meta.cc) details += `\n   CC: ${meta.cc}`;
-      if (meta.attendees) details += `\n   Attendees: ${(meta.attendees as string[]).join(', ')}`;
+      if (meta.bcc) details += `\n   BCC: ${meta.bcc}`;
+      if (meta.attendees) {
+        const attendees = meta.attendees;
+        if (Array.isArray(attendees)) {
+          details += `\n   Attendees: ${attendees.map((a: Record<string, unknown> | string) => typeof a === 'string' ? a : `${a.email || ''} (${a.displayName || a.name || ''}, ${a.responseStatus || ''})`).join('; ')}`;
+        }
+      }
       if (meta.channel_name) details += `\n   Channel: #${meta.channel_name}`;
-      if (meta.username) details += `\n   User: ${meta.username}`;
+      if (meta.username) details += `\n   Slack user: ${meta.username}`;
       if (meta.conference_link) details += `\n   Conference: ${meta.conference_link}`;
-      if (meta.has_attachments) details += `\n   Attachments: ${(meta.attachment_names as string[] || []).join(', ') || 'yes'}`;
+      if (meta.has_attachments) {
+        details += `\n   Attachments: ${(meta.attachment_names as string[] || []).join(', ') || 'yes'}`;
+        if (meta.attachments_read) details += ' (content extracted)';
+      }
+      if (meta.has_thread) details += `\n   [Has Slack thread with ${meta.thread_message_count || 0} messages]`;
+      if (meta.has_channel_context) details += `\n   [Surrounding channel context: ${meta.channel_context_count || 0} messages]`;
       details += `\n   Date: ${item.occurred_at}`;
       return details;
     }).join('\n\n');
 
     const contactsList = contactLinks && contactLinks.length > 0
-      ? '\n\nKnown contacts:\n' + contactLinks.map((cl: Record<string, unknown>) => {
+      ? '\n\nKnown contacts linked to this topic:\n' + contactLinks.map((cl: Record<string, unknown>) => {
           const contact = cl.contacts as Record<string, string> | null;
-          return `- ${contact?.name || 'Unknown'} (${contact?.email || ''}) — ${cl.role || 'role unknown'}`;
+          return `- ${contact?.name || 'Unknown'} (${contact?.email || ''}) — Role in topic: ${cl.role || 'not specified'} · Organization: ${contact?.organization || 'unknown'} · Title: ${(contact as Record<string, string> | null)?.role || 'unknown'}`;
         }).join('\n')
       : '';
 
@@ -101,13 +140,14 @@ Area: ${topic.area}
 Status: ${topic.status}
 Tags: ${(topic.tags || []).join(', ') || 'None'}
 Due date: ${topic.due_date || 'Not set'}
+Priority: ${topic.priority || 0}
 ${contactsList}
 ${noteContext}
 
-Linked Items (${(items || []).length} total):
+Linked Items (${(items || []).length} total from all sources):
 ${itemsList}
 
-${question ? `\nSpecific question: ${question}` : ''}`;
+${question ? `\nSpecific question to address: ${question}` : ''}`;
 
     const { text, tokensUsed } = await callClaude(system, prompt);
 

@@ -21,20 +21,46 @@ export async function POST(request: Request) {
       // ============ TOPIC PAGE AGENTS ============
 
       case 'auto_tag': {
-        // AI generates tags for a topic based on its content
+        // AI generates tags for a topic based on its content — deep analysis
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
-        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(20);
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata').eq('topic_id', topic_id).limit(25);
         const noteContext = await getTopicNoteContext(topic_id);
 
         const { data } = await callClaudeJSON<{ tags: string[]; area: string; priority: number }>(
-          'Generate relevant tags, suggest the best area (work/personal/career), and priority (1-5) for this topic. Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "priority": 1-5 }',
-          `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
+          `Analyze this topic's full content to generate accurate tags, area classification, and priority.
+
+RULES for tags:
+- Generate 3-8 specific, descriptive tags (not generic like "work" or "email")
+- Tags should capture: the project/initiative name, key technologies, key organizations involved, the type of work (e.g., "grant-application", "hiring", "product-launch")
+- Use lowercase-kebab-case for multi-word tags (e.g., "machine-learning", "budget-review")
+- Look at email subjects, document titles, Slack channels, and body content for clues
+
+RULES for area:
+- "work" = professional/business activities
+- "personal" = personal life, health, hobbies, family
+- "career" = job search, learning, certifications, networking
+- Look at the email domains, Slack workspace context, and content to decide
+
+RULES for priority (1-5):
+- 5 = critical/urgent (deadlines this week, blocking issues, executive escalations)
+- 4 = high (active projects with near-term deadlines, important meetings)
+- 3 = medium (ongoing projects, regular business)
+- 2 = low (informational, nice-to-have, background items)
+- 1 = minimal (archived, FYI only, no action needed)
+- Consider: due dates, language urgency ("ASAP", "urgent"), stakeholder seniority, financial impact
+
+Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "priority": 1-5 }`,
+          `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\nCurrent tags: ${(topic.tags || []).join(', ') || 'None'}\n\nItems (${(items || []).length} total):\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null; metadata: Record<string, unknown> }) => {
             const content = i.body || i.snippet || '';
-            const preview = content.length > 500 ? content.substring(0, 500) + '...' : content;
-            return `[${i.source}] ${i.title}${preview ? '\n' + preview : ''}`;
-          }).join('\n')}\n${noteContext}`
+            const preview = content.length > 800 ? content.substring(0, 800) + '...' : content;
+            const meta = i.metadata || {};
+            let metaStr = '';
+            if (meta.from) metaStr += ` | From: ${meta.from}`;
+            if (meta.channel_name) metaStr += ` | #${meta.channel_name}`;
+            return `[${i.source}] ${i.title}${metaStr}${preview ? '\n' + preview : ''}`;
+          }).join('\n---\n')}\n${noteContext}`
         );
 
         await supabase.from('topics').update({
@@ -91,21 +117,43 @@ export async function POST(request: Request) {
       }
 
       case 'extract_action_items': {
-        // AI extracts action items from topic communications
+        // AI extracts action items from topic communications — deep extraction
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
-        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata').eq('topic_id', topic_id).limit(20);
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata, occurred_at').eq('topic_id', topic_id).order('occurred_at', { ascending: true }).limit(30);
         const noteContext = await getTopicNoteContext(topic_id);
 
-        const { data } = await callClaudeJSON<{ action_items: Array<{ task: string; assignee: string; due: string; priority: string }> }>(
-          'Extract all action items, tasks, and commitments from these communications. Return JSON: { "action_items": [{ "task": "...", "assignee": "person or unknown", "due": "date or TBD", "priority": "high|medium|low" }] }',
-          `Topic: ${topic.title}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null; metadata: Record<string, unknown> }) => {
+        const { data } = await callClaudeJSON<{ action_items: Array<{ task: string; assignee: string; due: string; priority: string; source_item: string; status: string }> }>(
+          `Extract ALL action items, tasks, commitments, promises, and follow-ups from these communications. Be thorough and look for:
+
+1. EXPLICIT tasks: "Please do X", "Can you handle Y", "I need Z by Friday"
+2. IMPLICIT commitments: "I'll look into it", "Let me check", "We should follow up"
+3. DECISIONS that require action: "We agreed to move forward with X"
+4. DEADLINES mentioned: dates, "next week", "by EOD", "Q4", "ASAP"
+5. QUESTIONS awaiting answers: "Can you confirm?", "What do you think about?"
+6. MEETING follow-ups: action items from calendar events, "as discussed..."
+7. BLOCKED items: "waiting on X", "need approval for Y"
+
+For each item, determine:
+- assignee: the person responsible (use their actual name, not "unknown" unless truly ambiguous)
+- due: specific date if mentioned, or "ASAP"/"This week"/"No deadline"
+- priority: high (urgent/blocking), medium (important but not urgent), low (nice-to-have/informational)
+- status: "pending" (not done yet), "in-progress" (partially done), "done" (completed in later messages), "blocked" (waiting on something)
+- source_item: which email/message/event this came from (include date)
+
+Return JSON: { "action_items": [{ "task": "description", "assignee": "person name", "due": "date or timeframe", "priority": "high|medium|low", "source_item": "brief source reference", "status": "pending|in-progress|done|blocked" }] }`,
+          `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\nDue date: ${topic.due_date || 'Not set'}\n\nCommunications (chronological order):\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null; metadata: Record<string, unknown>; occurred_at: string }) => {
             const meta = i.metadata || {};
             const content = i.body || i.snippet || '';
-            const contentPreview = content.length > 1500 ? content.substring(0, 1500) + '...' : content;
-            return `[${i.source}] ${i.title}\n${contentPreview}\nFrom: ${meta.from || 'unknown'}\nTo: ${meta.to || 'unknown'}`;
-          }).join('\n---\n')}\n${noteContext}`
+            const contentPreview = content.length > 2000 ? content.substring(0, 2000) + '...' : content;
+            let header = `[${i.occurred_at}] [${i.source}] ${i.title}`;
+            if (meta.from) header += `\nFrom: ${meta.from}`;
+            if (meta.to) header += `\nTo: ${meta.to}`;
+            if (meta.cc) header += `\nCC: ${meta.cc}`;
+            if (meta.attendees) header += `\nAttendees: ${JSON.stringify(meta.attendees)}`;
+            return `${header}\n${contentPreview}`;
+          }).join('\n\n---\n\n')}\n${noteContext}`
         );
 
         result = { action_items: data.action_items };
@@ -230,38 +278,83 @@ export async function POST(request: Request) {
       // ============ CONTACTS AGENTS ============
 
       case 'enrich_contact': {
-        // AI enriches a contact profile
+        // AI enriches a contact profile — deep identity resolution
         const { contact_id } = context;
         const { data: contact } = await supabase.from('contacts').select('*').eq('id', contact_id).eq('user_id', user.id).single();
         if (!contact) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
 
         const { data: interactions } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, metadata')
-          .eq('user_id', user.id).limit(50);
+          .eq('user_id', user.id).order('occurred_at', { ascending: false }).limit(100);
 
-        // Find items mentioning this contact
+        // Find items mentioning this contact — broader matching
+        const contactEmail = (contact.email || '').toLowerCase();
+        const contactName = (contact.name || '').toLowerCase();
+        const contactNameParts = contactName.split(/\s+/).filter((p: string) => p.length > 2);
+
         const contactItems = (interactions || []).filter((i: Record<string, unknown>) => {
           const meta = i.metadata as Record<string, string> || {};
-          const contactStr = JSON.stringify(meta).toLowerCase();
-          const titleSnippet = `${(i.title as string || '')} ${(i.snippet as string || '')} ${(i.body as string || '')}`.toLowerCase();
-          return (
-            contactStr.includes((contact.email || '').toLowerCase()) ||
-            contactStr.includes((contact.name || '').toLowerCase()) ||
-            ((contact.email || '').length > 3 && titleSnippet.includes((contact.email || '').toLowerCase())) ||
-            ((contact.name || '').length > 3 && titleSnippet.includes((contact.name || '').toLowerCase()))
-          );
+          const metaStr = JSON.stringify(meta).toLowerCase();
+          const fullText = `${(i.title as string || '')} ${(i.snippet as string || '')} ${(i.body as string || '')}`.toLowerCase();
+
+          // Match by email
+          if (contactEmail && contactEmail.length > 3) {
+            if (metaStr.includes(contactEmail) || fullText.includes(contactEmail)) return true;
+          }
+          // Match by full name
+          if (contactName.length > 3) {
+            if (metaStr.includes(contactName) || fullText.includes(contactName)) return true;
+          }
+          // Match by name parts (first or last name in metadata)
+          for (const part of contactNameParts) {
+            if (part.length > 3 && metaStr.includes(part)) return true;
+          }
+          return false;
         });
 
-        const { data } = await callClaudeJSON<{ organization: string; role: string; relationship_summary: string; interaction_frequency: string; key_topics: string[] }>(
-          'Based on communications from ALL sources (email, calendar, drive, slack, notion, notes, links), enrich this contact profile. Return JSON: { "organization": "...", "role": "estimated role", "relationship_summary": "brief description", "interaction_frequency": "daily|weekly|monthly|rare", "key_topics": ["topic1", "topic2"] }',
-          `Contact: ${contact.name} <${contact.email}>\nCurrent org: ${contact.organization || 'unknown'}\n\nRelevant communications (${contactItems.length} items from all sources):\n${contactItems.slice(0, 20).map((i: Record<string, unknown>) => {
-            const content = (i.body as string) || (i.snippet as string) || '';
-            const preview = content.length > 800 ? content.substring(0, 800) + '...' : content;
-            return `[${i.source}] ${i.title}${preview ? '\n' + preview : ''}`;
-          }).join('\n---\n')}`
+        const { data } = await callClaudeJSON<{ organization: string; role: string; relationship_summary: string; interaction_frequency: string; key_topics: string[]; communication_style: string; last_discussed: string }>(
+          `You are building a comprehensive profile for a contact based on ALL their communications. Analyze deeply:
+
+1. ORGANIZATION: Look at their email domain, email signature, how they introduce themselves, company mentions in body text
+2. ROLE/TITLE: Look for email signatures (usually at the bottom of emails, after "Best regards" or similar), LinkedIn-style titles, how others address them ("Dear Director...", "Hi Professor...")
+3. RELATIONSHIP: How does the user interact with this person? Are they a colleague, client, vendor, manager, friend? Look at the tone, formality level, and topics discussed.
+4. COMMUNICATION STYLE: Formal/informal, response speed, who typically initiates
+5. KEY TOPICS: What specific projects, topics, or subjects do they discuss together?
+6. LAST DISCUSSED: What was the most recent conversation about?
+
+IMPORTANT: Read the FULL body content of emails and messages, especially email signatures which contain role, organization, and phone numbers.
+
+Return JSON: {
+  "organization": "Company/Org name or empty string",
+  "role": "Their job title/role or estimated role",
+  "relationship_summary": "2-3 sentence summary of the relationship",
+  "interaction_frequency": "daily|weekly|monthly|rare",
+  "key_topics": ["topic1", "topic2"],
+  "communication_style": "brief description of how they communicate",
+  "last_discussed": "what the most recent interaction was about"
+}`,
+          `Contact: ${contact.name} <${contact.email || 'no email'}>
+Current organization: ${contact.organization || 'unknown'}
+Current role: ${contact.role || 'unknown'}
+Current notes: ${contact.notes || 'none'}
+
+Relevant communications (${contactItems.length} items found across all sources):
+${contactItems.slice(0, 25).map((i: Record<string, unknown>, idx: number) => {
+  const meta = i.metadata as Record<string, unknown> || {};
+  const content = (i.body as string) || (i.snippet as string) || '';
+  const preview = content.length > 1200 ? content.substring(0, 1200) + '...' : content;
+  let header = `${idx + 1}. [${i.occurred_at}] [${i.source}] ${i.title}`;
+  if (meta.from) header += `\n   From: ${meta.from}`;
+  if (meta.to) header += `\n   To: ${meta.to}`;
+  if (meta.cc) header += `\n   CC: ${meta.cc}`;
+  if (meta.channel_name) header += `\n   Channel: #${meta.channel_name}`;
+  if (meta.username) header += `\n   Slack user: ${meta.username}`;
+  return `${header}\n   Content: ${preview}`;
+}).join('\n\n')}`
         );
 
         await supabase.from('contacts').update({
           organization: data.organization || contact.organization,
+          role: data.role || contact.role,
           notes: data.relationship_summary,
         }).eq('id', contact_id);
 
@@ -270,20 +363,51 @@ export async function POST(request: Request) {
       }
 
       case 'find_contacts': {
-        // AI extracts contacts from topic items
+        // AI extracts contacts from topic items — DEEP identity resolution
         const { topic_id } = context;
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata')
-          .eq('topic_id', topic_id).limit(20);
+          .eq('topic_id', topic_id).limit(30);
         const noteContext = await getTopicNoteContext(topic_id);
 
-        const { data } = await callClaudeJSON<{ contacts: Array<{ name: string; email: string; role: string }> }>(
-          'Extract all people mentioned in these communications. Return JSON: { "contacts": [{ "name": "Full Name", "email": "email@example.com", "role": "their apparent role" }] }',
+        // Also get existing contacts for dedup
+        const { data: existingContacts } = await supabase.from('contacts').select('name, email').eq('user_id', user.id);
+
+        const { data } = await callClaudeJSON<{ contacts: Array<{ name: string; email: string; role: string; organization: string; relevance: string; source_evidence: string }> }>(
+          `You are an expert at extracting and identifying people from communications. Analyze ALL items deeply to find every person involved in this topic.
+
+CRITICAL RULES:
+1. DISTINGUISH between the user (who owns these communications) and other people. The user typically appears in "From:" for sent emails and "To:" for received ones. Do NOT extract the user as a contact.
+2. For each person, look across ALL items to build a complete picture. The same person may appear as an email sender, a calendar attendee, and a Slack username — merge them.
+3. Extract emails from: "From:" / "To:" / "CC:" headers, email signatures, calendar attendee lists, and body text mentions.
+4. Infer roles from: email signatures (look for title lines after the name), how they're addressed, what they discuss, their email domain.
+5. Infer organization from: email domain (e.g., @company.com → Company), email signatures, or explicit mentions.
+6. Rate relevance: "key" (major participant, decision-maker), "involved" (regular contributor), "mentioned" (referenced but not active), "peripheral" (CC'd or briefly mentioned).
+7. If the same person appears with slightly different names (e.g., "John" vs "John Smith" vs "J. Smith"), merge them using the most complete version.
+8. Look for people mentioned BY NAME in email/message bodies even if they aren't in the From/To headers.
+
+ALREADY KNOWN CONTACTS (avoid duplicates):
+${(existingContacts || []).map((c: { name: string; email: string }) => `- ${c.name} <${c.email || 'no email'}>`).join('\n') || 'None'}
+
+Return JSON: { "contacts": [{ "name": "Full Name", "email": "email@example.com or empty string", "role": "their role/title", "organization": "their company/org", "relevance": "key|involved|mentioned|peripheral", "source_evidence": "brief explanation of where you found this person" }] }`,
           `Items:\n${(items || []).map((i: Record<string, unknown>) => {
             const meta = i.metadata as Record<string, unknown> || {};
             const content = (i.body as string) || (i.snippet as string) || '';
-            const contentPreview = content.length > 1000 ? content.substring(0, 1000) + '...' : content;
-            return `[${i.source}] ${i.title}\n${contentPreview}\nFrom: ${meta.from || ''}\nTo: ${meta.to || ''}\nAttendees: ${(meta.attendees as string[] || []).join(', ')}`;
-          }).join('\n---\n')}\n${noteContext}`
+            const contentPreview = content.length > 2000 ? content.substring(0, 2000) + '...' : content;
+            let metaStr = '';
+            if (meta.from) metaStr += `\nFrom: ${meta.from}`;
+            if (meta.to) metaStr += `\nTo: ${meta.to}`;
+            if (meta.cc) metaStr += `\nCC: ${meta.cc}`;
+            if (meta.bcc) metaStr += `\nBCC: ${meta.bcc}`;
+            if (meta.attendees) {
+              const attendees = meta.attendees as Array<Record<string, unknown>>;
+              if (Array.isArray(attendees)) {
+                metaStr += `\nAttendees: ${attendees.map(a => typeof a === 'string' ? a : `${a.email || ''} (${a.displayName || a.name || ''}, ${a.responseStatus || ''})`).join('; ')}`;
+              }
+            }
+            if (meta.username) metaStr += `\nSlack user: ${meta.username}`;
+            if (meta.channel_name) metaStr += `\nChannel: #${meta.channel_name}`;
+            return `[${i.source}] ${i.title}${metaStr}\nContent:\n${contentPreview}`;
+          }).join('\n\n---\n\n')}\n${noteContext}`
         );
 
         result = { contacts: data.contacts };
@@ -484,7 +608,7 @@ ${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
       }
 
       case 'contact_auto_link': {
-        // Auto-link contacts to topics based on topic_items metadata matching
+        // Auto-link contacts to topics based on topic_items metadata matching — improved matching
         const allContacts = await supabase.from('contacts').select('id, name, email').eq('user_id', user.id);
         const allItems = await supabase.from('topic_items').select('topic_id, title, snippet, body, metadata').eq('user_id', user.id);
         const existingLinks = await supabase.from('contact_topic_links').select('contact_id, topic_id').eq('user_id', user.id);
@@ -495,14 +619,41 @@ ${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
         for (const contact of (allContacts.data || [])) {
           const cEmail = (contact.email || '').toLowerCase();
           const cName = (contact.name || '').toLowerCase();
-          if (!cEmail && cName.length <= 2) continue;
+          // Split name into parts for partial matching (first name, last name)
+          const nameParts = cName.split(/\s+/).filter((p: string) => p.length > 2);
+          if (!cEmail && nameParts.length === 0) continue;
 
           const topicIds = new Set<string>();
           for (const item of (allItems.data || [])) {
             const metaStr = JSON.stringify(item.metadata || {}).toLowerCase();
             const fullText = `${(item.title || '')} ${(item.snippet || '')} ${(item.body || '')}`.toLowerCase();
-            if ((cEmail && (metaStr.includes(cEmail) || fullText.includes(cEmail))) ||
-                (cName.length > 2 && (metaStr.includes(cName) || fullText.includes(cName)))) {
+
+            let matched = false;
+
+            // Match by email (strongest signal)
+            if (cEmail && cEmail.length > 3) {
+              if (metaStr.includes(cEmail) || fullText.includes(cEmail)) matched = true;
+            }
+
+            // Match by full name
+            if (!matched && cName.length > 4) {
+              if (metaStr.includes(cName) || fullText.includes(cName)) matched = true;
+            }
+
+            // Match by email username part in metadata (e.g., "jorge.rodelgo" from "jorge.rodelgo@company.com")
+            if (!matched && cEmail) {
+              const emailUsername = cEmail.split('@')[0];
+              if (emailUsername.length > 4 && metaStr.includes(emailUsername)) matched = true;
+            }
+
+            // Match by first+last name parts in metadata (for "From: John Smith <js@co.com>")
+            if (!matched && nameParts.length >= 2) {
+              // Both first AND last name must appear in metadata to avoid false positives
+              const allInMeta = nameParts.every((part: string) => metaStr.includes(part));
+              if (allInMeta) matched = true;
+            }
+
+            if (matched) {
               topicIds.add(item.topic_id);
             }
           }
@@ -687,35 +838,75 @@ ${(actionItems || []).map((i: Record<string, unknown>, idx: number) => {
         }).join('\n');
 
         const { text } = await callClaude(
-          `You are performing a DEEP DIVE analysis of a topic/project. You have access to FULL CONTENT of linked items (emails, documents, messages, events), not just snippets.
+          `You are performing a DEEP DIVE analysis of a topic/project. You have access to FULL CONTENT of linked items (emails, documents, messages, events, attachments), not just snippets.
+
+CRITICAL INSTRUCTIONS:
+- READ every email body completely — they contain decisions, commitments, questions, and context
+- READ email signatures to identify roles, organizations, and contact details
+- READ Slack context: thread conversations AND surrounding channel messages provide crucial context
+- READ attachment content when included (marked as "📎 filename")
+- CROSS-REFERENCE across sources: an email may reference a Slack discussion, a calendar event may follow up on an email
+- IDENTIFY who sent vs received each item to understand the user's role
+- TRACK conversation threads: understand the back-and-forth, not just individual messages
 
 Provide an extremely comprehensive analysis:
 
 ## Executive Summary
-3-5 sentences capturing the full picture of this topic.
+3-5 sentences capturing the full picture of this topic — what it's about, who's involved, current status, and what needs attention most.
 
 ## Detailed Timeline
-Chronological breakdown of all events, decisions, and communications with specific dates and participants.
+Chronological breakdown of ALL events, decisions, and communications with specific dates and participants. Include:
+- Emails sent/received with key points
+- Meetings held and their outcomes
+- Slack discussions and their conclusions
+- Documents shared and their significance
+- Deadlines passed or upcoming
 
 ## Key Decisions Made
-List every decision identified from the full content, who made it, and when.
+List every decision identified from the full content:
+- What was decided
+- Who made the decision (and their authority)
+- When it was made
+- What triggered the decision
+- Any dissent or conditions
 
 ## Action Items & Commitments
-Every task, commitment, or promise found in the content, with assignees and deadlines.
+Every task, commitment, or promise found, with:
+- Specific description
+- Who is responsible
+- Deadline (explicit or implied)
+- Current status (done/pending/overdue/blocked)
+- Source reference (which email/message)
 
 ## People & Roles
-Detailed profile of each person involved, their role, contribution frequency, and relationship to the topic.
+Detailed profile of each person involved:
+- Full name and title (from email signatures or mentions)
+- Organization (from email domain or explicit)
+- Role in this topic (decision-maker, executor, advisor, stakeholder)
+- Communication frequency and last interaction
+- Key contributions or positions
 
 ## Risks & Blockers
-Potential risks, unresolved questions, and blockers identified from deep content analysis.
+- Unresolved questions or ambiguities
+- Waiting items (waiting on responses, approvals, deliverables)
+- Potential conflicts between stakeholders
+- Scope or timeline risks
+- Missing information or dependencies
 
 ## Content Gaps
-What information is missing? What follow-ups are needed? What sources haven't been checked?
+- What information is missing from the linked items?
+- Which sources haven't been checked (e.g., no Drive files, no Slack messages)?
+- What follow-up questions should be asked?
+- Any referenced documents or conversations not yet linked?
 
 ## Strategic Recommendations
-3-5 strategic recommendations based on the comprehensive analysis.
+3-5 strategic recommendations based on the comprehensive analysis. For each:
+- What to do
+- Why it matters
+- Suggested timeline
+- Who should take the lead
 
-Be extremely specific. Reference actual content, dates, and people. This is a deep analysis, not a surface summary.`,
+Be EXTREMELY specific. Reference actual content, dates, people, and quotes. This is a deep analysis, not a surface summary.`,
           `Topic: ${topic.title}
 Description: ${topic.description || 'None'}
 Area: ${topic.area}

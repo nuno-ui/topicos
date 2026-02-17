@@ -157,3 +157,190 @@ export async function getGmailMessageBody(
 
   return { body: bodyText, attachments, cc, bcc };
 }
+
+/**
+ * Supported MIME types for attachment text extraction.
+ */
+const READABLE_ATTACHMENT_MIMES: Record<string, string> = {
+  'text/plain': 'Text file',
+  'text/csv': 'CSV file',
+  'text/html': 'HTML file',
+  'text/markdown': 'Markdown file',
+  'application/json': 'JSON file',
+  'application/xml': 'XML file',
+  'text/xml': 'XML file',
+  'application/pdf': 'PDF file',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel spreadsheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
+  'application/rtf': 'RTF document',
+};
+
+/**
+ * Download and extract text from supported Gmail attachments.
+ * Reads text-based files (txt, csv, json, xml, md, html) directly.
+ * For PDFs and Office docs, extracts what we can from raw content.
+ * Returns array of "Filename: content" strings for readable attachments.
+ */
+export async function getGmailAttachmentContent(
+  accessToken: string,
+  messageId: string,
+  attachmentFilenames: string[],
+  maxAttachments: number = 5,
+  maxPerAttachment: number = 8000
+): Promise<string[]> {
+  const authHeader = { Authorization: 'Bearer ' + accessToken };
+  const results: string[] = [];
+
+  // First, get the message to find attachment IDs
+  const msgUrl = GMAIL_API + '/' + messageId + '?format=full';
+  const msgRes = await fetch(msgUrl, { headers: authHeader });
+  const msg = await msgRes.json();
+  if (!msg.payload) return [];
+
+  // Collect all attachment parts with their IDs
+  interface AttachmentPart {
+    filename: string;
+    mimeType: string;
+    attachmentId: string;
+    size: number;
+  }
+  const attachmentParts: AttachmentPart[] = [];
+
+  const findAttachments = (part: Record<string, unknown>) => {
+    const filename = part.filename as string;
+    const mimeType = (part.mimeType as string) || '';
+    const body = part.body as Record<string, unknown>;
+    const attachmentId = body?.attachmentId as string;
+
+    if (filename && filename.length > 0 && attachmentId) {
+      attachmentParts.push({
+        filename,
+        mimeType,
+        attachmentId,
+        size: (body?.size as number) || 0,
+      });
+    }
+
+    if (part.parts) {
+      for (const p of part.parts as Record<string, unknown>[]) {
+        findAttachments(p);
+      }
+    }
+  };
+  findAttachments(msg.payload);
+
+  // Filter to supported types and size limits
+  const readable = attachmentParts.filter(att => {
+    // Check by MIME type
+    if (READABLE_ATTACHMENT_MIMES[att.mimeType]) return true;
+    // Check by file extension for common text types
+    const ext = att.filename.split('.').pop()?.toLowerCase() || '';
+    return ['txt', 'csv', 'json', 'xml', 'md', 'html', 'htm', 'log', 'yml', 'yaml', 'rtf', 'pdf'].includes(ext);
+  }).filter(att => att.size < 5_000_000) // Skip files > 5MB
+    .slice(0, maxAttachments);
+
+  // Download and extract text from each readable attachment
+  for (const att of readable) {
+    try {
+      const attUrl = GMAIL_API + '/' + messageId + '/attachments/' + att.attachmentId;
+      const attRes = await fetch(attUrl, { headers: authHeader });
+      const attData = await attRes.json();
+
+      if (!attData.data) continue;
+
+      // Decode base64url attachment data
+      const rawData = Buffer.from(
+        attData.data.replace(/-/g, '+').replace(/_/g, '/'),
+        'base64'
+      );
+
+      let text = '';
+      const mimeType = att.mimeType.toLowerCase();
+      const ext = att.filename.split('.').pop()?.toLowerCase() || '';
+
+      // Text-based formats: decode directly
+      if (
+        mimeType.startsWith('text/') ||
+        mimeType === 'application/json' ||
+        mimeType === 'application/xml' ||
+        ['txt', 'csv', 'json', 'xml', 'md', 'html', 'htm', 'log', 'yml', 'yaml'].includes(ext)
+      ) {
+        text = rawData.toString('utf-8');
+
+        // Strip HTML tags for HTML files
+        if (mimeType === 'text/html' || ext === 'html' || ext === 'htm') {
+          text = text
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+        }
+      }
+      // PDF: extract readable text (basic extraction from raw PDF)
+      else if (mimeType === 'application/pdf' || ext === 'pdf') {
+        // Extract text strings from PDF binary (works for text-layer PDFs)
+        const rawStr = rawData.toString('latin1');
+        // Find text between BT and ET operators (PDF text objects)
+        const textMatches = rawStr.match(/\(([^)]+)\)/g);
+        if (textMatches) {
+          const pdfTexts = textMatches
+            .map(m => m.slice(1, -1))
+            .filter(t => t.length > 1 && /[a-zA-Z0-9]/.test(t))
+            .join(' ');
+          if (pdfTexts.length > 20) {
+            text = pdfTexts;
+          } else {
+            text = '[PDF file — limited text extraction. File available in original email.]';
+          }
+        } else {
+          text = '[PDF file — scanned/image-based. Cannot extract text without OCR.]';
+        }
+      }
+      // RTF: basic text extraction
+      else if (mimeType === 'application/rtf' || ext === 'rtf') {
+        const rtfStr = rawData.toString('utf-8');
+        // Strip RTF control words and groups
+        text = rtfStr
+          .replace(/\\[a-z]+\d*\s?/g, '')
+          .replace(/[{}]/g, '')
+          .replace(/\\\\/g, '\\')
+          .replace(/\\'/g, "'")
+          .trim();
+      }
+      // Office XML formats: extract text from XML inside ZIP
+      else if (
+        mimeType.includes('officedocument') ||
+        ['docx', 'xlsx', 'pptx'].includes(ext)
+      ) {
+        // These are ZIP files containing XML. We can try to extract raw text.
+        // Simple approach: find readable text patterns in the raw content
+        const rawStr = rawData.toString('utf-8');
+        const xmlTextMatches = rawStr.match(/>([^<]{2,})</g);
+        if (xmlTextMatches) {
+          text = xmlTextMatches
+            .map(m => m.slice(1, -1).trim())
+            .filter(t => t.length > 1 && !/^[\x00-\x1F]+$/.test(t))
+            .join(' ');
+        }
+        if (!text || text.length < 20) {
+          text = `[${READABLE_ATTACHMENT_MIMES[att.mimeType] || 'Office document'} — content available in original email attachment.]`;
+        }
+      }
+
+      if (text && text.length > 10) {
+        // Truncate per-attachment
+        if (text.length > maxPerAttachment) {
+          text = text.substring(0, maxPerAttachment) + '\n[... attachment truncated]';
+        }
+        const typeLabel = READABLE_ATTACHMENT_MIMES[att.mimeType] || 'File';
+        results.push(`📎 ${att.filename} (${typeLabel}):\n${text}`);
+      }
+    } catch (err) {
+      console.warn(`[Gmail] Failed to read attachment "${att.filename}":`, err);
+    }
+  }
+
+  return results;
+}

@@ -101,7 +101,7 @@ export async function getSlackThread(
 
     return {
       messages,
-      replyCount: Math.max(0, messages.length - 1), // Subtract parent message
+      replyCount: Math.max(0, messages.length - 1),
     };
   } catch (err) {
     console.error('Slack thread fetch error:', err);
@@ -110,7 +110,134 @@ export async function getSlackThread(
 }
 
 /**
- * Format a Slack thread into readable text for AI analysis.
+ * Fetch surrounding channel messages for context around a specific message.
+ * Gets messages before and after the target message to understand the conversation flow.
+ * This is critical for non-threaded messages where context comes from surrounding chat.
+ */
+export async function getSlackChannelContext(
+  accessToken: string,
+  channelId: string,
+  messageTs: string,
+  windowSize: number = 8
+): Promise<{ messages: Array<{ user: string; text: string; ts: string }>; contextType: 'channel' }> {
+  try {
+    // Fetch messages around the target timestamp
+    // First, get messages BEFORE (including) the target
+    const beforeRes = await fetch('https://slack.com/api/conversations.history', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + accessToken,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        channel: channelId,
+        latest: messageTs,
+        limit: String(windowSize + 1), // +1 to include the target message itself
+        inclusive: 'true',
+      }),
+    });
+
+    const beforeData = await beforeRes.json();
+    if (!beforeData.ok) {
+      console.error('Slack channel history (before) error:', beforeData.error);
+      return { messages: [], contextType: 'channel' };
+    }
+
+    // Then get messages AFTER the target
+    const afterRes = await fetch('https://slack.com/api/conversations.history', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + accessToken,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        channel: channelId,
+        oldest: messageTs,
+        limit: String(windowSize + 1),
+        inclusive: 'false', // Don't include target again
+      }),
+    });
+
+    const afterData = await afterRes.json();
+
+    // Combine: before messages are in reverse chronological order, so reverse them
+    const beforeMsgs = (beforeData.messages ?? []).reverse();
+    const afterMsgs = afterData.ok ? (afterData.messages ?? []) : [];
+
+    // Merge and deduplicate by ts
+    const seenTs = new Set<string>();
+    const allMessages: Array<{ user: string; text: string; ts: string }> = [];
+
+    for (const msg of [...beforeMsgs, ...afterMsgs]) {
+      const ts = (msg.ts as string) ?? '';
+      if (ts && !seenTs.has(ts)) {
+        seenTs.add(ts);
+        allMessages.push({
+          user: (msg.user as string) ?? (msg.username as string) ?? 'unknown',
+          text: (msg.text as string) ?? '',
+          ts,
+        });
+      }
+    }
+
+    // Sort chronologically
+    allMessages.sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
+
+    return { messages: allMessages, contextType: 'channel' };
+  } catch (err) {
+    console.error('Slack channel context fetch error:', err);
+    return { messages: [], contextType: 'channel' };
+  }
+}
+
+/**
+ * Get full Slack message context — thread + surrounding channel messages.
+ * For threaded messages: returns the full thread.
+ * For non-threaded messages: returns surrounding channel context.
+ * For all messages: also fetches nearby channel messages for broader context.
+ */
+export async function getSlackFullContext(
+  accessToken: string,
+  channelId: string,
+  messageTs: string,
+  threadTs?: string,
+  replyCount?: number
+): Promise<{
+  thread: Array<{ user: string; text: string; ts: string }>;
+  channelContext: Array<{ user: string; text: string; ts: string }>;
+  hasThread: boolean;
+  hasChannelContext: boolean;
+}> {
+  const results = {
+    thread: [] as Array<{ user: string; text: string; ts: string }>,
+    channelContext: [] as Array<{ user: string; text: string; ts: string }>,
+    hasThread: false,
+    hasChannelContext: false,
+  };
+
+  // Fetch thread if this message has replies or is part of a thread
+  const effectiveThreadTs = threadTs || messageTs;
+  const hasReplies = (replyCount ?? 0) > 0;
+  const isInThread = threadTs && threadTs !== messageTs;
+
+  if (hasReplies || isInThread) {
+    const { messages } = await getSlackThread(accessToken, channelId, effectiveThreadTs);
+    results.thread = messages;
+    results.hasThread = messages.length > 1;
+  }
+
+  // ALWAYS fetch surrounding channel context for broader conversation understanding
+  const { messages: channelMsgs } = await getSlackChannelContext(
+    accessToken, channelId, messageTs, 6
+  );
+  results.channelContext = channelMsgs;
+  results.hasChannelContext = channelMsgs.length > 1;
+
+  return results;
+}
+
+/**
+ * Format Slack context (thread + channel) into readable text for AI analysis.
  */
 export function formatSlackThread(
   messages: Array<{ user: string; text: string; ts: string }>
@@ -121,4 +248,34 @@ export function formatSlackThread(
     const time = new Date(parseFloat(msg.ts) * 1000).toLocaleString();
     return `[${time}] ${msg.user}: ${msg.text}`;
   }).join('\n');
+}
+
+/**
+ * Format full Slack context with both thread and channel context sections.
+ */
+export function formatSlackFullContext(
+  context: {
+    thread: Array<{ user: string; text: string; ts: string }>;
+    channelContext: Array<{ user: string; text: string; ts: string }>;
+    hasThread: boolean;
+    hasChannelContext: boolean;
+  }
+): string {
+  const parts: string[] = [];
+
+  if (context.hasThread && context.thread.length > 0) {
+    parts.push('=== Thread Conversation ===');
+    parts.push(formatSlackThread(context.thread));
+  }
+
+  if (context.hasChannelContext && context.channelContext.length > 0) {
+    parts.push('=== Surrounding Channel Messages ===');
+    parts.push(formatSlackThread(context.channelContext));
+  }
+
+  if (parts.length === 0) {
+    return '';
+  }
+
+  return parts.join('\n\n');
 }

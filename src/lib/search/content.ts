@@ -1,14 +1,17 @@
 /**
  * Content Enrichment Service — orchestrates deep content fetching from all sources.
  * Fetches full document/email/message body and stores in topic_items.body field.
+ *
+ * Enhanced: Now fetches Slack channel context (surrounding messages) + thread,
+ * reads Gmail attachment content for supported formats, and provides richer metadata.
  */
 
 import { createServiceClient } from '@/lib/supabase/server';
 import { getValidGoogleToken } from '@/lib/auth/google-tokens';
-import { getGmailMessageBody } from './gmail';
+import { getGmailMessageBody, getGmailAttachmentContent } from './gmail';
 import { getDriveFileContent } from './drive-content';
 import { getNotionPageContent } from './notion';
-import { getSlackThread, formatSlackThread } from './slack';
+import { getSlackFullContext, formatSlackFullContext } from './slack';
 
 export interface EnrichedContent {
   body: string;
@@ -42,10 +45,34 @@ export async function enrichItemContent(
         if (!item.source_account_id) return { body: '' };
         const { accessToken } = await getValidGoogleToken(item.source_account_id);
         const { body, attachments, cc, bcc } = await getGmailMessageBody(accessToken, item.external_id);
+
+        // Read supported attachments (PDF, Google Docs, text files, etc.)
+        let attachmentContent = '';
+        if (attachments.length > 0) {
+          try {
+            const attachmentTexts = await getGmailAttachmentContent(
+              accessToken, item.external_id, attachments
+            );
+            if (attachmentTexts.length > 0) {
+              attachmentContent = '\n\n--- Attached Files ---\n' + attachmentTexts.join('\n\n---\n\n');
+            }
+          } catch (err) {
+            console.warn(`[Content Enrichment] Failed to read attachments for ${item.external_id}:`, err);
+          }
+        }
+
+        const fullBody = body + attachmentContent;
+
         return {
-          body,
+          body: fullBody,
           attachments,
-          extra_metadata: { cc, bcc, has_attachments: attachments.length > 0, attachment_count: attachments.length },
+          extra_metadata: {
+            cc, bcc,
+            has_attachments: attachments.length > 0,
+            attachment_count: attachments.length,
+            attachment_names: attachments,
+            attachments_read: attachmentContent.length > 0,
+          },
         };
       }
 
@@ -93,15 +120,27 @@ export async function enrichItemContent(
         if (!account) return { body: '' };
 
         const channelId = (item.metadata?.channel_id as string) || '';
-        const threadTs = (item.metadata?.thread_ts as string) || item.external_id.split('-').pop() || '';
+        const messageTs = item.external_id.split('-').pop() || '';
+        const threadTs = (item.metadata?.thread_ts as string) || '';
+        const replyCount = (item.metadata?.reply_count as number) || 0;
 
-        if (!channelId || !threadTs) return { body: '' };
+        if (!channelId || !messageTs) return { body: '' };
 
-        const { messages, replyCount } = await getSlackThread(account.access_token, channelId, threadTs);
-        const body = formatSlackThread(messages);
+        // Fetch FULL context: thread + surrounding channel messages
+        const fullContext = await getSlackFullContext(
+          account.access_token, channelId, messageTs, threadTs, replyCount
+        );
+        const body = formatSlackFullContext(fullContext);
+
         return {
           body,
-          extra_metadata: { reply_count: replyCount, thread_message_count: messages.length },
+          extra_metadata: {
+            reply_count: replyCount,
+            thread_message_count: fullContext.thread.length,
+            channel_context_count: fullContext.channelContext.length,
+            has_thread: fullContext.hasThread,
+            has_channel_context: fullContext.hasChannelContext,
+          },
         };
       }
 
