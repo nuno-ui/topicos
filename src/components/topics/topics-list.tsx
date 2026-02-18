@@ -6,6 +6,8 @@ import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
 import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, ArrowRightLeft, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban, Circle, Undo2 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { HierarchyPicker, buildFolderPickerItems, buildTopicPickerItems } from '@/components/ui/hierarchy-picker';
 
 // --- Area border color map for topic cards ---
 const areaBorderColors: Record<string, string> = {
@@ -164,10 +166,12 @@ interface FolderType {
   area?: string | null;
 }
 
-export function TopicsList({ initialTopics, initialFolders }: { initialTopics: Topic[]; initialFolders: FolderType[] }) {
+export function TopicsList({ initialTopics, initialFolders, initialArea }: { initialTopics: Topic[]; initialFolders: FolderType[]; initialArea?: string | null }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [topics, setTopics] = useState(initialTopics);
   const [folders, setFolders] = useState(initialFolders);
-  const [selectedArea, setSelectedArea] = useState<string | null>(null);
+  const [selectedArea, setSelectedArea] = useState<string | null>(initialArea || null);
   const [showCreate, setShowCreate] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -1413,21 +1417,17 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
               {/* Parent topic section (only for single topic moves) */}
               {!isBulk && topicBeingMoved && (() => {
-                const rootTopics = topics.filter(t => !t.parent_topic_id && t.id !== movingTopic);
-                const currentParent = topicBeingMoved.parent_topic_id ? topics.find(t => t.id === topicBeingMoved.parent_topic_id) : null;
-                return rootTopics.length > 0 ? (
+                const parentPickerItems = buildTopicPickerItems(topics, movingTopic!);
+                return parentPickerItems.length > 0 ? (
                   <div className="px-4 py-3 border-t border-gray-100">
                     <div className="flex items-center gap-2 mb-2">
                       <Layers className="w-3.5 h-3.5 text-indigo-500" />
                       <span className="text-xs font-semibold text-gray-600">Parent Topic</span>
-                      {currentParent && (
-                        <span className="text-[10px] text-indigo-500 ml-auto">Current: {currentParent.title}</span>
-                      )}
                     </div>
-                    <select
-                      value={topicBeingMoved.parent_topic_id || ''}
-                      onChange={async (e) => {
-                        const newParentId = e.target.value || null;
+                    <HierarchyPicker
+                      items={parentPickerItems}
+                      value={topicBeingMoved.parent_topic_id}
+                      onChange={async (newParentId) => {
                         const res = await fetch(`/api/topics/${movingTopic}`, {
                           method: 'PATCH',
                           headers: { 'Content-Type': 'application/json' },
@@ -1441,19 +1441,10 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                         setTopics(prev => prev.map(t => t.id === movingTopic ? { ...t, parent_topic_id: newParentId } : t));
                         toast.success(newParentId ? 'Parent topic updated' : 'Topic is now a root topic');
                       }}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
-                    >
-                      <option value="">No parent (root topic)</option>
-                      {rootTopics.map(t => (
-                        <option key={t.id} value={t.id}>{t.title}</option>
-                      ))}
-                      {topics.filter(t => t.parent_topic_id && rootTopics.some(r => r.id === t.parent_topic_id) && t.id !== movingTopic).map(t => {
-                        const parent = rootTopics.find(r => r.id === t.parent_topic_id);
-                        return (
-                          <option key={t.id} value={t.id}>&nbsp;&nbsp;↳ {parent?.title} / {t.title}</option>
-                        );
-                      })}
-                    </select>
+                      placeholder="Select parent topic..."
+                      noneLabel="No parent (root topic)"
+                      searchPlaceholder="Search topics..."
+                    />
                   </div>
                 ) : null;
               })()}
@@ -1592,7 +1583,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               const Icon = config.icon;
               return (
                 <button key={areaKey}
-                  onClick={() => { setSelectedArea(areaKey); setFilterArea('all'); }}
+                  onClick={() => { setSelectedArea(areaKey); setFilterArea('all'); router.replace(`/topics?area=${areaKey}`, { scroll: false }); }}
                   className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${config.gradient} ${config.hoverGradient} p-6 text-left transition-all duration-300 hover:shadow-xl hover:shadow-${areaKey === 'work' ? 'blue' : areaKey === 'personal' ? 'green' : 'purple'}-500/20 hover:scale-[1.02] active:scale-[0.98]`}>
                   {/* Decorative background circle */}
                   <div className="absolute -right-6 -top-6 w-32 h-32 rounded-full bg-white/10 transition-transform duration-300 group-hover:scale-110" />
@@ -1727,45 +1718,36 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                 <div>
                   <label className="text-xs font-medium text-gray-500 block mb-1">Folder</label>
                   {folders.length > 0 ? (
-                    <select value={createFolderId || ''} onChange={e => setCreateFolderId(e.target.value || null)}
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">No folder</option>
-                      {folders.map(f => (
-                        <option key={f.id} value={f.id}>{getFolderPath(f.id).join(' / ')}</option>
-                      ))}
-                    </select>
+                    <HierarchyPicker
+                      items={buildFolderPickerItems(folders, topics)}
+                      value={createFolderId}
+                      onChange={setCreateFolderId}
+                      placeholder="Select folder..."
+                      noneLabel="No folder"
+                      searchPlaceholder="Search folders..."
+                    />
                   ) : (
                     <p className="text-xs text-gray-400 py-2.5">No folders yet</p>
                   )}
                 </div>
               </div>
               {/* Parent topic selector for sub-topics */}
-              {(() => {
-                const parentCandidates = topics.filter(t => !t.parent_topic_id || topics.some(p => p.id === t.parent_topic_id && !p.parent_topic_id));
-                const rootTopics = topics.filter(t => !t.parent_topic_id);
-                return rootTopics.length > 0 ? (
-                  <div>
-                    <label className="text-xs font-medium text-gray-500 block mb-1">
-                      <Layers className="w-3 h-3 inline mr-1" />
-                      Parent Topic <span className="text-gray-400 font-normal">(optional — makes this a sub-topic)</span>
-                    </label>
-                    <select value={createParentTopicId || ''} onChange={e => setCreateParentTopicId(e.target.value || null)}
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">No parent (root topic)</option>
-                      {rootTopics.map(t => (
-                        <option key={t.id} value={t.id}>📁 {t.title}</option>
-                      ))}
-                      {/* Level-2 topics can also be parents (max 3 levels) */}
-                      {topics.filter(t => t.parent_topic_id && rootTopics.some(r => r.id === t.parent_topic_id)).map(t => {
-                        const parent = rootTopics.find(r => r.id === t.parent_topic_id);
-                        return (
-                          <option key={t.id} value={t.id}>&nbsp;&nbsp;↳ {parent?.title} / {t.title}</option>
-                        );
-                      })}
-                    </select>
-                  </div>
-                ) : null;
-              })()}
+              {topics.filter(t => !t.parent_topic_id).length > 0 && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">
+                    <Layers className="w-3 h-3 inline mr-1" />
+                    Parent Topic <span className="text-gray-400 font-normal">(optional — makes this a sub-topic)</span>
+                  </label>
+                  <HierarchyPicker
+                    items={buildTopicPickerItems(topics)}
+                    value={createParentTopicId}
+                    onChange={setCreateParentTopicId}
+                    placeholder="Select parent topic..."
+                    noneLabel="No parent (root topic)"
+                    searchPlaceholder="Search topics..."
+                  />
+                </div>
+              )}
               <div className="flex justify-end pt-1">
                 <button onClick={handleCreate} disabled={createSubmitting}
                   className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center gap-2 shadow-sm hover:shadow-md">
@@ -1806,7 +1788,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
         <div>
           {/* Breadcrumb + Back button */}
           <div className="flex items-center gap-2 mb-4">
-            <button onClick={() => { setSelectedArea(null); setSearchQuery(''); setFilterArea('all'); setFilterStatus('active'); setStatsFilter(null); setSelectedTopics(new Set()); }}
+            <button onClick={() => { setSelectedArea(null); setSearchQuery(''); setFilterArea('all'); setFilterStatus('active'); setStatsFilter(null); setSelectedTopics(new Set()); router.replace('/topics', { scroll: false }); }}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors">
               <ArrowLeft className="w-4 h-4" />
               All Areas
@@ -2003,13 +1985,16 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                 <option value="career">Career</option>
               </select>
               {folders.length > 0 && (
-                <select value={newFolderParent || ''} onChange={e => setNewFolderParent(e.target.value || null)}
-                  className="px-2 py-1.5 border rounded-lg text-xs text-gray-600">
-                  <option value="">Root level</option>
-                  {folders.map(f => (
-                    <option key={f.id} value={f.id}>{getFolderPath(f.id).join(' / ')}</option>
-                  ))}
-                </select>
+                <div className="min-w-[180px]">
+                  <HierarchyPicker
+                    items={buildFolderPickerItems(folders, topics)}
+                    value={newFolderParent}
+                    onChange={setNewFolderParent}
+                    placeholder="Root level"
+                    noneLabel="Root level"
+                    searchPlaceholder="Search folders..."
+                  />
+                </div>
               )}
               <button onClick={createFolder} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700">Create</button>
               <button onClick={() => setShowCreateFolder(false)} className="p-1 text-gray-400 hover:text-gray-600">
@@ -2120,13 +2105,14 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                 <div>
                   <label className="text-xs font-medium text-gray-500 block mb-1">Folder</label>
                   {displayFolders.length > 0 ? (
-                    <select value={createFolderId || ''} onChange={e => setCreateFolderId(e.target.value || null)}
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">No folder</option>
-                      {displayFolders.map(f => (
-                        <option key={f.id} value={f.id}>{getFolderPath(f.id).join(' / ')}</option>
-                      ))}
-                    </select>
+                    <HierarchyPicker
+                      items={buildFolderPickerItems(displayFolders, topics)}
+                      value={createFolderId}
+                      onChange={setCreateFolderId}
+                      placeholder="Select folder..."
+                      noneLabel="No folder"
+                      searchPlaceholder="Search folders..."
+                    />
                   ) : (
                     <p className="text-xs text-gray-400 py-2.5">No folders yet</p>
                   )}

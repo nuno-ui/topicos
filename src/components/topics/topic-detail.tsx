@@ -9,6 +9,7 @@ import { NoteEditor } from './note-editor';
 import { NoteCard } from './note-card';
 import { TopicTimeline } from './topic-timeline';
 import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp, Eye, EyeOff, Pin, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Layers, GitBranch, Compass, Award, Target, MoreHorizontal, ChevronRight, Info, Calendar, FolderOpen, Check, CircleDot, Keyboard, Activity } from 'lucide-react';
+import { HierarchyPicker, buildFolderPickerItems, buildTopicPickerItems } from '@/components/ui/hierarchy-picker';
 
 interface TopicItem {
   id: string;
@@ -163,14 +164,14 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [editOwner, setEditOwner] = useState(topic.owner || '');
   const [editGoal, setEditGoal] = useState(topic.goal || '');
 
-  // Folders for folder picker
-  const [folders, setFolders] = useState<Array<{ id: string; name: string }>>([]);
+  // Folders for folder picker (full data for hierarchy display)
+  const [folders, setFolders] = useState<Array<{ id: string; name: string; parent_id: string | null; color: string | null; area: string | null; position: number }>>([]);
   // All topics for parent topic picker
-  const [allTopics, setAllTopics] = useState<Array<{ id: string; title: string; parent_topic_id: string | null }>>([]);
+  const [allTopics, setAllTopics] = useState<Array<{ id: string; title: string; parent_topic_id: string | null; area?: string; status?: string }>>([]);
   useEffect(() => {
-    fetch('/api/folders').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => setFolders(d.folders || [])).catch(() => {});
+    fetch('/api/folders').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => setFolders((d.folders || []).map((f: Record<string, unknown>) => ({ id: f.id, name: f.name, parent_id: f.parent_id || null, color: f.color || null, area: f.area || null, position: f.position || 0 })))).catch(() => {});
     fetch('/api/topics?limit=200&status=all').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => {
-      setAllTopics((d.topics || []).map((t: { id: string; title: string; parent_topic_id: string | null }) => ({ id: t.id, title: t.title, parent_topic_id: t.parent_topic_id })));
+      setAllTopics((d.topics || []).map((t: Record<string, unknown>) => ({ id: t.id as string, title: t.title as string, parent_topic_id: (t.parent_topic_id as string | null) || null, area: t.area as string | undefined, status: t.status as string | undefined })));
     }).catch(() => {});
   }, []);
 
@@ -1267,12 +1268,12 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
         <div className="relative">
           {/* Breadcrumb */}
           <nav className="mb-4 inline-flex items-center gap-1.5 text-xs">
-            <Link href="/topics" className="text-gray-400 hover:text-blue-600 inline-flex items-center gap-1 transition-all duration-200 group">
+            <Link href={`/topics?area=${topic.area}`} className="text-gray-400 hover:text-blue-600 inline-flex items-center gap-1 transition-all duration-200 group">
               <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
               <span className="group-hover:underline underline-offset-2">Topics</span>
             </Link>
             <ChevronRight className="w-3 h-3 text-gray-300" />
-            <Link href="/topics" className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+            <Link href={`/topics?area=${topic.area}`} className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
               AREA_COLORS[topic.area]
                 ? `${AREA_COLORS[topic.area].bg} ${AREA_COLORS[topic.area].text}`
                 : 'bg-gray-100 text-gray-600'
@@ -1351,13 +1352,14 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Folder</label>
-                      <select value={editFolderId} onChange={e => setEditFolderId(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                        <option value="">No folder</option>
-                        {folders.map(f => (
-                          <option key={f.id} value={f.id}>{f.name}</option>
-                        ))}
-                      </select>
+                      <HierarchyPicker
+                        items={buildFolderPickerItems(folders)}
+                        value={editFolderId || null}
+                        onChange={(id) => setEditFolderId(id || '')}
+                        placeholder="Select folder..."
+                        noneLabel="No folder"
+                        searchPlaceholder="Search folders..."
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Owner</label>
@@ -1377,19 +1379,14 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                     <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
                       <Layers className="w-3 h-3 text-indigo-500" /> Parent Topic <span className="text-gray-400 font-normal">(optional)</span>
                     </label>
-                    <select value={editParentTopicId} onChange={e => setEditParentTopicId(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
-                      <option value="">No parent (root topic)</option>
-                      {allTopics.filter(t => !t.parent_topic_id && t.id !== topic.id).map(t => (
-                        <option key={t.id} value={t.id}>{t.title}</option>
-                      ))}
-                      {allTopics.filter(t => t.parent_topic_id && !allTopics.find(p => p.id === t.parent_topic_id)?.parent_topic_id && t.id !== topic.id).map(t => {
-                        const parent = allTopics.find(p => p.id === t.parent_topic_id);
-                        return (
-                          <option key={t.id} value={t.id}>&nbsp;&nbsp;↳ {parent?.title} / {t.title}</option>
-                        );
-                      })}
-                    </select>
+                    <HierarchyPicker
+                      items={buildTopicPickerItems(allTopics, topic.id)}
+                      value={editParentTopicId || null}
+                      onChange={(id) => setEditParentTopicId(id || '')}
+                      placeholder="Select parent topic..."
+                      noneLabel="No parent (root topic)"
+                      searchPlaceholder="Search topics..."
+                    />
                   </div>
                   <div className="flex gap-2">
                     <button onClick={saveTopic} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors shadow-sm">

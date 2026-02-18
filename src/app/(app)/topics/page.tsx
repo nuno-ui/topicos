@@ -1,13 +1,15 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { TopicsList } from '@/components/topics/topics-list';
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 
 export const metadata: Metadata = {
   title: 'Topics - YouOS',
   description: 'Your projects and life areas, organized intelligently',
 };
 
-export default async function TopicsPage() {
+export default async function TopicsPage({ searchParams }: { searchParams: Promise<{ area?: string }> }) {
+  const { area } = await searchParams;
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -32,10 +34,13 @@ export default async function TopicsPage() {
           <p className="text-gray-500 mt-1 text-sm">Your projects and life areas, organized intelligently</p>
         </div>
       </div>
-      <TopicsList
-        initialTopics={topicsRes.data ?? []}
-        initialFolders={foldersRes.data ?? []}
-      />
+      <Suspense>
+        <TopicsList
+          initialTopics={topicsRes.data ?? []}
+          initialFolders={foldersRes.data ?? []}
+          initialArea={area || null}
+        />
+      </Suspense>
     </div>
   );
 }

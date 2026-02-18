@@ -1,6 +1,5 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { TopicDetail } from '@/components/topics/topic-detail';
-import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 
@@ -49,7 +48,6 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="p-4 md:p-8 max-w-5xl animate-page-enter">
-      <Breadcrumbs currentLabel={topicRes.data.title} />
       <TopicDetail
         topic={topicRes.data}
         initialItems={itemsRes.data ?? []}
