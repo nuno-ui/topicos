@@ -667,12 +667,22 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
 
   const areaFilteredFolders = useMemo(() => {
     if (!selectedArea) return folders;
+    // Helper: check if a folder or any of its descendants has topics of the selected area
+    const folderHasAreaTopics = (folderId: string): boolean => {
+      // Check direct topics
+      if (topics.some(t => t.folder_id === folderId && t.area === selectedArea)) return true;
+      // Check child folders recursively
+      const childFolders = folders.filter(cf => cf.parent_id === folderId);
+      return childFolders.some(cf => {
+        if (cf.area === selectedArea) return true;
+        return folderHasAreaTopics(cf.id);
+      });
+    };
     return folders.filter(f => {
       // If folder has explicit area, use it
       if (f.area) return f.area === selectedArea;
-      // Otherwise, infer area from topics inside this folder
-      const folderTopics = topics.filter(t => t.folder_id === f.id);
-      return folderTopics.some(t => t.area === selectedArea);
+      // Otherwise, infer area from topics inside this folder AND its descendants
+      return folderHasAreaTopics(f.id);
     });
   }, [folders, selectedArea, topics]);
 
