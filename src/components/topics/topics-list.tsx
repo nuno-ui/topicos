@@ -144,6 +144,7 @@ interface Topic {
   tags: string[];
   summary: string | null;
   folder_id: string | null;
+  parent_topic_id: string | null;
   owner: string | null;
   stakeholders: string[] | null;
   progress_percent: number | null;
@@ -176,6 +177,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   const [createPriority, setCreatePriority] = useState(2);
   const [createTags, setCreateTags] = useState('');
   const [createStartDate, setCreateStartDate] = useState('');
+  const [createParentTopicId, setCreateParentTopicId] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [createSubmitting, setCreateSubmitting] = useState(false);
 
@@ -273,13 +275,14 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
         priority: createPriority,
         tags: parsedTags.length > 0 ? parsedTags : [],
         folder_id: createFolderId || null,
+        parent_topic_id: createParentTopicId || null,
         user_id: user!.id,
         status: 'active',
       }).select('*, topic_items(count)').single();
       if (error) { toast.error(error.message); return; }
       setTopics([data, ...topics]);
       setTitle(''); setDescription(''); setDueDate(''); setCreateFolderId(null);
-      setCreatePriority(2); setCreateTags(''); setCreateStartDate('');
+      setCreatePriority(2); setCreateTags(''); setCreateStartDate(''); setCreateParentTopicId(null);
       setFormErrors({});
       setShowCreate(false);
       toast.success('Topic created successfully!');
@@ -687,7 +690,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   }, [areaFilteredFolders]);
 
   const areaUnfolderedTopics = useMemo(() => {
-    return areaFilteredTopics.filter(t => !t.folder_id);
+    return areaFilteredTopics.filter(t => !t.folder_id && !t.parent_topic_id);
   }, [areaFilteredTopics]);
 
   // Dashboard stats computation
@@ -820,13 +823,15 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
   };
 
   // Render a topic card (enhanced - visual improvements)
-  const renderTopicCard = (t: Topic) => {
+  const renderTopicCard = (t: Topic, depth: number = 0) => {
     const itemCount = t.topic_items?.[0]?.count || 0;
+    const childCount = topics.filter(c => c.parent_topic_id === t.id).length;
     const overdue = !!(t.due_date && new Date(t.due_date) < new Date());
     const daysUntilDue = t.due_date ? Math.ceil((new Date(t.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
     const health = getTopicHealth(t);
     const contactCount = (t.stakeholders || []).length;
     const isUrgent = overdue || (t.priority >= 4);
+    const parentTopic = t.parent_topic_id ? topics.find(p => p.id === t.parent_topic_id) : null;
     const healthDotColor = health.score >= 80 ? 'bg-green-500' : health.score >= 50 ? 'bg-amber-500' : 'bg-red-500';
     const healthDotRing = health.score >= 80 ? 'ring-green-500/20' : health.score >= 50 ? 'ring-amber-500/20' : 'ring-red-500/20';
     const borderColor = areaBorderColors[t.area] || 'border-l-gray-300';
@@ -906,6 +911,11 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
               </span>
             )}
             {!t.description && <span className="flex-1" />}
+            {childCount > 0 && (
+              <span className="flex items-center gap-0.5 flex-shrink-0 text-indigo-500">
+                <Layers className="w-3 h-3" /> {childCount}
+              </span>
+            )}
             {itemCount > 0 && (
               <span className="flex items-center gap-0.5 flex-shrink-0">
                 <Paperclip className="w-3 h-3" /> {itemCount}
@@ -928,6 +938,13 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             <div className="flex items-center gap-1.5 mt-1 pl-4 text-[10px] text-gray-400 truncate">
               <SourceIcon source={t.recent_items[0].source} className="w-3 h-3 flex-shrink-0 text-gray-300" />
               <span className="truncate">Latest: {t.recent_items[0].title}</span>
+            </div>
+          )}
+          {/* Sub-topic of label (shown in flat view) */}
+          {viewMode === 'flat' && parentTopic && (
+            <div className="flex items-center gap-1 mt-1 pl-4 text-[10px] text-indigo-500">
+              <Layers className="w-3 h-3 flex-shrink-0" />
+              <span className="truncate">Sub-topic of <span className="font-medium">{parentTopic.title}</span></span>
             </div>
           )}
         </Link>
@@ -959,10 +976,26 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     );
   };
 
+  // Render a topic with its child topics nested below
+  const renderTopicWithChildren = (t: Topic, allTopics: Topic[], depth: number = 0) => {
+    const children = allTopics.filter(c => c.parent_topic_id === t.id);
+    return (
+      <div key={t.id}>
+        {renderTopicCard(t, depth)}
+        {children.length > 0 && (
+          <div className="ml-5 pl-3 border-l-2 border-indigo-100 space-y-1.5 mt-1">
+            {children.map(child => renderTopicWithChildren(child, allTopics, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Render folder tree node (improved with indentation guides and drag indicator)
   const renderFolderNode = (node: { folder: FolderType; children: any[]; depth: number }) => {
     const topicsSource = selectedArea ? areaFilteredTopics : filteredTopics;
-    const folderTopics = topicsSource.filter(t => t.folder_id === node.folder.id);
+    // Only show root-level topics in folder (children will be nested under their parents)
+    const folderTopics = topicsSource.filter(t => t.folder_id === node.folder.id && !t.parent_topic_id);
     const isExpanded = expandedFolders.has(node.folder.id);
     // Recursively count all topics in this folder and subfolders
     const countDeep = (n: { folder: FolderType; children: any[] }): number => {
@@ -1110,7 +1143,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
             )}
             {node.children.map((child: any) => renderFolderNode(child))}
             <div className="space-y-1.5 mt-1 mb-2 ml-3">
-              {folderTopics.map(t => renderTopicCard(t))}
+              {folderTopics.map(t => renderTopicWithChildren(t, topicsSource))}
               {folderTopics.length === 0 && node.children.length === 0 && (
                 <div className="flex items-center gap-3 py-4 px-4 text-center rounded-lg border border-dashed border-gray-200 bg-gray-50/50">
                   <Inbox className="w-4 h-4 text-gray-300 flex-shrink-0" />
@@ -1135,7 +1168,7 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
     );
   };
 
-  const unfolderedTopics = filteredTopics.filter(t => !t.folder_id);
+  const unfolderedTopics = filteredTopics.filter(t => !t.folder_id && !t.parent_topic_id);
 
   // The current topics to display (area-filtered or all)
   const displayTopics = selectedArea ? areaFilteredTopics : filteredTopics;
@@ -1367,6 +1400,53 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                   </div>
                 )}
               </div>
+
+              {/* Parent topic section (only for single topic moves) */}
+              {!isBulk && topicBeingMoved && (() => {
+                const rootTopics = topics.filter(t => !t.parent_topic_id && t.id !== movingTopic);
+                const currentParent = topicBeingMoved.parent_topic_id ? topics.find(t => t.id === topicBeingMoved.parent_topic_id) : null;
+                return rootTopics.length > 0 ? (
+                  <div className="px-4 py-3 border-t border-gray-100">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                      <span className="text-xs font-semibold text-gray-600">Parent Topic</span>
+                      {currentParent && (
+                        <span className="text-[10px] text-indigo-500 ml-auto">Current: {currentParent.title}</span>
+                      )}
+                    </div>
+                    <select
+                      value={topicBeingMoved.parent_topic_id || ''}
+                      onChange={async (e) => {
+                        const newParentId = e.target.value || null;
+                        const res = await fetch(`/api/topics/${movingTopic}`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ parent_topic_id: newParentId }),
+                        });
+                        if (!res.ok) {
+                          const data = await res.json();
+                          toast.error(data.error || 'Failed to change parent');
+                          return;
+                        }
+                        setTopics(prev => prev.map(t => t.id === movingTopic ? { ...t, parent_topic_id: newParentId } : t));
+                        toast.success(newParentId ? 'Parent topic updated' : 'Topic is now a root topic');
+                      }}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
+                    >
+                      <option value="">No parent (root topic)</option>
+                      {rootTopics.map(t => (
+                        <option key={t.id} value={t.id}>{t.title}</option>
+                      ))}
+                      {topics.filter(t => t.parent_topic_id && rootTopics.some(r => r.id === t.parent_topic_id) && t.id !== movingTopic).map(t => {
+                        const parent = rootTopics.find(r => r.id === t.parent_topic_id);
+                        return (
+                          <option key={t.id} value={t.id}>&nbsp;&nbsp;↳ {parent?.title} / {t.title}</option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                ) : null;
+              })()}
 
               {/* Footer: Create new folder inline */}
               <div className="p-3 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl">
@@ -1649,6 +1729,33 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                   )}
                 </div>
               </div>
+              {/* Parent topic selector for sub-topics */}
+              {(() => {
+                const parentCandidates = topics.filter(t => !t.parent_topic_id || topics.some(p => p.id === t.parent_topic_id && !p.parent_topic_id));
+                const rootTopics = topics.filter(t => !t.parent_topic_id);
+                return rootTopics.length > 0 ? (
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 block mb-1">
+                      <Layers className="w-3 h-3 inline mr-1" />
+                      Parent Topic <span className="text-gray-400 font-normal">(optional — makes this a sub-topic)</span>
+                    </label>
+                    <select value={createParentTopicId || ''} onChange={e => setCreateParentTopicId(e.target.value || null)}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="">No parent (root topic)</option>
+                      {rootTopics.map(t => (
+                        <option key={t.id} value={t.id}>📁 {t.title}</option>
+                      ))}
+                      {/* Level-2 topics can also be parents (max 3 levels) */}
+                      {topics.filter(t => t.parent_topic_id && rootTopics.some(r => r.id === t.parent_topic_id)).map(t => {
+                        const parent = rootTopics.find(r => r.id === t.parent_topic_id);
+                        return (
+                          <option key={t.id} value={t.id}>&nbsp;&nbsp;↳ {parent?.title} / {t.title}</option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                ) : null;
+              })()}
               <div className="flex justify-end pt-1">
                 <button onClick={handleCreate} disabled={createSubmitting}
                   className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center gap-2 shadow-sm hover:shadow-md">
@@ -2154,8 +2261,8 @@ export function TopicsList({ initialTopics, initialFolders }: { initialTopics: T
                       <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{displayUnfoldered.length}</span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-                    {displayUnfoldered.map(t => renderTopicCard(t))}
+                  <div className="grid grid-cols-1 gap-2">
+                    {displayUnfoldered.map(t => renderTopicWithChildren(t, displayTopics))}
                   </div>
                 </div>
               )}

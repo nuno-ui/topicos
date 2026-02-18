@@ -6,6 +6,7 @@ interface Topic {
   description: string | null;
   status: string;
   area: string;
+  parent_topic_id: string | null;
 }
 
 interface TopicStore {

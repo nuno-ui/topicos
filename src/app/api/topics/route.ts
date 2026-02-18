@@ -45,7 +45,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { title, description, area = 'work', due_date, start_date, priority, tags, folder_id, status: topicStatus } = body;
+    const { title, description, area = 'work', due_date, start_date, priority, tags, folder_id, parent_topic_id, status: topicStatus } = body;
 
     // Validation
     if (!title || typeof title !== 'string' || title.trim().length < 2) {
@@ -68,6 +68,34 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Priority must be between 1 and 5' }, { status: 400 });
     }
 
+    // Validate parent_topic_id hierarchy if provided
+    if (parent_topic_id) {
+      const { data: parentTopic } = await supabase
+        .from('topics')
+        .select('id, parent_topic_id')
+        .eq('id', parent_topic_id)
+        .eq('user_id', user.id)
+        .single();
+      if (!parentTopic) {
+        return NextResponse.json({ error: 'Parent topic not found' }, { status: 400 });
+      }
+      // Check depth: walk up from parent to count levels (max 3 total = depth 2 for new child)
+      let depth = 1;
+      let currentParentId = parentTopic.parent_topic_id;
+      while (currentParentId) {
+        depth++;
+        if (depth > 2) {
+          return NextResponse.json({ error: 'Topic hierarchy cannot exceed 3 levels' }, { status: 400 });
+        }
+        const { data: ancestor } = await supabase
+          .from('topics')
+          .select('parent_topic_id')
+          .eq('id', currentParentId)
+          .single();
+        currentParentId = ancestor?.parent_topic_id || null;
+      }
+    }
+
     const insertData: Record<string, unknown> = {
       title: title.trim(),
       description: description?.trim() || null,
@@ -80,6 +108,7 @@ export async function POST(request: Request) {
     if (priority != null) insertData.priority = priority;
     if (tags && Array.isArray(tags)) insertData.tags = tags;
     if (folder_id) insertData.folder_id = folder_id;
+    if (parent_topic_id) insertData.parent_topic_id = parent_topic_id;
 
     let { data, error } = await supabase.from('topics').insert(insertData).select().single();
 
@@ -99,6 +128,7 @@ export async function POST(request: Request) {
       if (insertData.priority != null) safeData.priority = insertData.priority;
       if (insertData.tags) safeData.tags = insertData.tags;
       if (insertData.folder_id) safeData.folder_id = insertData.folder_id;
+      if (insertData.parent_topic_id) safeData.parent_topic_id = insertData.parent_topic_id;
       const retry = await supabase.from('topics').insert(safeData).select().single();
       data = retry.data;
       error = retry.error;

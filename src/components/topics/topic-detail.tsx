@@ -64,6 +64,7 @@ interface Topic {
   company: string | null;
   goal: string | null;
   folder_id: string | null;
+  parent_topic_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -87,7 +88,27 @@ type SectionTab = 'items' | 'intelligence' | 'search' | 'details' | 'contacts' |
 
 const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion', 'manual', 'link'] as const;
 
-export function TopicDetail({ topic: initialTopic, initialItems, initialContacts = [] }: { topic: Topic; initialItems: TopicItem[]; initialContacts?: LinkedContact[] }) {
+interface ChildTopic {
+  id: string;
+  title: string;
+  status: string;
+  area: string;
+  priority: number;
+  updated_at: string;
+  progress_percent: number | null;
+  description: string | null;
+  tags: string[];
+  parent_topic_id: string | null;
+}
+
+interface ParentTopic {
+  id: string;
+  title: string;
+  area: string;
+  parent_topic_id: string | null;
+}
+
+export function TopicDetail({ topic: initialTopic, initialItems, initialContacts = [], childTopics = [], parentTopic = null }: { topic: Topic; initialItems: TopicItem[]; initialContacts?: LinkedContact[]; childTopics?: ChildTopic[]; parentTopic?: ParentTopic | null }) {
   const router = useRouter();
   const [topic, setTopic] = useState(initialTopic);
   const [items, setItems] = useState(initialItems);
@@ -138,13 +159,19 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [editStartDate, setEditStartDate] = useState(topic.start_date || '');
   const [editProgress, setEditProgress] = useState(topic.progress_percent ?? 0);
   const [editFolderId, setEditFolderId] = useState(topic.folder_id || '');
+  const [editParentTopicId, setEditParentTopicId] = useState(topic.parent_topic_id || '');
   const [editOwner, setEditOwner] = useState(topic.owner || '');
   const [editGoal, setEditGoal] = useState(topic.goal || '');
 
   // Folders for folder picker
   const [folders, setFolders] = useState<Array<{ id: string; name: string }>>([]);
+  // All topics for parent topic picker
+  const [allTopics, setAllTopics] = useState<Array<{ id: string; title: string; parent_topic_id: string | null }>>([]);
   useEffect(() => {
     fetch('/api/folders').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => setFolders(d.folders || [])).catch(() => {});
+    fetch('/api/topics?limit=200&status=all').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => {
+      setAllTopics((d.topics || []).map((t: { id: string; title: string; parent_topic_id: string | null }) => ({ id: t.id, title: t.title, parent_topic_id: t.parent_topic_id })));
+    }).catch(() => {});
   }, []);
 
   // Notes state
@@ -841,6 +868,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
           tags: editTags.split(',').map(t => t.trim()).filter(Boolean),
           progress_percent: editProgress,
           folder_id: editFolderId || null,
+          parent_topic_id: editParentTopicId || null,
           owner: editOwner.trim() || null,
           goal: editGoal.trim() || null,
         }),
@@ -1344,6 +1372,25 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80" />
                     </div>
                   </div>
+                  {/* Parent topic selector */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+                      <Layers className="w-3 h-3 text-indigo-500" /> Parent Topic <span className="text-gray-400 font-normal">(optional)</span>
+                    </label>
+                    <select value={editParentTopicId} onChange={e => setEditParentTopicId(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                      <option value="">No parent (root topic)</option>
+                      {allTopics.filter(t => !t.parent_topic_id && t.id !== topic.id).map(t => (
+                        <option key={t.id} value={t.id}>{t.title}</option>
+                      ))}
+                      {allTopics.filter(t => t.parent_topic_id && !allTopics.find(p => p.id === t.parent_topic_id)?.parent_topic_id && t.id !== topic.id).map(t => {
+                        const parent = allTopics.find(p => p.id === t.parent_topic_id);
+                        return (
+                          <option key={t.id} value={t.id}>&nbsp;&nbsp;↳ {parent?.title} / {t.title}</option>
+                        );
+                      })}
+                    </select>
+                  </div>
                   <div className="flex gap-2">
                     <button onClick={saveTopic} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors shadow-sm">
                       <Save className="w-4 h-4" /> Save
@@ -1355,6 +1402,15 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                 </div>
               ) : (
                 <>
+                  {/* Parent topic badge */}
+                  {parentTopic && (
+                    <Link href={`/topics/${parentTopic.id}`}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-medium hover:bg-indigo-100 transition-colors border border-indigo-100 mt-1 mb-1">
+                      <Layers className="w-3 h-3" />
+                      Sub-topic of <span className="font-semibold">{parentTopic.title}</span>
+                      <ChevronRight className="w-3 h-3 opacity-50" />
+                    </Link>
+                  )}
                   <div className="flex items-start gap-2 mt-1">
                     <h1 className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight tracking-tight">{topic.title}</h1>
                     <button
@@ -1603,7 +1659,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
             </div>
             {!editing && (
               <div className="flex gap-1 items-center flex-shrink-0">
-                <button onClick={() => { setEditing(true); setEditTitle(topic.title); setEditDescription(topic.description || ''); setEditArea(topic.area); setEditStatus(topic.status); setEditDueDate(topic.due_date || ''); setEditPriority(topic.priority ?? 0); setEditTags(topic.tags?.join(', ') || ''); setEditStartDate(topic.start_date || ''); setEditProgress(topic.progress_percent ?? 0); setEditFolderId(topic.folder_id || ''); setEditOwner(topic.owner || ''); setEditGoal(topic.goal || ''); }}
+                <button onClick={() => { setEditing(true); setEditTitle(topic.title); setEditDescription(topic.description || ''); setEditArea(topic.area); setEditStatus(topic.status); setEditDueDate(topic.due_date || ''); setEditPriority(topic.priority ?? 0); setEditTags(topic.tags?.join(', ') || ''); setEditStartDate(topic.start_date || ''); setEditProgress(topic.progress_percent ?? 0); setEditFolderId(topic.folder_id || ''); setEditParentTopicId(topic.parent_topic_id || ''); setEditOwner(topic.owner || ''); setEditGoal(topic.goal || ''); }}
                   className="px-3 py-1.5 text-gray-500 hover:text-blue-600 hover:bg-white/80 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-transparent hover:border-gray-200 hover:shadow-sm" title="Edit">
                   <Edit3 className="w-3.5 h-3.5" /> Edit
                 </button>
@@ -2547,6 +2603,49 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
               </div>
             )}
           </div>
+
+          {/* Sub-topics section */}
+          {childTopics.length > 0 && (
+            <div className="mt-4 bg-gradient-to-br from-white to-indigo-50/30 rounded-xl border border-gray-100 p-4 shadow-sm lg:col-span-3">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+                <Layers className="w-3 h-3 text-indigo-500" /> Sub-topics
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">{childTopics.length}</span>
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {childTopics.map(child => {
+                  const statusColor = child.status === 'active' ? 'bg-emerald-100 text-emerald-700' : child.status === 'completed' ? 'bg-gray-100 text-gray-600' : 'bg-amber-100 text-amber-700';
+                  const areaBorder = child.area === 'work' ? 'border-l-blue-500' : child.area === 'personal' ? 'border-l-green-500' : 'border-l-purple-500';
+                  return (
+                    <Link key={child.id} href={`/topics/${child.id}`}
+                      className={`block px-3 py-2.5 bg-white rounded-lg border border-gray-100 border-l-[3px] ${areaBorder} hover:border-indigo-200 hover:shadow-md transition-all`}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm text-gray-900 truncate flex-1">{child.title}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColor}`}>{child.status}</span>
+                      </div>
+                      {child.description && (
+                        <p className="text-xs text-gray-500 mt-1 truncate">{child.description}</p>
+                      )}
+                      <div className="flex items-center gap-3 mt-1.5 text-[10px] text-gray-400">
+                        {child.progress_percent != null && child.progress_percent > 0 && (
+                          <span className="flex items-center gap-1">
+                            <div className="w-8 h-1 rounded-full bg-gray-200">
+                              <div className={`h-full rounded-full ${child.progress_percent >= 80 ? 'bg-green-500' : 'bg-blue-500'}`}
+                                style={{ width: `${child.progress_percent}%` }} />
+                            </div>
+                            {child.progress_percent}%
+                          </span>
+                        )}
+                        {child.tags && child.tags.length > 0 && (
+                          <span>{child.tags.slice(0, 2).join(', ')}</span>
+                        )}
+                        <span className="ml-auto">{formatRelativeDate(child.updated_at)}</span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -3,6 +3,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { callClaude, callClaudeJSON } from '@/lib/ai/provider';
 import { getTopicNoteContext } from '@/lib/ai/note-context';
 import { enrichTopicItems, enrichItemContent, forceReenrichItem } from '@/lib/search/content';
+import { getAncestorContext, getAncestorItems, buildGroundTruthSection } from '@/lib/ai/topic-hierarchy';
 
 export async function POST(request: Request) {
   try {
@@ -27,15 +28,19 @@ export async function POST(request: Request) {
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata').eq('topic_id', topic_id).limit(25);
         const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
 
         const { data } = await callClaudeJSON<{ tags: string[]; area: string; priority: number }>(
           `Analyze this topic's full content to generate accurate tags, area classification, and priority.
+Focus tags on what is most relevant to the topic's stated title and description, not tangential items.
 
 RULES for tags:
 - Generate 3-8 specific, descriptive tags (not generic like "work" or "email")
 - Tags should capture: the project/initiative name, key technologies, key organizations involved, the type of work (e.g., "grant-application", "hiring", "product-launch")
 - Use lowercase-kebab-case for multi-word tags (e.g., "machine-learning", "budget-review")
 - Look at email subjects, document titles, Slack channels, and body content for clues
+- Prioritize tags that align with the topic's core focus (title and description)
 
 RULES for area:
 - "work" = professional/business activities
@@ -52,7 +57,7 @@ RULES for priority (1-5):
 - Consider: due dates, language urgency ("ASAP", "urgent"), stakeholder seniority, financial impact
 
 Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "priority": 1-5 }`,
-          `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\nCurrent tags: ${(topic.tags || []).join(', ') || 'None'}\n\nItems (${(items || []).length} total):\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null; metadata: Record<string, unknown> }) => {
+          `${groundTruth}\nTopic: ${topic.title}\nDescription: ${topic.description || 'None'}\nCurrent tags: ${(topic.tags || []).join(', ') || 'None'}\n\nItems (${(items || []).length} total):\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null; metadata: Record<string, unknown> }) => {
             const content = i.body || i.snippet || '';
             const preview = content.length > 800 ? content.substring(0, 800) + '...' : content;
             const meta = i.metadata || {};
@@ -60,7 +65,7 @@ Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "p
             if (meta.from) metaStr += ` | From: ${meta.from}`;
             if (meta.channel_name) metaStr += ` | #${meta.channel_name}`;
             return `[${i.source}] ${i.title}${metaStr}${preview ? '\n' + preview : ''}`;
-          }).join('\n---\n')}\n${noteContext}`
+          }).join('\n---\n')}\n${noteContext}${ancestorCtx}`
         );
 
         await supabase.from('topics').update({
@@ -75,20 +80,29 @@ Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "p
       }
 
       case 'suggest_title': {
-        // AI suggests a better title for a topic
+        // AI suggests a better title for a topic — respects existing title meaning
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(10);
         const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
 
         const { data } = await callClaudeJSON<{ suggestions: string[] }>(
-          'Suggest 3 clear, concise titles for this topic based on its content from all sources. Return JSON: { "suggestions": ["Title 1", "Title 2", "Title 3"] }',
-          `Current: ${topic.title}\nDescription: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
+          `Suggest 3 clear, concise titles for this topic. CRITICAL RULES:
+- The user DELIBERATELY chose the current title. Your suggestions must REFINE it, not change its core meaning.
+- If the current title says "Assets Transfer", all suggestions must be about assets transfer — NOT about "Branch Restructuring" or "SL Opening" even if those appear in the items.
+- The title should capture the SPECIFIC focus the user intended, not the broadest possible umbrella.
+- Use the description (if available) to understand what the user considers the core focus.
+- Items are context, but the title and description define the topic's identity.
+
+Return JSON: { "suggestions": ["Title 1", "Title 2", "Title 3"] }`,
+          `${groundTruth}\nCurrent title: ${topic.title}\nDescription: ${topic.description || 'None'}\nGoal: ${topic.goal || 'None'}\n\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
             const content = i.body || i.snippet || '';
             const preview = content.length > 300 ? content.substring(0, 300) + '...' : content;
             return `[${i.source}] ${i.title}${preview ? ': ' + preview : ''}`;
-          }).join('\n')}\n${noteContext}`
+          }).join('\n')}\n${noteContext}${ancestorCtx}`
         );
 
         result = { suggestions: data.suggestions };
@@ -96,20 +110,27 @@ Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "p
       }
 
       case 'generate_description': {
-        // AI generates a rich description for a topic
+        // AI generates a rich description for a topic — preserves core focus
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(15);
         const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
 
         const { text } = await callClaude(
-          'Write a concise but comprehensive description (2-4 sentences) for this topic/project that captures its essence, key participants, and objectives.',
-          `Topic: ${topic.title}\nCurrent description: ${topic.description || 'None'}\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
+          `Write a concise but comprehensive description (2-4 sentences) for this topic/project. CRITICAL RULES:
+- The title defines the CORE FOCUS of this topic. The description must be ABOUT what the title says.
+- If the title says "Assets Transfer", the description must primarily be about assets transfer — not about branch closure or SL opening, even if those appear frequently in items.
+- Related/tangential projects mentioned in items can be acknowledged briefly as context, but the description must center on the title's stated focus.
+- Capture essence, key participants, and objectives — but ALL filtered through the lens of the title.
+- If an existing description is provided, preserve its core meaning and intent while improving clarity.`,
+          `${groundTruth}\nTopic: ${topic.title}\nCurrent description: ${topic.description || 'None'}\nGoal: ${topic.goal || 'None'}\n\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
             const content = i.body || i.snippet || '';
             const preview = content.length > 500 ? content.substring(0, 500) + '...' : content;
             return `[${i.source}] ${i.title}: ${preview}`;
-          }).join('\n')}\n${noteContext}`
+          }).join('\n')}\n${noteContext}${ancestorCtx}`
         );
 
         result = { description: text };
@@ -123,9 +144,14 @@ Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "p
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata, occurred_at').eq('topic_id', topic_id).order('occurred_at', { ascending: true }).limit(30);
         const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
 
         const { data } = await callClaudeJSON<{ action_items: Array<{ task: string; assignee: string; due: string; priority: string; source_item: string; status: string }> }>(
-          `Extract ALL action items, tasks, commitments, promises, and follow-ups from these communications. Be thorough and look for:
+          `Extract ALL action items, tasks, commitments, promises, and follow-ups from these communications.
+IMPORTANT: Prioritize action items that are directly relevant to the topic's stated title and description. Tangential items from related projects can be included but should be marked as lower priority unless they directly impact this topic's focus.
+
+Be thorough and look for:
 
 1. EXPLICIT tasks: "Please do X", "Can you handle Y", "I need Z by Friday"
 2. IMPLICIT commitments: "I'll look into it", "Let me check", "We should follow up"
@@ -143,7 +169,7 @@ For each item, determine:
 - source_item: which email/message/event this came from (include date)
 
 Return JSON: { "action_items": [{ "task": "description", "assignee": "person name", "due": "date or timeframe", "priority": "high|medium|low", "source_item": "brief source reference", "status": "pending|in-progress|done|blocked" }] }`,
-          `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\nDue date: ${topic.due_date || 'Not set'}\n\nCommunications (chronological order):\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null; metadata: Record<string, unknown>; occurred_at: string }) => {
+          `${groundTruth}\nTopic: ${topic.title}\nDescription: ${topic.description || 'None'}\nDue date: ${topic.due_date || 'Not set'}\n\nCommunications (chronological order):\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null; metadata: Record<string, unknown>; occurred_at: string }) => {
             const meta = i.metadata || {};
             const content = i.body || i.snippet || '';
             const contentPreview = content.length > 2000 ? content.substring(0, 2000) + '...' : content;
@@ -153,7 +179,7 @@ Return JSON: { "action_items": [{ "task": "description", "assignee": "person nam
             if (meta.cc) header += `\nCC: ${meta.cc}`;
             if (meta.attendees) header += `\nAttendees: ${JSON.stringify(meta.attendees)}`;
             return `${header}\n${contentPreview}`;
-          }).join('\n\n---\n\n')}\n${noteContext}`
+          }).join('\n\n---\n\n')}\n${noteContext}${ancestorCtx}`
         );
 
         result = { action_items: data.action_items };
@@ -161,21 +187,24 @@ Return JSON: { "action_items": [{ "task": "description", "assignee": "person nam
       }
 
       case 'summarize_thread': {
-        // AI summarizes all communications in a topic
+        // AI summarizes all communications in a topic — through topic's lens
         const { topic_id } = context;
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
         const { data: items } = await supabase.from('topic_items').select('*').eq('topic_id', topic_id).order('occurred_at', { ascending: true }).limit(30);
         const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
 
         const { text } = await callClaude(
-          'Create a chronological executive summary of this topic\'s communications and notes. Highlight key decisions, commitments, and open questions. Be concise but thorough.',
-          `Topic: ${topic.title}\nDescription: ${topic.description || 'None'}\n\nCommunications (chronological):\n${(items || []).map((i: Record<string, unknown>) => {
+          `Create a chronological executive summary of this topic's communications and notes.
+IMPORTANT: Frame the summary through the lens of the topic's title and description. Highlight key decisions, commitments, and open questions that are most relevant to the stated focus. Tangential discussions from related projects should be briefly mentioned as context but not dominate the summary.`,
+          `${groundTruth}\nTopic: ${topic.title}\nDescription: ${topic.description || 'None'}\n\nCommunications (chronological):\n${(items || []).map((i: Record<string, unknown>) => {
             const meta = i.metadata as Record<string, unknown> || {};
             const content = (i.body as string) || (i.snippet as string) || '';
             const contentPreview = content.length > 1500 ? content.substring(0, 1500) + '...' : content;
             return `[${i.occurred_at}] [${i.source}] ${i.title}\n${contentPreview}\nFrom: ${meta.from || ''} To: ${meta.to || ''}`;
-          }).join('\n---\n')}\n${noteContext}`
+          }).join('\n---\n')}\n${noteContext}${ancestorCtx}`
         );
 
         result = { summary: text };
@@ -850,6 +879,9 @@ ${(actionItems || []).map((i: Record<string, unknown>, idx: number) => {
         const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
         if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
         const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const ancestorItems = await getAncestorItems(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
 
         // Enrich all items (fetch full content from sources)
         const { enriched, failed, items: enrichedItems } = await enrichTopicItems(user.id, topic_id);
@@ -879,6 +911,8 @@ ${(actionItems || []).map((i: Record<string, unknown>, idx: number) => {
           `You are performing a DEEP DIVE analysis of a topic/project. You have access to FULL CONTENT of linked items (emails, documents, messages, events, attachments), not just snippets.
 
 CRITICAL INSTRUCTIONS:
+- The topic's title and description define its CORE FOCUS. Structure the entire analysis through this lens.
+- Items that are tangential to the core focus should be acknowledged but clearly labeled as "related context" rather than treated as primary content.
 - READ every email body completely — they contain decisions, commitments, questions, and context
 - READ email signatures to identify roles, organizations, and contact details
 - READ Slack context: thread conversations AND surrounding channel messages provide crucial context
@@ -937,26 +971,34 @@ Detailed profile of each person involved:
 - What follow-up questions should be asked?
 - Any referenced documents or conversations not yet linked?
 
+## Relevance to Core Focus
+Categorize items into:
+- **Directly relevant**: Items that directly address the topic's stated title and description
+- **Supporting context**: Items that provide background or related information
+- **Tangential**: Items that are loosely related but not central to the core focus
+Explain how each category contributes to understanding the topic.
+
 ## Strategic Recommendations
 3-5 strategic recommendations based on the comprehensive analysis. For each:
 - What to do
-- Why it matters
+- Why it matters (especially in relation to the topic's core focus)
 - Suggested timeline
 - Who should take the lead
 
 Be EXTREMELY specific. Reference actual content, dates, people, and quotes. This is a deep analysis, not a surface summary.`,
-          `Topic: ${topic.title}
+          `${groundTruth}\nTopic: ${topic.title}
 Description: ${topic.description || 'None'}
 Area: ${topic.area}
 Status: ${topic.status}
 Tags: ${(topic.tags || []).join(', ') || 'None'}
 Due date: ${topic.due_date || 'Not set'}
+Goal: ${topic.goal || 'Not set'}
 ${noteContext}
 
 Content enrichment: ${enriched} items enriched, ${failed} failed
 
 Full Content of ${(fullItems || []).length} Linked Items:
-${itemsContent}`,
+${itemsContent}${ancestorCtx}${ancestorItems}`,
           { maxTokens: 8192 }
         );
 
@@ -980,6 +1022,8 @@ ${itemsContent}`,
           .select('title, source, snippet, body, metadata')
           .eq('topic_id', topic_id).limit(20);
         const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
 
         const itemsSummary = (items || []).map((i: Record<string, unknown>) => {
           const meta = i.metadata as Record<string, unknown> || {};
@@ -997,11 +1041,12 @@ ${itemsContent}`,
           suggested_people: string[];
         }>(
           `You are a content discovery assistant. Analyze the linked items and suggest SPECIFIC search queries to find MORE related content the user might have missed.
+Focus recommendations on content that is directly relevant to the topic's stated title and description. Prioritize searches that will find content about the core focus.
 
 For each recommendation, provide:
 - source: which source to search (gmail, calendar, drive, slack, notion)
 - query: the exact search query to use (use source-specific syntax)
-- reason: why this content might be relevant
+- reason: why this content might be relevant to the topic's core focus
 - expected_type: what kind of content you expect to find
 
 Also identify:
@@ -1009,13 +1054,14 @@ Also identify:
 - suggested_people: people mentioned in items who might have more related communications
 
 Return JSON: { "recommendations": [...], "missing_sources": [...], "suggested_people": [...] }`,
-          `Topic: ${topic.title}
+          `${groundTruth}\nTopic: ${topic.title}
 Description: ${topic.description || 'None'}
 Tags: ${(topic.tags || []).join(', ') || 'None'}
+Goal: ${topic.goal || 'None'}
 ${noteContext}
 
 Currently linked items (${(items || []).length}):
-${itemsSummary}`
+${itemsSummary}${ancestorCtx}`
         );
 
         result = { recommendations: data.recommendations, missing_sources: data.missing_sources, suggested_people: data.suggested_people };
@@ -1035,6 +1081,8 @@ ${itemsSummary}`
           .select('title, source, snippet, body, metadata')
           .eq('topic_id', topic_id).limit(20);
         const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
 
         const itemsContent = (items || []).map((i: Record<string, unknown>) => {
           const body = (i.body as string) || (i.snippet as string) || '';
@@ -1056,8 +1104,10 @@ ${itemsSummary}`
 4. Monetary Amounts: value, currency, what it relates to
 5. Action Items: task description, who's responsible, due date if mentioned, current status (pending/done/blocked)
 
+Focus on entities most relevant to the topic's stated title and description.
+
 Return JSON: { "people": [...], "organizations": [...], "dates": [...], "amounts": [...], "action_items": [...] }`,
-          `Topic: ${topic.title}\n${noteContext}\n\nFull Content:\n${itemsContent}`
+          `${groundTruth}\nTopic: ${topic.title}\n${noteContext}\n\nFull Content:\n${itemsContent}${ancestorCtx}`
         );
 
         result = data;
@@ -1073,10 +1123,12 @@ Return JSON: { "people": [...], "organizations": [...], "dates": [...], "amounts
         const { data: items } = await supabase.from('topic_items')
           .select('title, source, snippet, body, metadata')
           .eq('topic_id', topic_id).limit(15);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
 
         // Get all other topics for comparison
         const { data: allTopics } = await supabase.from('topics')
-          .select('id, title, description, tags, summary')
+          .select('id, title, description, tags, summary, parent_topic_id')
           .eq('user_id', user.id)
           .neq('id', topic_id)
           .eq('status', 'active');
@@ -1091,23 +1143,27 @@ Return JSON: { "people": [...], "organizations": [...], "dates": [...], "amounts
           return `[${i.source}] ${i.title}: ${content.substring(0, 400)}`;
         }).join('\n');
         const otherTopics = allTopics.map((t: Record<string, unknown>) =>
-          `ID: ${t.id}\nTitle: ${t.title}\nDescription: ${t.description || 'None'}\nTags: ${(t.tags as string[] || []).join(', ')}\nSummary: ${((t.summary as string) || '').substring(0, 300)}`
+          `ID: ${t.id}\nTitle: ${t.title}\nDescription: ${t.description || 'None'}\nTags: ${(t.tags as string[] || []).join(', ')}\nParent: ${t.parent_topic_id || 'None (root)'}\nSummary: ${((t.summary as string) || '').substring(0, 300)}`
         ).join('\n---\n');
 
         const { data } = await callClaudeJSON<{
           related_topics: Array<{ topic_id: string; title: string; reason: string; confidence: number; relationship: string }>;
         }>(
-          `Analyze the current topic and find related topics from the user's collection. For each related topic, explain:
-- How they're connected
+          `Analyze the current topic and find related topics from the user's collection. Consider the topic's core focus (title and description) when determining relevance.
+For each related topic, explain:
+- How they're connected (especially in relation to the core focus)
 - The type of relationship (parent, child, related, dependent, conflicting)
 - Confidence score (0-1)
+Note: Topics may already have parent-child relationships via parent_topic_id. Include these and also identify other semantic relationships.
 
 Return JSON: { "related_topics": [{ "topic_id": "uuid", "title": "topic name", "reason": "explanation of connection", "confidence": 0.0-1.0, "relationship": "related|parent|child|dependent|conflicting" }] }
 Only include topics with confidence >= 0.3.`,
-          `Current Topic: ${topic.title}
+          `${groundTruth}\nCurrent Topic: ${topic.title}
 Description: ${topic.description || 'None'}
 Tags: ${(topic.tags || []).join(', ') || 'None'}
+Parent topic: ${topic.parent_topic_id || 'None (root topic)'}
 Items:\n${currentItems}
+${ancestorCtx}
 
 Other Topics:\n${otherTopics}`
         );
@@ -1131,6 +1187,8 @@ Other Topics:\n${otherTopics}`
           .eq('topic_id', topic_id);
 
         const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
         const itemCount = (items || []).length;
         const sources = [...new Set((items || []).map((i: { source: string }) => i.source))];
         const allSources = ['gmail', 'calendar', 'drive', 'slack', 'notion'];
@@ -1165,18 +1223,21 @@ Other Topics:\n${otherTopics}`
           strengths: string[];
         }>(
           `Evaluate this topic's completeness and provide actionable suggestions.
+Consider whether the linked items adequately cover the topic's stated focus (title and description), or if there are gaps in coverage for the core subject.
 
 Return JSON: {
   "suggestions": ["specific actionable suggestion 1", ...],
   "missing": ["what information or content is missing", ...],
   "strengths": ["what's good about this topic's current state", ...]
 }`,
-          `Topic: ${topic.title}
+          `${groundTruth}\nTopic: ${topic.title}
 Description: ${topic.description || 'MISSING'}
 Tags: ${(topic.tags as string[] || []).join(', ') || 'NONE'}
+Goal: ${topic.goal || 'NOT SET'}
 Due date: ${topic.due_date || 'NOT SET'}
 Status: ${topic.status}
 Priority: ${topic.priority || 0}
+Parent topic: ${topic.parent_topic_id || 'None (root topic)'}
 Has AI summary: ${!!topic.summary}
 Has notes: ${!!noteContext}
 
@@ -1185,7 +1246,7 @@ Sources used: ${sources.join(', ') || 'none'}
 Missing sources: ${missingSources.join(', ') || 'none'}
 Contacts linked: ${contactCount}
 Date range: ${oldestItem?.toLocaleDateString() || 'N/A'} to ${newestItem?.toLocaleDateString() || 'N/A'}
-Days since last activity: ${daysSinceLastItem ?? 'N/A'}`
+Days since last activity: ${daysSinceLastItem ?? 'N/A'}${ancestorCtx}`
         );
 
         result = {

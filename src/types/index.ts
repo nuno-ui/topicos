@@ -9,6 +9,8 @@ export interface Topic {
   priority: number | null;
   tags: string[];
   folder_id: string | null;
+  parent_topic_id: string | null;
+  children?: Topic[];
   summary: string | null;
   notes: string | null;
   progress_percent: number | null;

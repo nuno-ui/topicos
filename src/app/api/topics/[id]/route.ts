@@ -16,7 +16,28 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       .single();
 
     if (error) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
-    return NextResponse.json({ topic: data });
+
+    // Fetch child topics
+    const { data: children } = await supabase
+      .from('topics')
+      .select('id, title, status, area, priority, updated_at, progress_percent, description, tags, parent_topic_id')
+      .eq('parent_topic_id', id)
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false });
+
+    // Fetch parent topic info if this is a sub-topic
+    let parentTopic = null;
+    if (data.parent_topic_id) {
+      const { data: parent } = await supabase
+        .from('topics')
+        .select('id, title, area, parent_topic_id')
+        .eq('id', data.parent_topic_id)
+        .eq('user_id', user.id)
+        .single();
+      parentTopic = parent;
+    }
+
+    return NextResponse.json({ topic: { ...data, children: children || [] }, parentTopic });
   } catch (err) {
     console.error('GET /api/topics/[id] error:', err);
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal server error' }, { status: 500 });
@@ -49,8 +70,69 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'Progress must be between 0 and 100' }, { status: 400 });
     }
 
+    // Validate parent_topic_id hierarchy if provided
+    if (body.parent_topic_id !== undefined) {
+      if (body.parent_topic_id === id) {
+        return NextResponse.json({ error: 'A topic cannot be its own parent' }, { status: 400 });
+      }
+      if (body.parent_topic_id) {
+        // Validate parent exists and belongs to user
+        const { data: parentTopic } = await supabase
+          .from('topics')
+          .select('id, parent_topic_id')
+          .eq('id', body.parent_topic_id)
+          .eq('user_id', user.id)
+          .single();
+        if (!parentTopic) {
+          return NextResponse.json({ error: 'Parent topic not found' }, { status: 400 });
+        }
+        // Check for circular reference: walk down descendants of this topic
+        const checkCircular = async (topicId: string): Promise<boolean> => {
+          const { data: childrenCheck } = await supabase
+            .from('topics').select('id').eq('parent_topic_id', topicId).eq('user_id', user.id);
+          if (!childrenCheck) return false;
+          for (const child of childrenCheck) {
+            if (child.id === body.parent_topic_id) return true;
+            if (await checkCircular(child.id)) return true;
+          }
+          return false;
+        };
+        if (await checkCircular(id)) {
+          return NextResponse.json({ error: 'Circular hierarchy detected' }, { status: 400 });
+        }
+        // Check depth from parent upwards
+        let depth = 1;
+        let currentParentId = parentTopic.parent_topic_id;
+        while (currentParentId) {
+          depth++;
+          if (depth > 2) {
+            return NextResponse.json({ error: 'Topic hierarchy cannot exceed 3 levels' }, { status: 400 });
+          }
+          const { data: ancestor } = await supabase
+            .from('topics').select('parent_topic_id').eq('id', currentParentId).single();
+          currentParentId = ancestor?.parent_topic_id || null;
+        }
+        // Check if this topic has children that would exceed depth
+        const { data: existingChildren } = await supabase
+          .from('topics').select('id').eq('parent_topic_id', id);
+        if (existingChildren && existingChildren.length > 0 && depth > 1) {
+          return NextResponse.json({ error: 'Cannot nest this topic deeper: it has children that would exceed max depth' }, { status: 400 });
+        }
+        // Check for grandchildren
+        if (existingChildren && existingChildren.length > 0) {
+          for (const child of existingChildren) {
+            const { data: grandchildren } = await supabase
+              .from('topics').select('id').eq('parent_topic_id', child.id).limit(1);
+            if (grandchildren && grandchildren.length > 0 && depth > 0) {
+              return NextResponse.json({ error: 'Cannot nest this topic: it has grandchildren that would exceed max depth' }, { status: 400 });
+            }
+          }
+        }
+      }
+    }
+
     // Only allow known fields to be updated (prevent arbitrary field injection)
-    const allowedFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'summary', 'notes', 'progress_percent', 'owner', 'goal', 'updated_at'];
+    const allowedFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'parent_topic_id', 'summary', 'notes', 'progress_percent', 'owner', 'goal', 'updated_at'];
     const updateData: Record<string, unknown> = {};
     for (const key of allowedFields) {
       if (key in body) updateData[key] = body[key];
@@ -74,7 +156,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     // If schema cache error, retry with all known fields
     if (error && error.message.includes('schema cache')) {
       console.warn('PATCH /api/topics/[id]: schema cache error, retrying with known fields');
-      const knownFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'summary', 'notes', 'progress_percent', 'owner', 'goal', 'updated_at'];
+      const knownFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'parent_topic_id', 'summary', 'notes', 'progress_percent', 'owner', 'goal', 'updated_at'];
       const safeData: Record<string, unknown> = {};
       for (const key of knownFields) {
         if (key in updateData) safeData[key] = updateData[key];
@@ -109,6 +191,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     await Promise.all([
       supabase.from('topic_items').delete().eq('topic_id', id).eq('user_id', user.id),
       supabase.from('contact_topic_links').delete().eq('topic_id', id).eq('user_id', user.id),
+      // Detach child topics (set their parent to null) — redundant with FK ON DELETE SET NULL but explicit
+      supabase.from('topics').update({ parent_topic_id: null }).eq('parent_topic_id', id),
     ]);
 
     const { error } = await supabase
