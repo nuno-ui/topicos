@@ -133,6 +133,11 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [searchLoading, setSearchLoading] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchSources, setSearchSources] = useState<Set<string>>(new Set(SOURCES));
+  // Search advanced options
+  const [searchMaxResults, setSearchMaxResults] = useState(20);
+  const [searchAccounts, setSearchAccounts] = useState<{ google: Array<{ id: string; email: string }>; slack: Array<{ id: string; name: string }>; notion: Array<{ id: string; name: string }> }>({ google: [], slack: [], notion: [] });
+  const [selectedAccountIds, setSelectedAccountIds] = useState<Set<string>>(new Set());
+  const [showSearchOptions, setShowSearchOptions] = useState(false);
 
   // AI Find state
   const [aiFindLoading, setAiFindLoading] = useState(false);
@@ -173,6 +178,11 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
     fetch('/api/topics?limit=200&status=all').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => {
       setAllTopics((d.topics || []).map((t: Record<string, unknown>) => ({ id: t.id as string, title: t.title as string, parent_topic_id: (t.parent_topic_id as string | null) || null, area: t.area as string | undefined, status: t.status as string | undefined })));
     }).catch(() => {});
+    // Fetch connected accounts for search filters (lightweight: empty source search just to get accounts list)
+    fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: '_', sources: [] }) })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.accounts) setSearchAccounts(d.accounts); })
+      .catch(() => {});
   }, []);
 
   // Notes state
@@ -614,11 +624,12 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   };
 
   // --- SEARCH ---
-  const handleSearch = async () => {
+  const handleSearch = async (overrideMaxResults?: number) => {
     if (!searchQuery.trim()) return;
     setSearchLoading(true);
-    setSearchResults([]);
+    if (!overrideMaxResults) setSearchResults([]);
     try {
+      const effectiveMax = overrideMaxResults || searchMaxResults;
       const res = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -626,6 +637,8 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
           query: searchQuery,
           sources: Array.from(searchSources),
           topic_id: topic.id,
+          max_results: effectiveMax,
+          ...(selectedAccountIds.size > 0 ? { account_ids: Array.from(selectedAccountIds) } : {}),
         }),
       });
       const data = await res.json();
@@ -640,7 +653,9 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
         item.already_linked = linkedIds.has(item.source + ':' + item.external_id);
       });
       setSearchResults(allItems);
-      setSelectedResults(new Set());
+      if (!overrideMaxResults) setSelectedResults(new Set());
+      // Save available accounts for the UI
+      if (data.accounts) setSearchAccounts(data.accounts);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Search failed');
     }
@@ -2233,12 +2248,12 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                   <input
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                    onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
                     placeholder="Search emails, messages, events, files..."
                     className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl text-sm bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   />
                 </div>
-                <button onClick={handleSearch} disabled={searchLoading}
+                <button onClick={() => handleSearch()} disabled={searchLoading}
                   className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition-colors">
                   {searchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                   Search
@@ -2249,7 +2264,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                   AI Find
                 </button>
               </div>
-              {/* Source filter pills */}
+              {/* Source filter pills + options toggle */}
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-xs text-gray-400 mr-1">Sources:</span>
                 {SOURCES.map(src => (
@@ -2262,7 +2277,112 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                     <SourceIcon source={src} className="w-3.5 h-3.5" /> {sourceLabel(src)}
                   </button>
                 ))}
+                <button onClick={() => setShowSearchOptions(!showSearchOptions)}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-all ml-auto ${
+                    showSearchOptions || selectedAccountIds.size > 0 || searchMaxResults !== 20
+                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                      : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'
+                  }`}>
+                  <Activity className="w-3 h-3" />
+                  {showSearchOptions ? 'Less' : 'Options'}
+                  {(selectedAccountIds.size > 0 || searchMaxResults !== 20) && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                  )}
+                </button>
               </div>
+
+              {/* Advanced search options (accounts, result limit) */}
+              {showSearchOptions && (
+                <div className="space-y-3 pt-2 border-t border-gray-100 mt-1">
+                  {/* Account selection */}
+                  {(searchAccounts.google.length > 1 || searchAccounts.slack.length > 1 || searchAccounts.notion.length > 1) && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium text-gray-500">Search Accounts</span>
+                        {selectedAccountIds.size > 0 && (
+                          <button onClick={() => setSelectedAccountIds(new Set())}
+                            className="text-[10px] text-gray-400 hover:text-gray-600 flex items-center gap-0.5">
+                            <X className="w-2.5 h-2.5" /> Clear filter
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {searchAccounts.google.map(a => (
+                          <button key={a.id}
+                            onClick={() => setSelectedAccountIds(prev => {
+                              const next = new Set(prev);
+                              next.has(a.id) ? next.delete(a.id) : next.add(a.id);
+                              return next;
+                            })}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border transition-all ${
+                              selectedAccountIds.size === 0 || selectedAccountIds.has(a.id)
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'
+                            }`}>
+                            <SourceIcon source="gmail" className="w-3.5 h-3.5" />
+                            {a.email}
+                            {selectedAccountIds.has(a.id) && <Check className="w-3 h-3 text-blue-600" />}
+                          </button>
+                        ))}
+                        {searchAccounts.slack.map(a => (
+                          <button key={a.id}
+                            onClick={() => setSelectedAccountIds(prev => {
+                              const next = new Set(prev);
+                              next.has(a.id) ? next.delete(a.id) : next.add(a.id);
+                              return next;
+                            })}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border transition-all ${
+                              selectedAccountIds.size === 0 || selectedAccountIds.has(a.id)
+                                ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'
+                            }`}>
+                            <SourceIcon source="slack" className="w-3.5 h-3.5" />
+                            {a.name}
+                            {selectedAccountIds.has(a.id) && <Check className="w-3 h-3 text-purple-600" />}
+                          </button>
+                        ))}
+                        {searchAccounts.notion.map(a => (
+                          <button key={a.id}
+                            onClick={() => setSelectedAccountIds(prev => {
+                              const next = new Set(prev);
+                              next.has(a.id) ? next.delete(a.id) : next.add(a.id);
+                              return next;
+                            })}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border transition-all ${
+                              selectedAccountIds.size === 0 || selectedAccountIds.has(a.id)
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'
+                            }`}>
+                            <SourceIcon source="notion" className="w-3.5 h-3.5" />
+                            {a.name}
+                            {selectedAccountIds.has(a.id) && <Check className="w-3 h-3 text-amber-600" />}
+                          </button>
+                        ))}
+                      </div>
+                      {selectedAccountIds.size === 0 && (
+                        <p className="text-[10px] text-gray-400 mt-1">All accounts searched. Click to filter specific accounts.</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Max results control */}
+                  <div>
+                    <span className="text-xs font-medium text-gray-500 block mb-1.5">Results per search</span>
+                    <div className="flex gap-1.5">
+                      {[20, 50, 100].map(n => (
+                        <button key={n} onClick={() => setSearchMaxResults(n)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                            searchMaxResults === n
+                              ? 'bg-blue-50 text-blue-700 border-blue-200 ring-1 ring-blue-200'
+                              : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
+                          }`}>
+                          {n} results
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2329,6 +2449,23 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                   );
                 })}
               </div>
+              {/* Load more / expand results */}
+              {searchResults.length >= searchMaxResults && searchMaxResults < 100 && (
+                <div className="px-5 py-3 border-t border-blue-100 bg-blue-50/30 flex items-center justify-center">
+                  <button
+                    onClick={() => {
+                      const nextMax = Math.min(searchMaxResults + 30, 100);
+                      setSearchMaxResults(nextMax);
+                      handleSearch(nextMax);
+                    }}
+                    disabled={searchLoading}
+                    className="px-4 py-2 text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {searchLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+                    Load more results (currently showing {searchMaxResults}, max 100)
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
