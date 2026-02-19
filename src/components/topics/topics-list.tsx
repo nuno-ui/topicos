@@ -1269,6 +1269,12 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
               </span>
             )}
             {/* Tags as tiny pills */}
+            {/* Owner pill */}
+            {t.owner && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0 font-semibold bg-teal-100 text-teal-700 flex items-center gap-0.5" title={`Owner: ${t.owner}`}>
+                <Users className="w-2.5 h-2.5" /> {t.owner}
+              </span>
+            )}
             {tags.slice(0, 2).map((tag, idx) => (
               <span key={tag} className={`text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0 font-medium hidden lg:inline-block ${tagPillColors[idx % tagPillColors.length]}`}>
                 {tag}
