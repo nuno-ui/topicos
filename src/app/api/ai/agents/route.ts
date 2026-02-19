@@ -1380,6 +1380,98 @@ Days since last activity: ${daysSinceLastItem ?? 'N/A'}${tasksCtx}${ancestorCtx}
         break;
       }
 
+      case 'recommend_tasks': {
+        // AI recommends tasks for a topic based on its items, notes, and current state
+        const { topic_id } = context;
+        const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
+        if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata, occurred_at').eq('topic_id', topic_id).order('occurred_at', { ascending: true }).limit(30);
+        const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
+
+        const { data: recData } = await callClaudeJSON<{
+          recommended_tasks: Array<{
+            title: string;
+            description: string;
+            priority: string;
+            assignee: string;
+            due: string;
+            rationale: string;
+          }>;
+        }>(
+          `You are a proactive project management AI. Based on the topic's current state, linked communications, notes, and existing tasks, recommend NEW tasks that should be added.
+
+Consider:
+1. NEXT STEPS: What logically should happen next given the current state of work?
+2. GAPS: What tasks are missing? Is there follow-up needed on any communications?
+3. RISKS: Are there tasks that should be created to mitigate risks or prevent issues?
+4. DEADLINES: If the topic has a due date, what milestones or checkpoints are needed?
+5. DEPENDENCIES: What tasks need to happen before other things can proceed?
+6. FOLLOW-UPS: Are there unanswered questions or pending responses that need action?
+
+IMPORTANT: Do NOT recommend tasks that already exist. Only recommend genuinely new, useful tasks.
+IMPORTANT: Be specific and actionable. "Follow up on X" is better than "Do some stuff".
+IMPORTANT: Assign priorities realistically: high = blocking/urgent, medium = important, low = nice-to-have.
+
+Return JSON: {
+  "recommended_tasks": [{
+    "title": "Clear, actionable task title",
+    "description": "Brief context for why this task matters",
+    "priority": "high|medium|low",
+    "assignee": "person name if identifiable, or empty string",
+    "due": "suggested date/timeframe or 'No deadline'",
+    "rationale": "Why this task is recommended"
+  }]
+}
+
+Recommend 3-7 tasks, ordered by priority.`,
+          `${groundTruth}\nTopic: ${topic.title}\nDescription: ${topic.description || 'None'}\nStatus: ${topic.status}\nDue date: ${topic.due_date || 'Not set'}\nGoal: ${topic.goal || 'Not set'}\n\nCommunications:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null; metadata: Record<string, unknown>; occurred_at: string }) => {
+            const content = i.body || i.snippet || '';
+            const contentPreview = content.length > 1500 ? content.substring(0, 1500) + '...' : content;
+            const meta = i.metadata || {};
+            let header = `[${i.occurred_at}] [${i.source}] ${i.title}`;
+            if (meta.from) header += ` — From: ${meta.from}`;
+            return `${header}\n${contentPreview}`;
+          }).join('\n\n---\n\n')}\n${noteContext}${tasksCtx}${ancestorCtx}`
+        );
+
+        result = { recommended_tasks: recData.recommended_tasks };
+
+        // If persist_tasks is set, save them automatically
+        if (context.persist_tasks && recData.recommended_tasks?.length > 0) {
+          const tasksToInsert = recData.recommended_tasks.map((t: { title: string; description: string; priority: string; assignee: string; due: string }, index: number) => ({
+            user_id: user.id,
+            topic_id: topic_id,
+            title: t.title,
+            description: t.description || '',
+            status: 'pending',
+            priority: t.priority || 'medium',
+            due_date: parseFuzzyDate(t.due),
+            assignee: t.assignee || null,
+            source: 'ai_extracted',
+            source_item_ref: null,
+            position: index,
+            metadata: { recommended: true },
+          }));
+
+          const { data: insertedTasks, error: insertError } = await supabase
+            .from('topic_tasks')
+            .insert(tasksToInsert)
+            .select();
+
+          if (insertError) {
+            console.error('Failed to persist recommended tasks:', insertError);
+          } else {
+            result.persisted_count = insertedTasks?.length || 0;
+            result.tasks = insertedTasks;
+          }
+        }
+
+        break;
+      }
+
       case 'concept_search': {
         // AI-powered multilingual concept search across all sources
         const { query: conceptQuery, sources: conceptSources } = context;

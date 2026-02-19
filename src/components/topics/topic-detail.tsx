@@ -262,6 +262,17 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [tasksLoading, setTasksLoading] = useState(false);
   const [taskSaving, setTaskSaving] = useState(false);
+  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [taskFormData, setTaskFormData] = useState<{
+    title: string; description: string; assignee: string; priority: 'high' | 'medium' | 'low'; due_date: string;
+  }>({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' });
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingTaskData, setEditingTaskData] = useState<{
+    title: string; description: string; assignee: string; priority: 'high' | 'medium' | 'low'; due_date: string; status: string;
+  }>({ title: '', description: '', assignee: '', priority: 'medium', due_date: '', status: 'pending' });
+  const [taskRecommendations, setTaskRecommendations] = useState<Array<{
+    title: string; description: string; priority: string; assignee: string; due: string; rationale: string;
+  }>>([]);
 
   // Content expand state
   const [expandedContent, setExpandedContent] = useState<Record<string, string>>({});
@@ -1129,22 +1140,135 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
     setTasksLoading(false);
   }, [topic.id]);
 
-  const createTask = async (title: string) => {
-    if (!title.trim()) return;
+  const createTask = async (titleOrData: string | { title: string; description?: string; assignee?: string; priority?: string; due_date?: string }) => {
+    const payload = typeof titleOrData === 'string'
+      ? { title: titleOrData.trim() }
+      : {
+          title: titleOrData.title.trim(),
+          ...(titleOrData.description && { description: titleOrData.description.trim() }),
+          ...(titleOrData.assignee && { assignee: titleOrData.assignee.trim() }),
+          ...(titleOrData.priority && { priority: titleOrData.priority }),
+          ...(titleOrData.due_date && { due_date: new Date(titleOrData.due_date).toISOString() }),
+        };
+    if (!payload.title) return;
     setTaskSaving(true);
     try {
       const res = await fetch(`/api/topics/${topic.id}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim() }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error('Failed to create task');
       const data = await res.json();
       setTasks(prev => [data.task, ...prev]);
       setNewTaskTitle('');
+      setTaskFormData({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' });
+      setShowTaskForm(false);
       toast.success('Task created');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create task');
+    }
+    setTaskSaving(false);
+  };
+
+  const startEditingTask = (task: TopicTask) => {
+    setEditingTaskId(task.id);
+    setEditingTaskData({
+      title: task.title,
+      description: task.description || '',
+      assignee: task.assignee || '',
+      priority: task.priority,
+      due_date: task.due_date ? task.due_date.split('T')[0] : '',
+      status: task.status,
+    });
+  };
+
+  const saveEditingTask = async () => {
+    if (!editingTaskId || !editingTaskData.title.trim()) return;
+    const updates: Record<string, unknown> = {
+      title: editingTaskData.title.trim(),
+      description: editingTaskData.description.trim(),
+      assignee: editingTaskData.assignee.trim() || null,
+      priority: editingTaskData.priority,
+      due_date: editingTaskData.due_date ? new Date(editingTaskData.due_date).toISOString() : null,
+      status: editingTaskData.status,
+    };
+    await updateTask(editingTaskId, updates as Partial<TopicTask>);
+    setEditingTaskId(null);
+    toast.success('Task updated');
+  };
+
+  const cancelEditingTask = () => {
+    setEditingTaskId(null);
+  };
+
+  const recommendTasks = async () => {
+    setAgentLoading('recommend_tasks');
+    setTaskRecommendations([]);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: 'recommend_tasks',
+          context: {
+            topic_id: topic.id,
+            topic_title: topic.title,
+            topic_description: topic.description,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error('AI recommendation failed');
+      const data = await res.json();
+      if (data.result?.recommended_tasks?.length) {
+        setTaskRecommendations(data.result.recommended_tasks);
+        toast.success(`AI recommended ${data.result.recommended_tasks.length} tasks`);
+      } else {
+        toast.info('No additional tasks recommended — topic looks well-covered!');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to get recommendations');
+    }
+    setAgentLoading(null);
+  };
+
+  const acceptRecommendedTask = async (rec: { title: string; description: string; priority: string; assignee: string; due: string }) => {
+    const payload = {
+      title: rec.title,
+      description: rec.description || '',
+      priority: rec.priority || 'medium',
+      assignee: rec.assignee || '',
+      due_date: rec.due && rec.due !== 'No deadline' && rec.due !== 'N/A' ? rec.due : '',
+    };
+    await createTask(payload);
+    setTaskRecommendations(prev => prev.filter(r => r.title !== rec.title));
+  };
+
+  const acceptAllRecommendedTasks = async () => {
+    setTaskSaving(true);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: 'recommend_tasks',
+          context: {
+            topic_id: topic.id,
+            topic_title: topic.title,
+            topic_description: topic.description,
+            persist_tasks: true,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to persist tasks');
+      const data = await res.json();
+      if (data.result?.tasks?.length) {
+        setTasks(prev => [...data.result.tasks, ...prev]);
+        setTaskRecommendations([]);
+        toast.success(`Added ${data.result.persisted_count || data.result.tasks.length} recommended tasks`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add tasks');
     }
     setTaskSaving(false);
   };
@@ -2267,29 +2391,160 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                 className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Refresh tasks">
                 <RefreshCw className={`w-3.5 h-3.5 ${tasksLoading ? 'animate-spin' : ''}`} />
               </button>
+              <button onClick={recommendTasks} disabled={!!agentLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50"
+                title="AI recommends tasks based on topic context">
+                {agentLoading === 'recommend_tasks' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
+                Recommend
+              </button>
               <button onClick={extractAndPersistTasks} disabled={!!agentLoading}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors disabled:opacity-50"
                 title="Extract tasks from linked items using AI">
                 {agentLoading === 'extract_tasks' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                Extract with AI
+                Extract
               </button>
             </div>
           </div>
 
-          {/* Quick-add input */}
-          <div className="flex items-center gap-2">
-            <div className="flex-1 relative">
-              <input
-                type="text"
-                value={newTaskTitle}
-                onChange={e => setNewTaskTitle(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && newTaskTitle.trim()) createTask(newTaskTitle); }}
-                placeholder="Add a new task... (press Enter)"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 transition-all placeholder:text-gray-400"
-                disabled={taskSaving}
-              />
-              {taskSaving && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-amber-500" />}
+          {/* AI Task Recommendations */}
+          {taskRecommendations.length > 0 && (
+            <div className="bg-blue-50/50 border border-blue-200/50 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Brain className="w-4 h-4 text-blue-600" />
+                  <span className="text-sm font-semibold text-blue-900">AI Recommended Tasks</span>
+                  <span className="text-[10px] text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">{taskRecommendations.length} suggestions</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={acceptAllRecommendedTasks} disabled={taskSaving}
+                    className="px-3 py-1 text-xs font-semibold text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors disabled:opacity-50">
+                    {taskSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Add All'}
+                  </button>
+                  <button onClick={() => setTaskRecommendations([])}
+                    className="px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">Dismiss</button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {taskRecommendations.map((rec, idx) => {
+                  const priorityColor = rec.priority === 'high' ? 'border-l-red-400' : rec.priority === 'medium' ? 'border-l-amber-400' : 'border-l-green-400';
+                  return (
+                    <div key={idx} className={`bg-white border border-gray-100 border-l-[3px] ${priorityColor} rounded-lg p-3`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-800">{rec.title}</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                              rec.priority === 'high' ? 'text-red-600 bg-red-50' : rec.priority === 'medium' ? 'text-amber-600 bg-amber-50' : 'text-green-600 bg-green-50'
+                            }`}>{rec.priority}</span>
+                          </div>
+                          {rec.description && <p className="text-xs text-gray-500 mt-0.5">{rec.description}</p>}
+                          <div className="flex items-center gap-3 mt-1.5">
+                            {rec.assignee && (
+                              <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
+                                <Users className="w-2.5 h-2.5" /> {rec.assignee}
+                              </span>
+                            )}
+                            {rec.due && rec.due !== 'No deadline' && rec.due !== 'N/A' && (
+                              <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
+                                <Calendar className="w-2.5 h-2.5" /> {rec.due}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-blue-600/70 mt-1 italic">{rec.rationale}</p>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button onClick={() => acceptRecommendedTask(rec)}
+                            className="px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors">
+                            <Check className="w-3 h-3 inline mr-0.5" />Add
+                          </button>
+                          <button onClick={() => setTaskRecommendations(prev => prev.filter((_, i) => i !== idx))}
+                            className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+          )}
+
+          {/* Quick-add input + expand button */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={newTaskTitle}
+                  onChange={e => setNewTaskTitle(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && newTaskTitle.trim()) createTask(newTaskTitle); }}
+                  placeholder="Quick add task... (press Enter for title only)"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 transition-all placeholder:text-gray-400"
+                  disabled={taskSaving}
+                />
+                {taskSaving && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-amber-500" />}
+              </div>
+              <button
+                onClick={() => { setShowTaskForm(!showTaskForm); if (!showTaskForm) setTaskFormData({ title: newTaskTitle || '', description: '', assignee: '', priority: 'medium', due_date: '' }); }}
+                className={`px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${showTaskForm ? 'bg-amber-50 border-amber-200 text-amber-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                title="Expand to add more details"
+              >
+                {showTaskForm ? 'Simple' : '+ Details'}
+              </button>
+            </div>
+
+            {/* Expanded task creation form */}
+            {showTaskForm && (
+              <div className="bg-amber-50/40 border border-amber-200/50 rounded-xl p-4 space-y-3">
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Title *</label>
+                    <input type="text" value={taskFormData.title} onChange={e => setTaskFormData(prev => ({ ...prev, title: e.target.value }))}
+                      placeholder="Task title" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Description</label>
+                    <textarea value={taskFormData.description} onChange={e => setTaskFormData(prev => ({ ...prev, description: e.target.value }))}
+                      placeholder="Add more context or details..." rows={2}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 resize-none" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">
+                        <Users className="w-3 h-3 inline mr-1" />Owner
+                      </label>
+                      <input type="text" value={taskFormData.assignee} onChange={e => setTaskFormData(prev => ({ ...prev, assignee: e.target.value }))}
+                        placeholder="Assignee name" className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">
+                        <Calendar className="w-3 h-3 inline mr-1" />Deadline
+                      </label>
+                      <input type="date" value={taskFormData.due_date} onChange={e => setTaskFormData(prev => ({ ...prev, due_date: e.target.value }))}
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Priority</label>
+                      <select value={taskFormData.priority} onChange={e => setTaskFormData(prev => ({ ...prev, priority: e.target.value as 'high' | 'medium' | 'low' }))}
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400">
+                        <option value="low">🟢 Low</option>
+                        <option value="medium">🟡 Medium</option>
+                        <option value="high">🔴 High</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <button onClick={() => createTask(taskFormData)} disabled={taskSaving || !taskFormData.title.trim()}
+                    className="px-4 py-1.5 text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors disabled:opacity-50">
+                    {taskSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Create Task'}
+                  </button>
+                  <button onClick={() => { setShowTaskForm(false); setTaskFormData({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' }); }}
+                    className="px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">Cancel</button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Filter pills */}
@@ -2346,18 +2601,88 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
             }
 
             return (
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {filteredTasks.map(task => {
                   const isCompleted = task.status === 'completed';
                   const isArchived = task.status === 'archived';
+                  const isEditing = editingTaskId === task.id;
                   const priorityDot = task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400';
+                  const isOverdue = task.due_date && new Date(task.due_date) < new Date() && !isCompleted && !isArchived;
+
+                  if (isEditing) {
+                    return (
+                      <div key={task.id} className="border border-amber-200 bg-amber-50/30 rounded-xl p-4 space-y-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Title</label>
+                          <input type="text" value={editingTaskData.title} onChange={e => setEditingTaskData(prev => ({ ...prev, title: e.target.value }))}
+                            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400" autoFocus />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Description</label>
+                          <textarea value={editingTaskData.description} onChange={e => setEditingTaskData(prev => ({ ...prev, description: e.target.value }))}
+                            placeholder="Add details..." rows={2}
+                            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 resize-none" />
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">
+                              <Users className="w-3 h-3 inline mr-1" />Owner
+                            </label>
+                            <input type="text" value={editingTaskData.assignee} onChange={e => setEditingTaskData(prev => ({ ...prev, assignee: e.target.value }))}
+                              placeholder="Assignee" className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">
+                              <Calendar className="w-3 h-3 inline mr-1" />Deadline
+                            </label>
+                            <input type="date" value={editingTaskData.due_date} onChange={e => setEditingTaskData(prev => ({ ...prev, due_date: e.target.value }))}
+                              className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Priority</label>
+                            <select value={editingTaskData.priority} onChange={e => setEditingTaskData(prev => ({ ...prev, priority: e.target.value as 'high' | 'medium' | 'low' }))}
+                              className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20">
+                              <option value="low">🟢 Low</option>
+                              <option value="medium">🟡 Medium</option>
+                              <option value="high">🔴 High</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Status</label>
+                            <select value={editingTaskData.status} onChange={e => setEditingTaskData(prev => ({ ...prev, status: e.target.value }))}
+                              className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20">
+                              <option value="pending">Pending</option>
+                              <option value="in_progress">In Progress</option>
+                              <option value="completed">Completed</option>
+                              <option value="archived">Archived</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 pt-1">
+                          <button onClick={saveEditingTask}
+                            className="px-4 py-1.5 text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors disabled:opacity-50"
+                            disabled={!editingTaskData.title.trim()}>
+                            <Save className="w-3 h-3 inline mr-1" />Save
+                          </button>
+                          <button onClick={cancelEditingTask}
+                            className="px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">Cancel</button>
+                          <div className="flex-1" />
+                          <button onClick={() => { cancelEditingTask(); deleteTask(task.id); }}
+                            className="px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                            <Trash2 className="w-3 h-3 inline mr-1" />Delete
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
 
                   return (
                     <div
                       key={task.id}
-                      className={`group flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-all hover:shadow-sm ${
+                      className={`group flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-all hover:shadow-sm cursor-pointer ${
                         isArchived ? 'border-gray-100 bg-gray-50/50 opacity-60' : isCompleted ? 'border-green-100 bg-green-50/30' : 'border-gray-100 bg-white hover:border-gray-200'
                       }`}
+                      onDoubleClick={() => startEditingTask(task)}
                     >
                       {/* Checkbox */}
                       <button
@@ -2380,41 +2705,45 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                               <Sparkles className="w-2.5 h-2.5" /> AI
                             </span>
                           )}
+                          {task.status === 'in_progress' && (
+                            <span className="text-[10px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">In Progress</span>
+                          )}
                         </div>
                         {task.description && (
                           <p className={`text-xs mt-0.5 ${isCompleted ? 'text-gray-300' : 'text-gray-500'}`}>{task.description}</p>
                         )}
-                        <div className="flex items-center gap-3 mt-1">
+                        <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                           {task.assignee && (
-                            <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
-                              <Users className="w-2.5 h-2.5" /> {task.assignee}
+                            <span className="text-[11px] text-gray-500 flex items-center gap-1 bg-gray-50 px-2 py-0.5 rounded-full">
+                              <Users className="w-3 h-3" /> {task.assignee}
                             </span>
                           )}
                           {task.due_date && (
-                            <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
-                              <Calendar className="w-2.5 h-2.5" /> {formatSmartDate(task.due_date)}
+                            <span className={`text-[11px] flex items-center gap-1 px-2 py-0.5 rounded-full ${
+                              isOverdue ? 'text-red-700 bg-red-50 font-semibold' : 'text-gray-500 bg-gray-50'
+                            }`}>
+                              <Calendar className="w-3 h-3" />
+                              {isOverdue && <AlertTriangle className="w-2.5 h-2.5" />}
+                              {formatSmartDate(task.due_date)}
                             </span>
                           )}
-                          {task.status === 'in_progress' && (
-                            <span className="text-[10px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">In Progress</span>
-                          )}
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                            task.priority === 'high' ? 'text-red-600 bg-red-50' : task.priority === 'medium' ? 'text-amber-600 bg-amber-50' : 'text-green-600 bg-green-50'
+                          }`}>
+                            {task.priority === 'high' ? '🔴' : task.priority === 'medium' ? '🟡' : '🟢'} {task.priority}
+                          </span>
+                          <span className="text-[10px] text-gray-300">
+                            Added {formatRelativeDate(task.created_at)}
+                          </span>
                         </div>
                       </div>
 
                       {/* Hover actions */}
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                        {/* Priority cycle */}
-                        <button
-                          onClick={() => {
-                            const next = task.priority === 'low' ? 'medium' : task.priority === 'medium' ? 'high' : 'low';
-                            updateTask(task.id, { priority: next } as Partial<TopicTask>);
-                          }}
-                          className="p-1 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
-                          title={`Priority: ${task.priority} (click to cycle)`}
-                        >
-                          <ArrowUp className="w-3 h-3" />
+                        <button onClick={() => startEditingTask(task)}
+                          className="p-1 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors" title="Edit task">
+                          <Edit3 className="w-3 h-3" />
                         </button>
-                        {/* Status toggle: pending <-> in_progress */}
                         {!isCompleted && !isArchived && (
                           <button
                             onClick={() => updateTask(task.id, { status: task.status === 'in_progress' ? 'pending' : 'in_progress' } as Partial<TopicTask>)}

@@ -111,19 +111,26 @@ export function buildGroundTruthSection(topic: {
   title: string;
   description: string | null;
   goal?: string | null;
+  summary?: string | null;
+  next_steps?: Array<{ action: string; priority: string; rationale: string }> | null;
 }): string {
   if (!topic.description && !topic.goal) {
     // If no description or goal set, just note the title as the anchor
-    return `=== TOPIC FOCUS ===\nTitle: ${topic.title}\nNote: The user chose this title deliberately. Keep analysis focused on what this title implies.\n===\n`;
+    let section = `=== TOPIC FOCUS ===\nTitle: ${topic.title}\nNote: The user chose this title deliberately. Keep analysis focused on what this title implies.\n`;
+    if (topic.summary) section += `\nPrevious AI Summary:\n${topic.summary}\n`;
+    if (topic.next_steps?.length) section += `\nPrevious AI Next Steps:\n${topic.next_steps.map(s => `- [${s.priority}] ${s.action} — ${s.rationale}`).join('\n')}\n`;
+    return section + '===\n';
   }
 
-  return `=== GROUND TRUTH (CORE FOCUS) ===
+  let section = `=== GROUND TRUTH (CORE FOCUS) ===
 The user has DELIBERATELY chosen this title and description. They define the CORE FOCUS of this topic.
 ALL analysis MUST be filtered through this lens. Items that are tangential to this stated focus should be acknowledged but de-prioritized.
 Do NOT let the volume of tangential items overshadow the core focus.
 
 Title (ground truth): ${topic.title}
 ${topic.description ? `Description (ground truth): ${topic.description}` : ''}
-${topic.goal ? `Goal (ground truth): ${topic.goal}` : ''}
-===\n`;
+${topic.goal ? `Goal (ground truth): ${topic.goal}` : ''}`;
+  if (topic.summary) section += `\nPrevious AI Summary:\n${topic.summary}`;
+  if (topic.next_steps?.length) section += `\nPrevious AI Next Steps:\n${topic.next_steps.map(s => `- [${s.priority}] ${s.action} — ${s.rationale}`).join('\n')}`;
+  return section + '\n===\n';
 }

@@ -248,6 +248,10 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
   const [topicTasksCache, setTopicTasksCache] = useState<Record<string, TopicTaskPreview[]>>({});
   const [loadingTasks, setLoadingTasks] = useState<Set<string>>(new Set());
   const [inlineNewTaskTitle, setInlineNewTaskTitle] = useState<Record<string, string>>({});
+  const [inlineTaskFormTopic, setInlineTaskFormTopic] = useState<string | null>(null);
+  const [inlineTaskFormData, setInlineTaskFormData] = useState<{
+    title: string; description: string; assignee: string; priority: 'high' | 'medium' | 'low'; due_date: string;
+  }>({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' });
   const [tasksViewLoaded, setTasksViewLoaded] = useState(false);
 
   // Auto-load tasks for all topics when entering tasks view
@@ -997,14 +1001,22 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
     }
   };
 
-  const quickAddTask = async (topicId: string) => {
-    const taskTitle = inlineNewTaskTitle[topicId]?.trim();
-    if (!taskTitle) return;
+  const quickAddTask = async (topicId: string, formData?: { title: string; description?: string; assignee?: string; priority?: string; due_date?: string }) => {
+    const payload = formData
+      ? {
+          title: formData.title.trim(),
+          ...(formData.description && { description: formData.description.trim() }),
+          ...(formData.assignee && { assignee: formData.assignee.trim() }),
+          ...(formData.priority && { priority: formData.priority }),
+          ...(formData.due_date && { due_date: new Date(formData.due_date).toISOString() }),
+        }
+      : { title: inlineNewTaskTitle[topicId]?.trim() || '' };
+    if (!payload.title) return;
     try {
       const res = await fetch(`/api/topics/${topicId}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: taskTitle }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const data = await res.json();
@@ -1013,6 +1025,8 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
           [topicId]: [data.task, ...(prev[topicId] || [])],
         }));
         setInlineNewTaskTitle(prev => ({ ...prev, [topicId]: '' }));
+        setInlineTaskFormTopic(null);
+        setInlineTaskFormData({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' });
         toast.success('Task added');
       }
     } catch {
@@ -1179,6 +1193,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
               <>
                 {(topicTasksCache[t.id] || []).filter(task => task.status !== 'completed' && task.status !== 'archived').slice(0, 5).map(task => {
                   const dotColor = task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400';
+                  const isOverdue = task.due_date && new Date(task.due_date) < new Date();
                   return (
                     <div key={task.id} className="flex items-center gap-2 group/task">
                       <button
@@ -1189,6 +1204,16 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                       </button>
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
                       <span className="text-xs text-gray-700 truncate flex-1">{task.title}</span>
+                      {task.assignee && (
+                        <span className="text-[10px] text-gray-400 flex items-center gap-0.5 flex-shrink-0">
+                          <Users className="w-2.5 h-2.5" /> {task.assignee}
+                        </span>
+                      )}
+                      {task.due_date && (
+                        <span className={`text-[10px] flex items-center gap-0.5 flex-shrink-0 ${isOverdue ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>
+                          <Calendar className="w-2.5 h-2.5" /> {formatRelativeDate(task.due_date)}
+                        </span>
+                      )}
                       {task.source === 'ai_extracted' && (
                         <span className="text-[8px] text-purple-500 bg-purple-50 px-1 rounded flex-shrink-0">AI</span>
                       )}
@@ -1252,6 +1277,117 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
     return (
       <div key={t.id}>
         {renderTopicCard(t, depth)}
+        {/* In tasks view, show inline tasks below the topic card */}
+        {viewMode === 'tasks' && (() => {
+          const cachedTasks = topicTasksCache[t.id] || [];
+          const activeTasks = cachedTasks.filter(task => task.status !== 'archived');
+          const isLoading = loadingTasks.has(t.id) || (!tasksViewLoaded && !topicTasksCache[t.id]);
+          if (isLoading) {
+            return (
+              <div className="ml-6 mb-1 pl-3 flex items-center gap-2 text-xs text-gray-400 py-1">
+                <Loader2 className="w-3 h-3 animate-spin" /> Loading tasks...
+              </div>
+            );
+          }
+          if (activeTasks.length === 0 && !(inlineNewTaskTitle[t.id]?.length)) {
+            return (
+              <div className="ml-6 mb-1 pl-3 flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={inlineNewTaskTitle[t.id] || ''}
+                  onChange={e => setInlineNewTaskTitle(prev => ({ ...prev, [t.id]: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') quickAddTask(t.id); }}
+                  placeholder="+ Add task..."
+                  className="text-xs px-2 py-1 text-gray-400 border-none focus:ring-0 bg-transparent placeholder:text-gray-300 w-40"
+                />
+              </div>
+            );
+          }
+          return (
+            <div className="ml-6 mb-2 pl-3 border-l-2 border-amber-100 space-y-0">
+              {activeTasks.map(task => {
+                const isCompleted = task.status === 'completed';
+                const dotColor = task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400';
+                const statusBadge = task.status === 'in_progress'
+                  ? <span className="text-[9px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">In Progress</span>
+                  : task.status === 'completed'
+                  ? <span className="text-[9px] font-medium text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">Done</span>
+                  : null;
+                return (
+                  <div key={task.id} className={`flex items-center gap-2 px-2 py-1.5 rounded hover:bg-amber-50/40 transition-colors group/task ${isCompleted ? 'opacity-50' : ''}`}>
+                    <button onClick={() => quickCompleteTask(t.id, task.id)}
+                      className={`flex-shrink-0 transition-colors ${isCompleted ? 'text-green-500' : 'text-gray-300 hover:text-green-500'}`}>
+                      {isCompleted ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+                    </button>
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
+                    <span className={`text-xs flex-1 min-w-0 truncate ${isCompleted ? 'line-through text-gray-400' : 'text-gray-700'}`}>{task.title}</span>
+                    {statusBadge}
+                    {task.assignee && (
+                      <span className="text-[10px] text-gray-400 flex items-center gap-0.5 flex-shrink-0">
+                        <Users className="w-2.5 h-2.5" /> {task.assignee}
+                      </span>
+                    )}
+                    {task.due_date && (
+                      <span className={`text-[10px] flex items-center gap-0.5 flex-shrink-0 ${
+                        new Date(task.due_date) < new Date() && !isCompleted ? 'text-red-500 font-semibold' : 'text-gray-400'
+                      }`}>
+                        <Calendar className="w-2.5 h-2.5" /> {formatRelativeDate(task.due_date)}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-gray-300 flex-shrink-0 hidden lg:inline">{formatRelativeDate(task.created_at)}</span>
+                    {task.source === 'ai_extracted' && (
+                      <span className="text-[8px] text-purple-500 bg-purple-50 px-1 rounded flex-shrink-0">AI</span>
+                    )}
+                  </div>
+                );
+              })}
+              {/* Quick-add inside tasks view */}
+              {inlineTaskFormTopic === t.id ? (
+                <div className="bg-amber-50/40 border border-amber-200/50 rounded-lg p-2.5 space-y-2 mt-1">
+                  <input type="text" value={inlineTaskFormData.title} onChange={e => setInlineTaskFormData(prev => ({ ...prev, title: e.target.value }))}
+                    placeholder="Task title *" className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-amber-400 focus:border-amber-400" autoFocus />
+                  <textarea value={inlineTaskFormData.description} onChange={e => setInlineTaskFormData(prev => ({ ...prev, description: e.target.value }))}
+                    placeholder="Description (optional)" rows={1}
+                    className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-amber-400 resize-none" />
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <input type="text" value={inlineTaskFormData.assignee} onChange={e => setInlineTaskFormData(prev => ({ ...prev, assignee: e.target.value }))}
+                      placeholder="Owner" className="px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-amber-400" />
+                    <input type="date" value={inlineTaskFormData.due_date} onChange={e => setInlineTaskFormData(prev => ({ ...prev, due_date: e.target.value }))}
+                      className="px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-amber-400" />
+                    <select value={inlineTaskFormData.priority} onChange={e => setInlineTaskFormData(prev => ({ ...prev, priority: e.target.value as 'high' | 'medium' | 'low' }))}
+                      className="px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-amber-400">
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => quickAddTask(t.id, inlineTaskFormData)} disabled={!inlineTaskFormData.title.trim()}
+                      className="px-2.5 py-1 text-[10px] font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded transition-colors disabled:opacity-50">Create</button>
+                    <button onClick={() => { setInlineTaskFormTopic(null); setInlineTaskFormData({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' }); }}
+                      className="px-2 py-1 text-[10px] text-gray-500 hover:bg-gray-100 rounded transition-colors">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-2 py-1">
+                  <Plus className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                  <input
+                    type="text"
+                    value={inlineNewTaskTitle[t.id] || ''}
+                    onChange={e => setInlineNewTaskTitle(prev => ({ ...prev, [t.id]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') quickAddTask(t.id); }}
+                    placeholder="Add task... (Enter)"
+                    className="flex-1 text-xs px-0 py-0.5 border-none focus:ring-0 placeholder:text-gray-300 bg-transparent"
+                  />
+                  <button onClick={() => { setInlineTaskFormTopic(t.id); setInlineTaskFormData({ title: inlineNewTaskTitle[t.id] || '', description: '', assignee: '', priority: 'medium', due_date: '' }); }}
+                    className="text-[10px] text-gray-400 hover:text-amber-600 px-1.5 py-0.5 rounded hover:bg-amber-50 transition-colors flex-shrink-0" title="Add with details">
+                    + Details
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {children.length > 0 && (
           <div className="ml-5 pl-3 border-l-2 border-indigo-100 space-y-1.5 mt-1">
             {children.map(child => renderTopicWithChildren(child, allTopics, depth + 1))}
@@ -2560,118 +2696,36 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
               </div>
             </div>
           ) : viewMode === 'tasks' ? (
-            <div className="space-y-4">
-              {displayTopics.filter(t => t.status !== 'archived').map(t => {
-                const cachedTasks = topicTasksCache[t.id] || [];
-                const activeTasks = cachedTasks.filter(task => task.status !== 'archived');
-                const pendingCount = activeTasks.filter(task => task.status === 'pending' || task.status === 'in_progress').length;
-                const completedCount = activeTasks.filter(task => task.status === 'completed').length;
-                const borderColor = areaBorderColors[t.area] || 'border-l-gray-300';
-
-                return (
-                  <div key={t.id} className={`bg-white rounded-xl border border-gray-100 border-l-[3px] ${borderColor} shadow-sm overflow-hidden`}>
-                    {/* Topic header */}
-                    <Link href={`/topics/${t.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 transition-colors">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-sm font-semibold text-gray-900 truncate">{t.title}</h3>
-                          {pendingCount > 0 && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">{pendingCount} open</span>
-                          )}
-                          {completedCount > 0 && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">{completedCount} done</span>
-                          )}
-                        </div>
-                        {t.description && <p className="text-xs text-gray-500 truncate mt-0.5">{t.description}</p>}
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
-                    </Link>
-
-                    {/* Tasks list */}
-                    {loadingTasks.has(t.id) || (!tasksViewLoaded && !topicTasksCache[t.id]) ? (
-                      <div className="px-4 py-3 border-t border-gray-50 flex items-center gap-2 text-xs text-gray-400">
-                        <Loader2 className="w-3 h-3 animate-spin" /> Loading tasks...
-                      </div>
-                    ) : activeTasks.length > 0 ? (
-                      <div className="border-t border-gray-50">
-                        {activeTasks.map(task => {
-                          const isCompleted = task.status === 'completed';
-                          const dotColor = task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400';
-                          const statusBadge = task.status === 'in_progress'
-                            ? <span className="text-[9px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">In Progress</span>
-                            : task.status === 'completed'
-                            ? <span className="text-[9px] font-medium text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">Done</span>
-                            : null;
-
-                          return (
-                            <div key={task.id} className={`flex items-center gap-2.5 px-4 py-2 hover:bg-gray-50/50 transition-colors group/task ${isCompleted ? 'opacity-50' : ''}`}>
-                              <button
-                                onClick={() => quickCompleteTask(t.id, task.id)}
-                                className={`flex-shrink-0 transition-colors ${isCompleted ? 'text-green-500' : 'text-gray-300 hover:text-green-500'}`}
-                              >
-                                {isCompleted ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-                              </button>
-                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
-                              <span className={`text-sm flex-1 min-w-0 truncate ${isCompleted ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                                {task.title}
-                              </span>
-                              {statusBadge}
-                              {task.assignee && (
-                                <span className="text-[10px] text-gray-400 flex items-center gap-0.5 flex-shrink-0">
-                                  <Users className="w-2.5 h-2.5" /> {task.assignee}
-                                </span>
-                              )}
-                              {task.due_date && (
-                                <span className={`text-[10px] flex items-center gap-0.5 flex-shrink-0 ${
-                                  new Date(task.due_date) < new Date() && !isCompleted ? 'text-red-500 font-semibold' : 'text-gray-400'
-                                }`}>
-                                  <Calendar className="w-2.5 h-2.5" /> {formatRelativeDate(task.due_date)}
-                                </span>
-                              )}
-                              <span className="text-[10px] text-gray-300 flex-shrink-0 hidden lg:inline">
-                                {formatRelativeDate(task.created_at)}
-                              </span>
-                              {task.source === 'ai_extracted' && (
-                                <span className="text-[8px] text-purple-500 bg-purple-50 px-1 rounded flex-shrink-0">AI</span>
-                              )}
-                            </div>
-                          );
-                        })}
-                        {/* Inline quick-add */}
-                        <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-50">
-                          <Plus className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />
-                          <input
-                            type="text"
-                            value={inlineNewTaskTitle[t.id] || ''}
-                            onChange={e => setInlineNewTaskTitle(prev => ({ ...prev, [t.id]: e.target.value }))}
-                            onKeyDown={e => { if (e.key === 'Enter') quickAddTask(t.id); }}
-                            placeholder="Add task..."
-                            className="flex-1 text-xs px-0 py-1 border-none focus:ring-0 placeholder:text-gray-300 bg-transparent"
-                          />
+            <div>
+              {/* Tasks view: same folder structure but with tasks visible under each topic */}
+              {displayFolders.length > 0 && (
+                <>
+                  {displayFolderTree.map(node => renderFolderNode(node))}
+                  {displayUnfoldered.length > 0 && (
+                    <div className="mt-6">
+                      <div className="border-t border-gray-200 pt-4 mb-3">
+                        <div className="flex items-center gap-2 px-2">
+                          <Inbox className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm font-medium text-gray-500">Topics without a folder</span>
+                          <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{displayUnfoldered.length}</span>
                         </div>
                       </div>
-                    ) : (
-                      <div className="border-t border-gray-50">
-                        <div className="flex items-center gap-2 px-4 py-2">
-                          <Plus className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />
-                          <input
-                            type="text"
-                            value={inlineNewTaskTitle[t.id] || ''}
-                            onChange={e => setInlineNewTaskTitle(prev => ({ ...prev, [t.id]: e.target.value }))}
-                            onKeyDown={e => { if (e.key === 'Enter') quickAddTask(t.id); }}
-                            placeholder="Add first task..."
-                            className="flex-1 text-xs px-0 py-1 border-none focus:ring-0 placeholder:text-gray-300 bg-transparent"
-                          />
-                        </div>
+                      <div className="grid grid-cols-1 gap-2">
+                        {displayUnfoldered.map(t => renderTopicWithChildren(t, displayTopics))}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-              {displayTopics.filter(t => t.status !== 'archived').length === 0 && (
+                    </div>
+                  )}
+                </>
+              )}
+              {displayFolders.length === 0 && (
+                <div className="grid grid-cols-1 gap-2">
+                  {displayTopics.map(t => renderTopicWithChildren(t, displayTopics))}
+                </div>
+              )}
+              {displayTopics.length === 0 && (
                 <div className="text-center py-16 text-gray-400">
                   <ListChecks className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                  <p className="text-sm">No active topics with tasks</p>
+                  <p className="text-sm">No topics to show</p>
                 </div>
               )}
             </div>
