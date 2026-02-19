@@ -45,7 +45,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { title, description, area = 'work', due_date, start_date, priority, tags, folder_id, parent_topic_id, status: topicStatus } = body;
+    const { title, description, area = 'work', due_date, start_date, priority, tags, folder_id, parent_topic_id, is_ongoing, status: topicStatus } = body;
 
     // Validation
     if (!title || typeof title !== 'string' || title.trim().length < 2) {
@@ -109,6 +109,7 @@ export async function POST(request: Request) {
     if (tags && Array.isArray(tags)) insertData.tags = tags;
     if (folder_id) insertData.folder_id = folder_id;
     if (parent_topic_id) insertData.parent_topic_id = parent_topic_id;
+    if (is_ongoing != null) insertData.is_ongoing = !!is_ongoing;
 
     let { data, error } = await supabase.from('topics').insert(insertData).select().single();
 
@@ -129,6 +130,7 @@ export async function POST(request: Request) {
       if (insertData.tags) safeData.tags = insertData.tags;
       if (insertData.folder_id) safeData.folder_id = insertData.folder_id;
       if (insertData.parent_topic_id) safeData.parent_topic_id = insertData.parent_topic_id;
+      if (insertData.is_ongoing != null) safeData.is_ongoing = insertData.is_ongoing;
       const retry = await supabase.from('topics').insert(safeData).select().single();
       data = retry.data;
       error = retry.error;

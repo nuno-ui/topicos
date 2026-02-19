@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client';
 import { formatRelativeDate } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, ArrowRightLeft, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban, Circle, Undo2 } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, ArrowRightLeft, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban, Circle, Undo2, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { HierarchyPicker, buildFolderPickerItems, buildTopicPickerItems } from '@/components/ui/hierarchy-picker';
@@ -147,6 +147,7 @@ interface Topic {
   summary: string | null;
   folder_id: string | null;
   parent_topic_id: string | null;
+  is_ongoing?: boolean;
   owner: string | null;
   stakeholders: string[] | null;
   progress_percent: number | null;
@@ -182,6 +183,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
   const [createTags, setCreateTags] = useState('');
   const [createStartDate, setCreateStartDate] = useState('');
   const [createParentTopicId, setCreateParentTopicId] = useState<string | null>(null);
+  const [createIsOngoing, setCreateIsOngoing] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [createSubmitting, setCreateSubmitting] = useState(false);
 
@@ -224,7 +226,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
   const [searchQuery, setSearchQuery] = useState('');
   const [filterArea, setFilterArea] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('active');
-  const [sortBy, setSortBy] = useState<string>('progress');
+  const [sortBy, setSortBy] = useState<string>('relevance');
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'folders' | 'flat'>('folders');
 
@@ -274,19 +276,20 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
         title: title.trim(),
         description: description.trim() || null,
         area,
-        due_date: dueDate || null,
-        start_date: createStartDate || null,
+        due_date: createIsOngoing ? null : (dueDate || null),
+        start_date: createIsOngoing ? null : (createStartDate || null),
         priority: createPriority,
         tags: parsedTags.length > 0 ? parsedTags : [],
         folder_id: createFolderId || null,
         parent_topic_id: createParentTopicId || null,
+        is_ongoing: createIsOngoing,
         user_id: user!.id,
         status: 'active',
       }).select('*, topic_items(count)').single();
       if (error) { toast.error(error.message); return; }
       setTopics([data, ...topics]);
       setTitle(''); setDescription(''); setDueDate(''); setCreateFolderId(null);
-      setCreatePriority(2); setCreateTags(''); setCreateStartDate(''); setCreateParentTopicId(null);
+      setCreatePriority(2); setCreateTags(''); setCreateStartDate(''); setCreateParentTopicId(null); setCreateIsOngoing(false);
       setFormErrors({});
       setShowCreate(false);
       toast.success('Topic created successfully!');
@@ -549,7 +552,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
     setReorgLoading(false);
   };
 
-  // Build folder tree
+  // Build folder tree (sorting handled after relevance functions are defined)
   const folderTree = useMemo(() => {
     const rootFolders = folders.filter(f => !f.parent_id);
     const getChildren = (parentId: string): FolderType[] => folders.filter(f => f.parent_id === parentId);
@@ -586,7 +589,8 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
     if (itemCount === 0) { score -= 20; issues.push('No linked items'); }
     if (t.due_date && new Date(t.due_date) < new Date()) { score -= 25; issues.push('Overdue'); }
     if (!t.tags || t.tags.length === 0) { score -= 5; issues.push('No tags'); }
-    if (t.progress_percent === null || t.progress_percent === undefined) { score -= 5; }
+    // Ongoing topics don't need progress tracking
+    if (!t.is_ongoing && (t.progress_percent === null || t.progress_percent === undefined)) { score -= 5; }
 
     score = Math.max(0, Math.min(100, score));
     const color = score >= 80 ? 'text-green-500' : score >= 50 ? 'text-amber-500' : 'text-red-500';
@@ -595,6 +599,57 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
 
     return { score, issues, color, bgColor, label };
   }, []);
+
+  // Topic relevance score (0-100, higher = more relevant/needs attention)
+  const getTopicRelevance = useCallback((t: Topic): number => {
+    // Completed/archived topics have zero relevance
+    if (t.status === 'completed' || t.status === 'archived') return 0;
+
+    let score = 0;
+    const now = Date.now();
+
+    // Priority (0-25): P5=25, P4=20, P3=15, P2=10, P1=5, P0=0
+    const p = t.priority || 0;
+    score += p >= 5 ? 25 : p === 4 ? 20 : p === 3 ? 15 : p === 2 ? 10 : p === 1 ? 5 : 0;
+
+    // Recency (0-25): how recently updated
+    const daysSinceUpdate = (now - new Date(t.updated_at).getTime()) / (1000 * 60 * 60 * 24);
+    score += daysSinceUpdate <= 1 ? 25 : daysSinceUpdate <= 3 ? 20 : daysSinceUpdate <= 7 ? 15 : daysSinceUpdate <= 14 ? 10 : daysSinceUpdate <= 30 ? 5 : 0;
+
+    // Activity (0-15): linked items count
+    const itemCount = t.topic_items?.[0]?.count || 0;
+    score += itemCount >= 10 ? 15 : itemCount >= 5 ? 12 : itemCount >= 3 ? 9 : itemCount >= 1 ? 5 : 0;
+
+    // Deadline urgency (0-20)
+    if (t.is_ongoing) {
+      score += 5; // Baseline for ongoing topics
+    } else if (t.due_date) {
+      const daysUntilDue = (new Date(t.due_date).getTime() - now) / (1000 * 60 * 60 * 24);
+      score += daysUntilDue < 0 ? 20 : daysUntilDue <= 3 ? 18 : daysUntilDue <= 7 ? 14 : daysUntilDue <= 14 ? 10 : daysUntilDue <= 30 ? 5 : 0;
+    }
+
+    // Progress gap (0-15): active topics with low progress need attention
+    const progress = t.progress_percent ?? 0;
+    if (!t.is_ongoing) {
+      score += progress <= 30 ? 15 : progress <= 60 ? 10 : progress <= 90 ? 5 : 0;
+    } else {
+      // Ongoing topics: give moderate score since they're always in progress
+      score += 8;
+    }
+
+    return Math.min(100, Math.max(0, score));
+  }, []);
+
+  // Folder relevance score: max relevance of contained active topics (recursive)
+  const getFolderRelevance = useCallback((folderId: string, topicsList: Topic[]): number => {
+    // Direct topics in this folder
+    const directTopics = topicsList.filter(t => t.folder_id === folderId && t.status === 'active');
+    const directMax = directTopics.reduce((max, t) => Math.max(max, getTopicRelevance(t)), 0);
+    // Child folder topics (recursive)
+    const childFolders = folders.filter(f => f.parent_id === folderId);
+    const childMax = childFolders.reduce((max, cf) => Math.max(max, getFolderRelevance(cf.id, topicsList)), 0);
+    return Math.max(directMax, childMax);
+  }, [folders, getTopicRelevance]);
 
   // Filtered and sorted topics (memoized)
   const filteredTopics = useMemo(() => {
@@ -633,11 +688,12 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
           return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
         case 'items': return (b.topic_items?.[0]?.count || 0) - (a.topic_items?.[0]?.count || 0);
         case 'title': return a.title.localeCompare(b.title);
+        case 'relevance': return getTopicRelevance(b) - getTopicRelevance(a);
         default: return 0;
       }
     });
     return result;
-  }, [topics, searchQuery, filterArea, filterStatus, sortBy, statsFilter, getTopicHealth]);
+  }, [topics, searchQuery, filterArea, filterStatus, sortBy, statsFilter, getTopicHealth, getTopicRelevance]);
 
   const areaCounts = useMemo(() => topics.reduce((acc, t) => { acc[t.area] = (acc[t.area] || 0) + 1; return acc; }, {} as Record<string, number>), [topics]);
 
@@ -914,6 +970,18 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
             {tags.length > 2 && (
               <span className="text-[9px] text-gray-400 flex-shrink-0 hidden lg:inline-block">+{tags.length - 2}</span>
             )}
+            {t.is_ongoing && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-100 text-cyan-700 font-medium flex-shrink-0 flex items-center gap-0.5">
+                <RefreshCw className="w-2.5 h-2.5" /> Ongoing
+              </span>
+            )}
+            {sortBy === 'relevance' && (() => {
+              const rel = getTopicRelevance(t);
+              if (rel >= 70) return <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold flex-shrink-0 flex items-center gap-0.5"><Flame className="w-2.5 h-2.5" /> Hot</span>;
+              if (rel >= 45) return <span className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" title={`Relevance: ${rel}`} />;
+              if (rel >= 20) return <span className="w-1.5 h-1.5 rounded-full bg-gray-300 flex-shrink-0" title={`Relevance: ${rel}`} />;
+              return null;
+            })()}
           </div>
           {/* Row 2: Description (one-line) + meta */}
           <div className="flex items-center gap-2 mt-1 pl-4 text-[11px] text-gray-400">
@@ -1075,6 +1143,13 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
               <span className={`text-[10px] font-semibold min-w-[20px] text-center px-1.5 py-0.5 rounded-full flex-shrink-0 ${totalCount > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-50 text-gray-300'}`}>
                 {totalCount}
               </span>
+              {sortBy === 'relevance' && (() => {
+                const rel = getFolderRelevance(node.folder.id, topicsSource);
+                if (rel >= 70) return <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" title={`Relevance: ${rel}`} />;
+                if (rel >= 45) return <span className="w-2 h-2 rounded-full bg-orange-400 flex-shrink-0" title={`Relevance: ${rel}`} />;
+                if (rel >= 20) return <span className="w-2 h-2 rounded-full bg-gray-300 flex-shrink-0" title={`Relevance: ${rel}`} />;
+                return null;
+              })()}
             </span>
           )}
           <div className="flex gap-0.5 items-center opacity-0 group-hover/folder:opacity-100 transition-opacity bg-white/80 backdrop-blur-sm rounded-lg border border-gray-100 shadow-sm p-0.5">
@@ -1186,7 +1261,19 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
 
   // The current topics to display (area-filtered or all)
   const displayTopics = selectedArea ? areaFilteredTopics : filteredTopics;
-  const displayFolderTree = selectedArea ? areaFolderTree : folderTree;
+  const rawFolderTree = selectedArea ? areaFolderTree : folderTree;
+  // Sort folder tree by relevance when relevance sort is active
+  const displayFolderTree = useMemo(() => {
+    if (sortBy !== 'relevance') return rawFolderTree;
+    type FTN = { folder: FolderType; children: FTN[]; depth: number };
+    const topicsForRelevance = selectedArea ? areaFilteredTopics : filteredTopics;
+    const sortTree = (nodes: FTN[]): FTN[] => {
+      return [...nodes]
+        .map(n => ({ ...n, children: sortTree(n.children) }))
+        .sort((a, b) => getFolderRelevance(b.folder.id, topicsForRelevance) - getFolderRelevance(a.folder.id, topicsForRelevance));
+    };
+    return sortTree(rawFolderTree);
+  }, [rawFolderTree, sortBy, selectedArea, areaFilteredTopics, filteredTopics, getFolderRelevance]);
   const displayUnfoldered = selectedArea ? areaUnfolderedTopics : unfolderedTopics;
   const displayFolders = selectedArea ? areaFilteredFolders : folders;
 
@@ -1708,13 +1795,26 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                   </div>
                 </div>
               </div>
+              {/* Ongoing toggle */}
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => { setCreateIsOngoing(!createIsOngoing); if (!createIsOngoing) { setDueDate(''); setCreateStartDate(''); } }}
+                  className={`relative w-9 h-5 rounded-full transition-colors ${createIsOngoing ? 'bg-cyan-500' : 'bg-gray-300'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow-sm ${createIsOngoing ? 'translate-x-4' : ''}`} />
+                </button>
+                <label className="text-xs font-medium text-gray-600 flex items-center gap-1 cursor-pointer" onClick={() => { setCreateIsOngoing(!createIsOngoing); if (!createIsOngoing) { setDueDate(''); setCreateStartDate(''); } }}>
+                  <RefreshCw className="w-3 h-3 text-cyan-600" />
+                  Ongoing topic <span className="text-gray-400 font-normal">(no end date needed)</span>
+                </label>
+              </div>
               <div className="grid grid-cols-2 gap-4">
+                {!createIsOngoing && (
                 <div>
                   <label className="text-xs font-medium text-gray-500 block mb-1">Due Date</label>
                   <input type="date" value={dueDate} onChange={e => { setDueDate(e.target.value); setFormErrors(prev => ({ ...prev, dueDate: '' })); }}
                     className={`w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.dueDate ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} />
                   {formErrors.dueDate && <p className="text-xs text-red-500 mt-1">{formErrors.dueDate}</p>}
                 </div>
+                )}
                 <div>
                   <label className="text-xs font-medium text-gray-500 block mb-1">Folder</label>
                   {folders.length > 0 ? (
@@ -1930,6 +2030,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                 <div className="flex items-center gap-1 ml-auto">
                   <ArrowUpDown className="w-3 h-3 text-gray-400" />
                   <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="text-xs border rounded-lg px-2 py-1.5 text-gray-600 bg-white">
+                    <option value="relevance">Relevance</option>
                     <option value="progress">Completion %</option>
                     <option value="updated_at">Last Updated</option>
                     <option value="priority">Priority</option>
@@ -2067,7 +2168,20 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                 </div>
               </div>
 
+              {/* Ongoing toggle */}
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => { setCreateIsOngoing(!createIsOngoing); if (!createIsOngoing) { setDueDate(''); setCreateStartDate(''); } }}
+                  className={`relative w-9 h-5 rounded-full transition-colors ${createIsOngoing ? 'bg-cyan-500' : 'bg-gray-300'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow-sm ${createIsOngoing ? 'translate-x-4' : ''}`} />
+                </button>
+                <label className="text-xs font-medium text-gray-600 flex items-center gap-1 cursor-pointer" onClick={() => { setCreateIsOngoing(!createIsOngoing); if (!createIsOngoing) { setDueDate(''); setCreateStartDate(''); } }}>
+                  <RefreshCw className="w-3 h-3 text-cyan-600" />
+                  Ongoing topic <span className="text-gray-400 font-normal">(no end date needed)</span>
+                </label>
+              </div>
+
               {/* Row: Start Date + Due Date */}
+              {!createIsOngoing && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-medium text-gray-500 block mb-1">Start Date</label>
@@ -2082,6 +2196,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                   {formErrors.dueDate && <p className="text-xs text-red-500 mt-1">{formErrors.dueDate}</p>}
                 </div>
               </div>
+              )}
 
               {/* Row: Tags + Folder */}
               <div className="grid grid-cols-2 gap-4">

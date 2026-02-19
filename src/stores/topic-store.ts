@@ -7,6 +7,7 @@ interface Topic {
   status: string;
   area: string;
   parent_topic_id: string | null;
+  is_ongoing?: boolean;
 }
 
 interface TopicStore {

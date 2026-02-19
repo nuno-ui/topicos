@@ -10,6 +10,7 @@ export interface Topic {
   tags: string[];
   folder_id: string | null;
   parent_topic_id: string | null;
+  is_ongoing?: boolean;
   children?: Topic[];
   summary: string | null;
   notes: string | null;

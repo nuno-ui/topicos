@@ -66,6 +66,7 @@ interface Topic {
   goal: string | null;
   folder_id: string | null;
   parent_topic_id: string | null;
+  is_ongoing?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -168,6 +169,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [editParentTopicId, setEditParentTopicId] = useState(topic.parent_topic_id || '');
   const [editOwner, setEditOwner] = useState(topic.owner || '');
   const [editGoal, setEditGoal] = useState(topic.goal || '');
+  const [editIsOngoing, setEditIsOngoing] = useState(topic.is_ongoing || false);
 
   // Folders for folder picker (full data for hierarchy display)
   const [folders, setFolders] = useState<Array<{ id: string; name: string; parent_id: string | null; color: string | null; area: string | null; position: number }>>([]);
@@ -878,8 +880,8 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
           description: editDescription.trim() || null,
           area: editArea,
           status: editStatus,
-          due_date: editDueDate || null,
-          start_date: editStartDate || null,
+          due_date: editIsOngoing ? null : (editDueDate || null),
+          start_date: editIsOngoing ? null : (editStartDate || null),
           priority: editPriority,
           tags: editTags.split(',').map(t => t.trim()).filter(Boolean),
           progress_percent: editProgress,
@@ -887,6 +889,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
           parent_topic_id: editParentTopicId || null,
           owner: editOwner.trim() || null,
           goal: editGoal.trim() || null,
+          is_ongoing: editIsOngoing,
         }),
       });
       const data = await res.json();
@@ -1321,16 +1324,30 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                       <option value="completed">Completed</option>
                       <option value="archived">Archived</option>
                     </select>
-                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)}
-                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                    {!editIsOngoing && (
+                      <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)}
+                        className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                    )}
+                    {/* Ongoing toggle */}
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => { setEditIsOngoing(!editIsOngoing); if (!editIsOngoing) { setEditDueDate(''); setEditStartDate(''); } }}
+                        className={`relative w-9 h-5 rounded-full transition-colors ${editIsOngoing ? 'bg-cyan-500' : 'bg-gray-300'}`}>
+                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow-sm ${editIsOngoing ? 'translate-x-4' : ''}`} />
+                      </button>
+                      <span className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                        <RefreshCw className="w-3 h-3 text-cyan-600" /> Ongoing
+                      </span>
+                    </div>
                   </div>
                   {/* Dates row */}
                   <div className="grid grid-cols-2 gap-3">
+                    {!editIsOngoing && (
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
                       <input type="date" value={editStartDate} onChange={e => setEditStartDate(e.target.value)}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
                     </div>
+                    )}
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Progress ({editProgress}%)</label>
                       <input type="range" min={0} max={100} value={editProgress} onChange={e => setEditProgress(Number(e.target.value))}
@@ -1468,6 +1485,13 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                     <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${areaBadgeClass}`}>
                       {topic.area.charAt(0).toUpperCase() + topic.area.slice(1)}
                     </span>
+
+                    {/* Ongoing badge */}
+                    {topic.is_ongoing && (
+                      <span className="text-xs font-semibold px-3 py-1.5 rounded-full inline-flex items-center gap-1 bg-cyan-50 text-cyan-700 ring-1 ring-cyan-200">
+                        <RefreshCw className="w-3 h-3" /> Ongoing
+                      </span>
+                    )}
 
                     {/* Priority badge */}
                     {topic.priority > 0 && (
