@@ -316,6 +316,20 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
   const [intelligence, setIntelligence] = useState<Record<string, unknown> | null>(null);
   const [showIntelligence, setShowIntelligence] = useState(false);
 
+  // Review Recent Activity state
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewResults, setReviewResults] = useState<Array<{
+    external_id: string; source: string; source_account_id: string;
+    title: string; snippet: string; url: string; occurred_at: string;
+    metadata: Record<string, unknown>;
+    ai_confidence?: number | null; ai_reason?: string | null; already_linked?: boolean;
+  }>>([]);
+  const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [reviewTimePeriod, setReviewTimePeriod] = useState<'15d' | '1m' | '3m'>('1m');
+  const [selectedReviewResults, setSelectedReviewResults] = useState<Set<string>>(new Set());
+  const [reviewLinkTopicId, setReviewLinkTopicId] = useState<string | null>(null);
+  const [reviewLinking, setReviewLinking] = useState(false);
+
   // Link topic state
   const [showLinkDropdown, setShowLinkDropdown] = useState(false);
   const [linkSearchQuery, setLinkSearchQuery] = useState('');
@@ -684,6 +698,88 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       toast.error(err instanceof Error ? err.message : 'Agent failed');
     }
     setAgentLoading(null);
+  };
+
+  // Review Recent Activity
+  const handleReviewActivity = async () => {
+    setReviewLoading(true);
+    setReviewResults([]);
+    setShowReviewPanel(true);
+    try {
+      const res = await fetch('/api/ai/review-activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contact_id: contact.id,
+          time_period: reviewTimePeriod,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setReviewResults(data.results ?? []);
+      setSelectedReviewResults(new Set());
+      const periodLabel = reviewTimePeriod === '15d' ? '15 days' : reviewTimePeriod === '1m' ? 'month' : '3 months';
+      toast.success(`Found ${data.results?.length || 0} items from the last ${periodLabel}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Review failed');
+    }
+    setReviewLoading(false);
+  };
+
+  const toggleReviewResult = (key: string) => {
+    setSelectedReviewResults(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+
+  const selectAllReview = () => {
+    const linkable = reviewResults.filter(r => !r.already_linked);
+    if (selectedReviewResults.size === linkable.length) {
+      setSelectedReviewResults(new Set());
+    } else {
+      setSelectedReviewResults(new Set(linkable.map(r => r.source + ':' + r.external_id)));
+    }
+  };
+
+  const linkSelectedReviewToTopic = async () => {
+    if (!reviewLinkTopicId || selectedReviewResults.size === 0) return;
+    setReviewLinking(true);
+    let linked = 0;
+    for (const result of reviewResults) {
+      const key = result.source + ':' + result.external_id;
+      if (!selectedReviewResults.has(key) || result.already_linked) continue;
+      try {
+        const res = await fetch(`/api/topics/${reviewLinkTopicId}/items`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            external_id: result.external_id,
+            source: result.source,
+            source_account_id: result.source_account_id,
+            title: result.title,
+            snippet: result.snippet || '',
+            url: result.url || '',
+            occurred_at: result.occurred_at,
+            metadata: result.metadata || {},
+            linked_by: 'ai_review',
+          }),
+        });
+        if (res.ok) linked++;
+      } catch { /* continue */ }
+    }
+    if (linked > 0) {
+      toast.success(`Linked ${linked} item${linked > 1 ? 's' : ''} to topic`);
+      // Mark results as linked
+      setReviewResults(prev => prev.map(r => {
+        const key = r.source + ':' + r.external_id;
+        if (selectedReviewResults.has(key)) return { ...r, already_linked: true };
+        return r;
+      }));
+      setSelectedReviewResults(new Set());
+    }
+    setReviewLinking(false);
   };
 
   // Topic linking
@@ -1435,6 +1531,20 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               </span>
             </button>
 
+            <button
+              onClick={handleReviewActivity}
+              disabled={!!agentLoading || reviewLoading}
+              className="group relative px-3 py-2 text-teal-700 rounded-xl text-xs font-semibold hover:bg-teal-50 disabled:opacity-50 flex items-center gap-1.5 transition-all"
+            >
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%)' }}>
+                {reviewLoading ? <Loader2 className="w-3 h-3 animate-spin text-white" /> : <Activity className="w-3 h-3 text-white" />}
+              </div>
+              Review
+              <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
+                Find recent items mentioning this contact
+              </span>
+            </button>
+
             <div className="w-px h-6 bg-gray-200 mx-0.5" />
 
             <div className="relative">
@@ -1478,6 +1588,146 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               </span>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ============================
+          Review Recent Activity Panel
+          ============================ */}
+      {showReviewPanel && (
+        <div className="animate-fade-in bg-white rounded-2xl border border-teal-200 shadow-lg overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-teal-100 bg-gradient-to-r from-teal-50/50 to-cyan-50/30">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%)' }}>
+                  <Activity className="w-3.5 h-3.5 text-white" />
+                </div>
+                Review Recent Activity
+                {reviewLoading && <Loader2 className="w-4 h-4 animate-spin text-teal-500" />}
+              </h3>
+              <button onClick={() => setShowReviewPanel(false)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">Find recent items involving {contact.name} that aren&apos;t linked yet</p>
+          </div>
+          <div className="px-5 py-3 space-y-3 border-b border-teal-100/50">
+            {/* Time period + Scan */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 font-medium">Period:</span>
+              {(['15d', '1m', '3m'] as const).map(period => (
+                <button
+                  key={period}
+                  onClick={() => setReviewTimePeriod(period)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                    reviewTimePeriod === period
+                      ? 'bg-teal-50 text-teal-700 border-teal-300 shadow-sm'
+                      : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  {period === '15d' ? '15 days' : period === '1m' ? '1 month' : '3 months'}
+                </button>
+              ))}
+              <div className="flex-1" />
+              <button onClick={handleReviewActivity} disabled={reviewLoading}
+                className="px-4 py-1.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-lg text-xs font-medium hover:from-teal-700 hover:to-cyan-700 disabled:opacity-50 flex items-center gap-1.5 transition-all shadow-sm">
+                {reviewLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+                {reviewLoading ? 'Scanning...' : 'Scan'}
+              </button>
+            </div>
+          </div>
+
+          {/* Results */}
+          {reviewResults.length === 0 && !reviewLoading ? (
+            <p className="px-5 py-8 text-center text-sm text-gray-500">
+              {reviewResults.length === 0 ? 'Click Scan to search for recent items involving this contact' : 'No unlinked items found — this contact appears up to date!'}
+            </p>
+          ) : reviewLoading ? (
+            <div className="px-5 py-8 text-center">
+              <Loader2 className="w-6 h-6 animate-spin text-teal-500 mx-auto mb-2" />
+              <p className="text-sm text-gray-500">Scanning sources for {contact.name}...</p>
+            </div>
+          ) : (
+            <>
+              {/* Header with select all + link controls */}
+              <div className="px-5 py-2.5 flex items-center justify-between bg-teal-50/30 border-b border-teal-100/50">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-semibold text-gray-600">{reviewResults.length} results</span>
+                  {reviewResults.filter(r => !r.already_linked).length > 0 && (
+                    <button onClick={selectAllReview}
+                      className="text-xs text-teal-600 hover:text-teal-800 flex items-center gap-1 transition-colors">
+                      {selectedReviewResults.size === reviewResults.filter(r => !r.already_linked).length
+                        ? 'Deselect All' : 'Select All'}
+                    </button>
+                  )}
+                </div>
+                {selectedReviewResults.size > 0 && (
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={reviewLinkTopicId || ''}
+                      onChange={e => setReviewLinkTopicId(e.target.value || null)}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-400 max-w-[200px]"
+                    >
+                      <option value="">Link to topic...</option>
+                      {(topicLinks || []).map((ct: ContactTopicLink) => (
+                        <option key={ct.topic_id} value={ct.topic_id}>
+                          {ct.topics?.title || ct.topic_id}
+                        </option>
+                      ))}
+                    </select>
+                    <button onClick={linkSelectedReviewToTopic} disabled={reviewLinking || !reviewLinkTopicId}
+                      className="px-3 py-1.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-lg text-xs font-medium hover:from-teal-700 hover:to-cyan-700 disabled:opacity-50 flex items-center gap-1.5 shadow-sm transition-all">
+                      {reviewLinking ? <Loader2 className="w-3 h-3 animate-spin" /> : <LinkIcon className="w-3 h-3" />}
+                      Link {selectedReviewResults.size}
+                    </button>
+                  </div>
+                )}
+              </div>
+              {/* Results list */}
+              <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto">
+                {reviewResults.map((item) => {
+                  const key = item.source + ':' + item.external_id;
+                  const confidencePercent = item.ai_confidence != null ? Math.round(item.ai_confidence * 100) : null;
+                  return (
+                    <div key={key} className={`px-5 py-3.5 flex items-start gap-3 transition-colors ${item.already_linked ? 'opacity-50 bg-gray-50' : 'hover:bg-teal-50/20'}`}>
+                      {!item.already_linked ? (
+                        <input type="checkbox" checked={selectedReviewResults.has(key)}
+                          onChange={() => toggleReviewResult(key)}
+                          className="mt-1 rounded border-gray-300 text-teal-600 focus:ring-teal-500" />
+                      ) : (
+                        <span className="mt-1 text-green-500 text-xs font-semibold flex items-center gap-0.5">
+                          <Check className="w-3 h-3" /> Linked
+                        </span>
+                      )}
+                      <SourceIconCircle source={item.source} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
+                        <p className="text-xs text-gray-500 truncate mt-0.5">{item.snippet}</p>
+                        <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-400">
+                          <span className="text-[10px] font-medium text-gray-500">{getSourceLabel(item.source)}</span>
+                          <span>{formatRelativeDate(item.occurred_at)}</span>
+                          {confidencePercent != null && (
+                            <span className={`text-[10px] font-bold ${confidencePercent >= 80 ? 'text-green-600' : confidencePercent >= 50 ? 'text-amber-600' : 'text-gray-500'}`}>
+                              {confidencePercent}% match
+                            </span>
+                          )}
+                        </div>
+                        {item.ai_reason && (
+                          <p className="text-xs text-teal-600 mt-1 italic bg-teal-50/50 px-2 py-1 rounded">{item.ai_reason}</p>
+                        )}
+                      </div>
+                      {item.url && (
+                        <a href={item.url} target="_blank" rel="noopener noreferrer"
+                          className="p-1.5 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors" title="Open in source">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       )}
 
