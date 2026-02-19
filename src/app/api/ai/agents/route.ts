@@ -5,6 +5,19 @@ import { getTopicNoteContext } from '@/lib/ai/note-context';
 import { enrichTopicItems, enrichItemContent, forceReenrichItem } from '@/lib/search/content';
 import { getAncestorContext, getAncestorItems, buildGroundTruthSection } from '@/lib/ai/topic-hierarchy';
 
+function parseFuzzyDate(dateStr: string): string | null {
+  if (!dateStr || dateStr === 'No deadline' || dateStr === 'N/A' || dateStr === 'None') return null;
+  const parsed = new Date(dateStr);
+  if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 2000) return parsed.toISOString();
+  const now = new Date();
+  const lower = dateStr.toLowerCase();
+  if (lower === 'asap' || lower === 'today' || lower === 'eod') return now.toISOString();
+  if (lower === 'tomorrow') { now.setDate(now.getDate() + 1); return now.toISOString(); }
+  if (lower.includes('this week')) { now.setDate(now.getDate() + (5 - now.getDay())); return now.toISOString(); }
+  if (lower.includes('next week')) { now.setDate(now.getDate() + (12 - now.getDay())); return now.toISOString(); }
+  return null;
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = await createServerSupabaseClient();
@@ -183,6 +196,41 @@ Return JSON: { "action_items": [{ "task": "description", "assignee": "person nam
         );
 
         result = { action_items: data.action_items };
+
+        // Optionally persist extracted action items as topic_tasks
+        if (context.persist_tasks && data.action_items?.length > 0) {
+          const tasksToInsert = data.action_items
+            .filter((a: { status: string }) => a.status !== 'done')
+            .map((a: { task: string; assignee: string; due: string; priority: string; source_item: string; status: string }, index: number) => ({
+              user_id: user.id,
+              topic_id: topic_id,
+              title: a.task,
+              description: '',
+              status: a.status === 'in-progress' ? 'in_progress' : 'pending',
+              priority: a.priority || 'medium',
+              due_date: parseFuzzyDate(a.due),
+              assignee: a.assignee || null,
+              source: 'ai_extracted',
+              source_item_ref: a.source_item || null,
+              position: index,
+              metadata: { raw_action_item: a },
+            }));
+
+          if (tasksToInsert.length > 0) {
+            const { data: insertedTasks, error: insertError } = await supabase
+              .from('topic_tasks')
+              .insert(tasksToInsert)
+              .select();
+
+            if (insertError) {
+              console.error('Failed to persist tasks:', insertError);
+            } else {
+              result.persisted_count = insertedTasks?.length || 0;
+              result.tasks = insertedTasks;
+            }
+          }
+        }
+
         break;
       }
 

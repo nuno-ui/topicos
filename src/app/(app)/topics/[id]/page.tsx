@@ -28,11 +28,12 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
   const { data: { user } } = await supabase.auth.getUser();
 
   // Fetch topic, items, and contacts in parallel
-  const [topicRes, itemsRes, contactsRes, childrenRes] = await Promise.all([
+  const [topicRes, itemsRes, contactsRes, childrenRes, tasksRes] = await Promise.all([
     supabase.from('topics').select('*').eq('id', id).eq('user_id', user!.id).single(),
     supabase.from('topic_items').select('*').eq('topic_id', id).order('occurred_at', { ascending: false }),
     supabase.from('contact_topic_links').select('*, contacts(id, name, email, organization, role)').eq('topic_id', id).eq('user_id', user!.id),
     supabase.from('topics').select('id, title, status, area, priority, updated_at, progress_percent, description, tags, parent_topic_id').eq('parent_topic_id', id).eq('user_id', user!.id).order('updated_at', { ascending: false }),
+    supabase.from('topic_tasks').select('*').eq('topic_id', id).order('position', { ascending: true }).order('created_at', { ascending: false }),
   ]);
 
   if (!topicRes.data) notFound();
@@ -57,6 +58,7 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
         initialContacts={contactsRes.data ?? []}
         childTopics={childrenRes.data ?? []}
         parentTopic={parentTopic}
+        initialTasks={tasksRes.data ?? []}
       />
     </div>
   );

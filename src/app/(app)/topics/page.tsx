@@ -18,7 +18,7 @@ export default async function TopicsPage({ searchParams }: { searchParams: Promi
   const [topicsRes, foldersRes] = await Promise.all([
     supabase
       .from('topics')
-      .select('*, topic_items(count)')
+      .select('*, topic_items(count), topic_tasks(count)')
       .eq('user_id', user!.id)
       .order('updated_at', { ascending: false }),
     supabase

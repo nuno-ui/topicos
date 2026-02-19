@@ -86,7 +86,26 @@ interface LinkedContact {
   } | null;
 }
 
-type SectionTab = 'items' | 'intelligence' | 'search' | 'details' | 'contacts' | 'notes' | 'timeline';
+type SectionTab = 'items' | 'tasks' | 'intelligence' | 'search' | 'details' | 'contacts' | 'notes' | 'timeline';
+
+interface TopicTask {
+  id: string;
+  topic_id: string;
+  title: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'archived';
+  priority: 'high' | 'medium' | 'low';
+  due_date: string | null;
+  assignee: string | null;
+  source: 'manual' | 'ai_extracted';
+  source_item_ref: string | null;
+  position: number;
+  completed_at: string | null;
+  archived_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
 
 const SOURCES = ['gmail', 'calendar', 'drive', 'slack', 'notion', 'manual', 'link'] as const;
 
@@ -110,7 +129,7 @@ interface ParentTopic {
   parent_topic_id: string | null;
 }
 
-export function TopicDetail({ topic: initialTopic, initialItems, initialContacts = [], childTopics = [], parentTopic = null }: { topic: Topic; initialItems: TopicItem[]; initialContacts?: LinkedContact[]; childTopics?: ChildTopic[]; parentTopic?: ParentTopic | null }) {
+export function TopicDetail({ topic: initialTopic, initialItems, initialContacts = [], childTopics = [], parentTopic = null, initialTasks = [] }: { topic: Topic; initialItems: TopicItem[]; initialContacts?: LinkedContact[]; childTopics?: ChildTopic[]; parentTopic?: ParentTopic | null; initialTasks?: TopicTask[] }) {
   const router = useRouter();
   const [topic, setTopic] = useState(initialTopic);
   const [items, setItems] = useState(initialItems);
@@ -195,6 +214,11 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.topic) { setTopic(d.topic); setNotes(d.topic.notes || ''); } })
       .catch(() => {});
+    // Refresh tasks on mount
+    fetch(`/api/topics/${initialTopic.id}/tasks`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.tasks) setTasks(d.tasks); })
+      .catch(() => {});
   }, []);
 
   // Notes state
@@ -231,6 +255,13 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [linkTitle, setLinkTitle] = useState('');
   const [linkSaving, setLinkSaving] = useState(false);
   const [itemsRefreshing, setItemsRefreshing] = useState(false);
+
+  // Tasks state
+  const [tasks, setTasks] = useState<TopicTask[]>(initialTasks);
+  const [taskFilter, setTaskFilter] = useState<'active' | 'completed' | 'archived' | 'all'>('active');
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [taskSaving, setTaskSaving] = useState(false);
 
   // Content expand state
   const [expandedContent, setExpandedContent] = useState<Record<string, string>>({});
@@ -282,7 +313,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   }, []);
 
   // Keyboard navigation shortcuts
-  const sectionTabOrder: SectionTab[] = ['items', 'intelligence', 'search', 'details', 'contacts', 'notes', 'timeline'];
+  const sectionTabOrder: SectionTab[] = ['items', 'tasks', 'intelligence', 'search', 'details', 'contacts', 'notes', 'timeline'];
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -1083,6 +1114,123 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
     setItemsRefreshing(false);
   }, [topic.id]);
 
+  // --- TASK FUNCTIONS ---
+  const refreshTasks = useCallback(async () => {
+    setTasksLoading(true);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/tasks`);
+      if (res.ok) {
+        const data = await res.json();
+        setTasks(data.tasks || []);
+      }
+    } catch (err) {
+      console.error('Failed to refresh tasks:', err);
+    }
+    setTasksLoading(false);
+  }, [topic.id]);
+
+  const createTask = async (title: string) => {
+    if (!title.trim()) return;
+    setTaskSaving(true);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title.trim() }),
+      });
+      if (!res.ok) throw new Error('Failed to create task');
+      const data = await res.json();
+      setTasks(prev => [data.task, ...prev]);
+      setNewTaskTitle('');
+      toast.success('Task created');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create task');
+    }
+    setTaskSaving(false);
+  };
+
+  const updateTask = async (taskId: string, updates: Partial<TopicTask>) => {
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) throw new Error('Failed to update task');
+      const data = await res.json();
+      setTasks(prev => prev.map(t => t.id === taskId ? data.task : t));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update task');
+    }
+  };
+
+  const toggleTaskComplete = async (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    const newStatus = task.status === 'completed' ? 'pending' : 'completed';
+    await updateTask(taskId, { status: newStatus } as Partial<TopicTask>);
+    toast.success(newStatus === 'completed' ? 'Task completed!' : 'Task reopened');
+  };
+
+  const archiveTask = async (taskId: string) => {
+    await updateTask(taskId, { status: 'archived' } as Partial<TopicTask>);
+    toast.success('Task archived');
+  };
+
+  const deleteTask = async (taskId: string) => {
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/tasks/${taskId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete task');
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+      toast.success('Task deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete task');
+    }
+  };
+
+  const extractAndPersistTasks = async () => {
+    if (items.length === 0) {
+      toast.error('Link some items first before extracting tasks');
+      return;
+    }
+    setAgentLoading('extract_tasks');
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: 'extract_action_items',
+          context: {
+            topic_id: topic.id,
+            topic_title: topic.title,
+            topic_description: topic.description,
+            items: items.slice(0, 20).map(i => ({
+              title: i.title,
+              snippet: i.snippet,
+              source: i.source,
+              occurred_at: i.occurred_at,
+            })),
+            persist_tasks: true,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error('AI extraction failed');
+      const data = await res.json();
+      if (data.result?.tasks?.length) {
+        setTasks(prev => [...data.result.tasks, ...prev]);
+        toast.success(`Extracted ${data.result.persisted_count || data.result.tasks.length} tasks with AI`);
+      } else if (data.result?.action_items?.length) {
+        // Fallback: AI returned items but didn't persist (API key issue, etc.)
+        toast.info(`AI found ${data.result.action_items.length} potential tasks but couldn't persist them`);
+      } else {
+        toast.info('No actionable tasks found in linked items');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to extract tasks');
+    }
+    setAgentLoading(null);
+  };
+
   // --- PIN ITEM ---
   const togglePinItem = async (itemId: string) => {
     const item = items.find(i => i.id === itemId);
@@ -1786,6 +1934,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
         <div className="flex gap-1 overflow-x-auto py-1">
           {([
             { key: 'items' as SectionTab, label: 'Items', icon: <Layers className="w-3.5 h-3.5" />, count: items.length },
+            { key: 'tasks' as SectionTab, label: 'Tasks', icon: <ListChecks className="w-3.5 h-3.5" />, count: tasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length },
             { key: 'intelligence' as SectionTab, label: 'Intelligence', icon: <Bot className="w-3.5 h-3.5" />, count: analysis ? 1 : 0 },
             { key: 'search' as SectionTab, label: 'Search', icon: <Search className="w-3.5 h-3.5" />, count: searchResults.length + aiFindResults.length },
             { key: 'details' as SectionTab, label: 'Details', icon: <Info className="w-3.5 h-3.5" />, count: 0 },
@@ -2096,6 +2245,202 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ===== TASKS TAB ===== */}
+      {activeSection === 'tasks' && (
+        <div id="section-tasks" className="scroll-mt-8 space-y-4">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
+                <ListChecks className="w-3.5 h-3.5 text-white" />
+              </span>
+              <h2 className="text-base font-bold text-gray-900">Tasks</h2>
+              <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                {tasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length} active
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button onClick={refreshTasks} disabled={tasksLoading}
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Refresh tasks">
+                <RefreshCw className={`w-3.5 h-3.5 ${tasksLoading ? 'animate-spin' : ''}`} />
+              </button>
+              <button onClick={extractAndPersistTasks} disabled={!!agentLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors disabled:opacity-50"
+                title="Extract tasks from linked items using AI">
+                {agentLoading === 'extract_tasks' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                Extract with AI
+              </button>
+            </div>
+          </div>
+
+          {/* Quick-add input */}
+          <div className="flex items-center gap-2">
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={newTaskTitle}
+                onChange={e => setNewTaskTitle(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && newTaskTitle.trim()) createTask(newTaskTitle); }}
+                placeholder="Add a new task... (press Enter)"
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 transition-all placeholder:text-gray-400"
+                disabled={taskSaving}
+              />
+              {taskSaving && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-amber-500" />}
+            </div>
+          </div>
+
+          {/* Filter pills */}
+          <div className="flex gap-1">
+            {(['active', 'completed', 'archived', 'all'] as const).map(filter => {
+              const counts = {
+                active: tasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length,
+                completed: tasks.filter(t => t.status === 'completed').length,
+                archived: tasks.filter(t => t.status === 'archived').length,
+                all: tasks.length,
+              };
+              return (
+                <button
+                  key={filter}
+                  onClick={() => setTaskFilter(filter)}
+                  className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                    taskFilter === filter
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                  {counts[filter] > 0 && <span className="ml-1 text-[10px] opacity-70">{counts[filter]}</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Task list */}
+          {(() => {
+            const filteredTasks = tasks.filter(t => {
+              if (taskFilter === 'active') return t.status === 'pending' || t.status === 'in_progress';
+              if (taskFilter === 'completed') return t.status === 'completed';
+              if (taskFilter === 'archived') return t.status === 'archived';
+              return true;
+            });
+
+            if (filteredTasks.length === 0) {
+              return (
+                <div className="text-center py-12 text-gray-400">
+                  <ListChecks className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                  <p className="text-sm font-medium">
+                    {tasks.length === 0
+                      ? 'No tasks yet'
+                      : `No ${taskFilter} tasks`}
+                  </p>
+                  <p className="text-xs mt-1">
+                    {tasks.length === 0
+                      ? 'Add tasks manually or extract them from linked items with AI'
+                      : 'Try a different filter'}
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-1">
+                {filteredTasks.map(task => {
+                  const isCompleted = task.status === 'completed';
+                  const isArchived = task.status === 'archived';
+                  const priorityDot = task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400';
+
+                  return (
+                    <div
+                      key={task.id}
+                      className={`group flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-all hover:shadow-sm ${
+                        isArchived ? 'border-gray-100 bg-gray-50/50 opacity-60' : isCompleted ? 'border-green-100 bg-green-50/30' : 'border-gray-100 bg-white hover:border-gray-200'
+                      }`}
+                    >
+                      {/* Checkbox */}
+                      <button
+                        onClick={() => toggleTaskComplete(task.id)}
+                        className={`mt-0.5 flex-shrink-0 transition-colors ${isCompleted ? 'text-green-500' : 'text-gray-300 hover:text-green-400'}`}
+                        title={isCompleted ? 'Reopen task' : 'Complete task'}
+                      >
+                        {isCompleted ? <CheckSquare className="w-4.5 h-4.5" /> : <Square className="w-4.5 h-4.5" />}
+                      </button>
+
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${priorityDot}`} title={`${task.priority} priority`} />
+                          <span className={`text-sm font-medium ${isCompleted ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                            {task.title}
+                          </span>
+                          {task.source === 'ai_extracted' && (
+                            <span className="text-[9px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                              <Sparkles className="w-2.5 h-2.5" /> AI
+                            </span>
+                          )}
+                        </div>
+                        {task.description && (
+                          <p className={`text-xs mt-0.5 ${isCompleted ? 'text-gray-300' : 'text-gray-500'}`}>{task.description}</p>
+                        )}
+                        <div className="flex items-center gap-3 mt-1">
+                          {task.assignee && (
+                            <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
+                              <Users className="w-2.5 h-2.5" /> {task.assignee}
+                            </span>
+                          )}
+                          {task.due_date && (
+                            <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
+                              <Calendar className="w-2.5 h-2.5" /> {formatSmartDate(task.due_date)}
+                            </span>
+                          )}
+                          {task.status === 'in_progress' && (
+                            <span className="text-[10px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">In Progress</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Hover actions */}
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                        {/* Priority cycle */}
+                        <button
+                          onClick={() => {
+                            const next = task.priority === 'low' ? 'medium' : task.priority === 'medium' ? 'high' : 'low';
+                            updateTask(task.id, { priority: next } as Partial<TopicTask>);
+                          }}
+                          className="p-1 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
+                          title={`Priority: ${task.priority} (click to cycle)`}
+                        >
+                          <ArrowUp className="w-3 h-3" />
+                        </button>
+                        {/* Status toggle: pending <-> in_progress */}
+                        {!isCompleted && !isArchived && (
+                          <button
+                            onClick={() => updateTask(task.id, { status: task.status === 'in_progress' ? 'pending' : 'in_progress' } as Partial<TopicTask>)}
+                            className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            title={task.status === 'in_progress' ? 'Set to pending' : 'Start working on this'}
+                          >
+                            <Activity className="w-3 h-3" />
+                          </button>
+                        )}
+                        {isCompleted && (
+                          <button onClick={() => archiveTask(task.id)}
+                            className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors" title="Archive task">
+                            <Archive className="w-3 h-3" />
+                          </button>
+                        )}
+                        <button onClick={() => deleteTask(task.id)}
+                          className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Delete task">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 

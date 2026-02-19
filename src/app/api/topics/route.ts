@@ -113,9 +113,9 @@ export async function POST(request: Request) {
 
     let { data, error } = await supabase.from('topics').insert(insertData).select().single();
 
-    // If schema cache error, retry with all known fields
-    if (error && error.message.includes('schema cache')) {
-      console.warn('POST /api/topics: schema cache error, retrying with known fields');
+    // If schema cache error, retry without newer columns that may not exist yet
+    if (error && (error.message.includes('schema cache') || error.message.includes('Could not find'))) {
+      console.warn('POST /api/topics: schema cache error, retrying with core fields only');
       const safeData: Record<string, unknown> = {
         title: insertData.title,
         description: insertData.description,
@@ -124,13 +124,12 @@ export async function POST(request: Request) {
         due_date: insertData.due_date,
         user_id: insertData.user_id,
       };
-      // Include optional fields if provided
       if (insertData.start_date) safeData.start_date = insertData.start_date;
       if (insertData.priority != null) safeData.priority = insertData.priority;
       if (insertData.tags) safeData.tags = insertData.tags;
       if (insertData.folder_id) safeData.folder_id = insertData.folder_id;
       if (insertData.parent_topic_id) safeData.parent_topic_id = insertData.parent_topic_id;
-      if (insertData.is_ongoing != null) safeData.is_ongoing = insertData.is_ongoing;
+      // Omit is_ongoing on retry — column may not exist yet
       const retry = await supabase.from('topics').insert(safeData).select().single();
       data = retry.data;
       error = retry.error;

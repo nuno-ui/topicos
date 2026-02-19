@@ -38,6 +38,26 @@ export interface TopicItem {
   created_at: string;
 }
 
+export interface TopicTask {
+  id: string;
+  user_id: string;
+  topic_id: string;
+  title: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'archived';
+  priority: 'high' | 'medium' | 'low';
+  due_date: string | null;
+  assignee: string | null;
+  source: 'manual' | 'ai_extracted';
+  source_item_ref: string | null;
+  position: number;
+  completed_at: string | null;
+  archived_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface GoogleAccount {
   id: string;
   user_id: string;

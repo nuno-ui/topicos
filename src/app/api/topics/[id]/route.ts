@@ -190,6 +190,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     // Clean up related records first
     await Promise.all([
       supabase.from('topic_items').delete().eq('topic_id', id).eq('user_id', user.id),
+      supabase.from('topic_tasks').delete().eq('topic_id', id).eq('user_id', user.id),
       supabase.from('contact_topic_links').delete().eq('topic_id', id).eq('user_id', user.id),
       // Detach child topics (set their parent to null) — redundant with FK ON DELETE SET NULL but explicit
       supabase.from('topics').update({ parent_topic_id: null }).eq('parent_topic_id', id),

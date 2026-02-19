@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client';
 import { formatRelativeDate } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, ArrowRightLeft, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban, Circle, Undo2, RefreshCw } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, ArrowRightLeft, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban, Circle, Undo2, RefreshCw, ListChecks, CheckSquare, Square } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { HierarchyPicker, buildFolderPickerItems, buildTopicPickerItems } from '@/components/ui/hierarchy-picker';
@@ -153,8 +153,17 @@ interface Topic {
   progress_percent: number | null;
   notes: string | null;
   topic_items: { count: number }[];
+  topic_tasks?: { count: number }[];
   recent_items?: Array<{ title: string; source: string; occurred_at: string }>;
   source_counts?: Record<string, number>;
+}
+
+interface TopicTaskPreview {
+  id: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'archived';
+  priority: 'high' | 'medium' | 'low';
+  source: 'manual' | 'ai_extracted';
 }
 
 interface FolderType {
@@ -230,6 +239,12 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'folders' | 'flat'>('folders');
 
+  // Task inline preview state
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
+  const [topicTasksCache, setTopicTasksCache] = useState<Record<string, TopicTaskPreview[]>>({});
+  const [loadingTasks, setLoadingTasks] = useState<Set<string>>(new Set());
+  const [inlineNewTaskTitle, setInlineNewTaskTitle] = useState<Record<string, string>>({});
+
   // Bulk selection state
   const [selectedTopics, setSelectedTopics] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
@@ -272,7 +287,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const parsedTags = createTags.split(',').map(t => t.trim()).filter(Boolean);
-      const { data, error } = await supabase.from('topics').insert({
+      const insertPayload: Record<string, unknown> = {
         title: title.trim(),
         description: description.trim() || null,
         area,
@@ -282,10 +297,18 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
         tags: parsedTags.length > 0 ? parsedTags : [],
         folder_id: createFolderId || null,
         parent_topic_id: createParentTopicId || null,
-        is_ongoing: createIsOngoing,
         user_id: user!.id,
         status: 'active',
-      }).select('*, topic_items(count)').single();
+      };
+      if (createIsOngoing) insertPayload.is_ongoing = true;
+      let { data, error } = await supabase.from('topics').insert(insertPayload).select('*, topic_items(count)').single();
+      // If schema cache error (is_ongoing column may not exist yet), retry without it
+      if (error && (error.message.includes('schema cache') || error.message.includes('Could not find'))) {
+        delete insertPayload.is_ongoing;
+        const retry = await supabase.from('topics').insert(insertPayload).select('*, topic_items(count)').single();
+        data = retry.data;
+        error = retry.error;
+      }
       if (error) { toast.error(error.message); return; }
       setTopics([data, ...topics]);
       setTitle(''); setDescription(''); setDueDate(''); setCreateFolderId(null);
@@ -892,9 +915,81 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
     });
   };
 
+  // --- INLINE TASK FUNCTIONS ---
+  const toggleTopicTasks = async (topicId: string) => {
+    if (expandedTasks.has(topicId)) {
+      setExpandedTasks(prev => { const n = new Set(prev); n.delete(topicId); return n; });
+      return;
+    }
+    setExpandedTasks(prev => new Set(prev).add(topicId));
+    if (topicTasksCache[topicId]) return; // Already cached
+    setLoadingTasks(prev => new Set(prev).add(topicId));
+    try {
+      const res = await fetch(`/api/topics/${topicId}/tasks?status=active`);
+      if (res.ok) {
+        const data = await res.json();
+        setTopicTasksCache(prev => ({ ...prev, [topicId]: data.tasks || [] }));
+      }
+    } catch {}
+    setLoadingTasks(prev => { const n = new Set(prev); n.delete(topicId); return n; });
+  };
+
+  const quickCompleteTask = async (topicId: string, taskId: string) => {
+    // Optimistic update
+    setTopicTasksCache(prev => ({
+      ...prev,
+      [topicId]: (prev[topicId] || []).map(t => t.id === taskId ? { ...t, status: 'completed' as const } : t),
+    }));
+    try {
+      const res = await fetch(`/api/topics/${topicId}/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'completed' }),
+      });
+      if (!res.ok) {
+        // Revert
+        setTopicTasksCache(prev => ({
+          ...prev,
+          [topicId]: (prev[topicId] || []).map(t => t.id === taskId ? { ...t, status: 'pending' as const } : t),
+        }));
+      } else {
+        toast.success('Task completed');
+      }
+    } catch {
+      setTopicTasksCache(prev => ({
+        ...prev,
+        [topicId]: (prev[topicId] || []).map(t => t.id === taskId ? { ...t, status: 'pending' as const } : t),
+      }));
+    }
+  };
+
+  const quickAddTask = async (topicId: string) => {
+    const taskTitle = inlineNewTaskTitle[topicId]?.trim();
+    if (!taskTitle) return;
+    try {
+      const res = await fetch(`/api/topics/${topicId}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: taskTitle }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTopicTasksCache(prev => ({
+          ...prev,
+          [topicId]: [data.task, ...(prev[topicId] || [])],
+        }));
+        setInlineNewTaskTitle(prev => ({ ...prev, [topicId]: '' }));
+        toast.success('Task added');
+      }
+    } catch {
+      toast.error('Failed to add task');
+    }
+  };
+
   // Render a topic card (enhanced - visual improvements)
   const renderTopicCard = (t: Topic, depth: number = 0) => {
     const itemCount = t.topic_items?.[0]?.count || 0;
+    const taskCount = t.topic_tasks?.[0]?.count || 0;
     const childCount = topics.filter(c => c.parent_topic_id === t.id).length;
     const overdue = !!(t.due_date && new Date(t.due_date) < new Date());
     const daysUntilDue = t.due_date ? Math.ceil((new Date(t.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
@@ -1003,6 +1098,15 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                 <Paperclip className="w-3 h-3" /> {itemCount}
               </span>
             )}
+            {taskCount > 0 && (
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleTopicTasks(t.id); }}
+                className="flex items-center gap-0.5 flex-shrink-0 text-amber-500 hover:text-amber-700 transition-colors"
+                title={`${taskCount} task${taskCount !== 1 ? 's' : ''} (click to expand)`}
+              >
+                <ListChecks className="w-3 h-3" /> {taskCount}
+              </button>
+            )}
             {t.progress_percent != null && t.progress_percent > 0 && (
               <span className="flex items-center gap-1 flex-shrink-0">
                 <div className={`w-10 h-1 rounded-full overflow-hidden ${progressNearComplete ? 'bg-green-100' : 'bg-gray-200'}`}>
@@ -1030,6 +1134,56 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
             </div>
           )}
         </Link>
+        {/* Expandable inline task panel */}
+        <div className={`overflow-hidden transition-all duration-300 ${expandedTasks.has(t.id) ? 'max-h-80 opacity-100' : 'max-h-0 opacity-0'}`}>
+          <div className="mx-3 mb-2 mt-0.5 rounded-lg border border-amber-100 bg-amber-50/30 p-2.5 space-y-1.5">
+            {loadingTasks.has(t.id) ? (
+              <div className="flex items-center justify-center py-3 text-xs text-gray-400">
+                <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> Loading tasks...
+              </div>
+            ) : (
+              <>
+                {(topicTasksCache[t.id] || []).filter(task => task.status !== 'completed' && task.status !== 'archived').slice(0, 5).map(task => {
+                  const dotColor = task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400';
+                  return (
+                    <div key={task.id} className="flex items-center gap-2 group/task">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); quickCompleteTask(t.id, task.id); }}
+                        className="text-gray-300 hover:text-green-500 transition-colors flex-shrink-0"
+                      >
+                        <Square className="w-3.5 h-3.5" />
+                      </button>
+                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
+                      <span className="text-xs text-gray-700 truncate flex-1">{task.title}</span>
+                      {task.source === 'ai_extracted' && (
+                        <span className="text-[8px] text-purple-500 bg-purple-50 px-1 rounded flex-shrink-0">AI</span>
+                      )}
+                    </div>
+                  );
+                })}
+                {(topicTasksCache[t.id] || []).filter(task => task.status !== 'completed' && task.status !== 'archived').length === 0 && !loadingTasks.has(t.id) && (
+                  <div className="text-xs text-gray-400 text-center py-1">No active tasks</div>
+                )}
+                {/* Inline quick-add */}
+                <div className="flex items-center gap-1.5 pt-1 border-t border-amber-100/50">
+                  <input
+                    type="text"
+                    value={inlineNewTaskTitle[t.id] || ''}
+                    onChange={e => setInlineNewTaskTitle(prev => ({ ...prev, [t.id]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') quickAddTask(t.id); }}
+                    onClick={e => e.stopPropagation()}
+                    placeholder="+ Add task..."
+                    className="flex-1 text-xs px-2 py-1 border border-gray-200 rounded focus:ring-1 focus:ring-amber-400 focus:border-amber-300 bg-white"
+                  />
+                </div>
+                <Link href={`/topics/${t.id}`} onClick={e => e.stopPropagation()}
+                  className="block text-[10px] text-amber-600 hover:text-amber-800 text-center font-medium">
+                  View all tasks →
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
         {/* Quick action buttons on hover - Edit, Move, Pin, Archive */}
         <div className="absolute top-2 right-12 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-all z-10">
           <Link href={`/topics/${t.id}`} onClick={(e) => e.stopPropagation()}
