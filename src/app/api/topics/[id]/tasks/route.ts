@@ -77,6 +77,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Update topic updated_at
     await supabase.from('topics').update({ updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', user.id);
 
+    // Return single task for single insert, array for bulk
+    if (!Array.isArray(body.tasks)) {
+      return NextResponse.json({ task: data![0] }, { status: 201 });
+    }
     return NextResponse.json({ tasks: data }, { status: 201 });
   } catch (err) {
     console.error('POST /api/topics/[id]/tasks error:', err);

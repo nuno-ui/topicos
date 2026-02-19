@@ -18,6 +18,41 @@ function parseFuzzyDate(dateStr: string): string | null {
   return null;
 }
 
+async function getTopicTasksContext(topicId: string, supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>): Promise<string> {
+  try {
+    const { data: tasks } = await supabase
+      .from('topic_tasks')
+      .select('title, description, status, priority, due_date, assignee, source, created_at')
+      .eq('topic_id', topicId)
+      .neq('status', 'archived')
+      .order('position', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    if (!tasks || tasks.length === 0) return '';
+
+    const statusLabel = (s: string) => s === 'in_progress' ? 'In Progress' : s.charAt(0).toUpperCase() + s.slice(1);
+    const priorityLabel = (p: string) => p === 'high' ? '🔴 High' : p === 'medium' ? '🟡 Medium' : '🟢 Low';
+
+    const taskLines = tasks.map((t: { title: string; description: string; status: string; priority: string; due_date: string | null; assignee: string | null; source: string; created_at: string }) => {
+      let line = `- [${statusLabel(t.status)}] [${priorityLabel(t.priority)}] ${t.title}`;
+      if (t.assignee) line += ` (Responsible: ${t.assignee})`;
+      if (t.due_date) line += ` — Due: ${new Date(t.due_date).toLocaleDateString()}`;
+      if (t.description) line += `\n  ${t.description}`;
+      if (t.source === 'ai_extracted') line += ' [AI-extracted]';
+      return line;
+    });
+
+    const pending = tasks.filter((t: { status: string }) => t.status === 'pending').length;
+    const inProgress = tasks.filter((t: { status: string }) => t.status === 'in_progress').length;
+    const completed = tasks.filter((t: { status: string }) => t.status === 'completed').length;
+
+    return `\n\n=== TOPIC TASKS (${pending} pending, ${inProgress} in progress, ${completed} completed) ===\n${taskLines.join('\n')}\n===\n`;
+  } catch {
+    return '';
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = await createServerSupabaseClient();
@@ -42,6 +77,7 @@ export async function POST(request: Request) {
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata').eq('topic_id', topic_id).limit(25);
         const noteContext = await getTopicNoteContext(topic_id);
         const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
         const groundTruth = buildGroundTruthSection(topic);
 
         const { data } = await callClaudeJSON<{ tags: string[]; area: string; priority: number }>(
@@ -78,7 +114,7 @@ Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "p
             if (meta.from) metaStr += ` | From: ${meta.from}`;
             if (meta.channel_name) metaStr += ` | #${meta.channel_name}`;
             return `[${i.source}] ${i.title}${metaStr}${preview ? '\n' + preview : ''}`;
-          }).join('\n---\n')}\n${noteContext}${ancestorCtx}`
+          }).join('\n---\n')}\n${noteContext}${tasksCtx}${ancestorCtx}`
         );
 
         await supabase.from('topics').update({
@@ -100,6 +136,7 @@ Return JSON: { "tags": ["tag1", "tag2", ...], "area": "work|personal|career", "p
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(10);
         const noteContext = await getTopicNoteContext(topic_id);
         const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
         const groundTruth = buildGroundTruthSection(topic);
 
         const { data } = await callClaudeJSON<{ suggestions: string[] }>(
@@ -115,7 +152,7 @@ Return JSON: { "suggestions": ["Title 1", "Title 2", "Title 3"] }`,
             const content = i.body || i.snippet || '';
             const preview = content.length > 300 ? content.substring(0, 300) + '...' : content;
             return `[${i.source}] ${i.title}${preview ? ': ' + preview : ''}`;
-          }).join('\n')}\n${noteContext}${ancestorCtx}`
+          }).join('\n')}\n${noteContext}${tasksCtx}${ancestorCtx}`
         );
 
         result = { suggestions: data.suggestions };
@@ -130,6 +167,7 @@ Return JSON: { "suggestions": ["Title 1", "Title 2", "Title 3"] }`,
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(15);
         const noteContext = await getTopicNoteContext(topic_id);
         const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
         const groundTruth = buildGroundTruthSection(topic);
 
         const { text } = await callClaude(
@@ -143,7 +181,7 @@ Return JSON: { "suggestions": ["Title 1", "Title 2", "Title 3"] }`,
             const content = i.body || i.snippet || '';
             const preview = content.length > 500 ? content.substring(0, 500) + '...' : content;
             return `[${i.source}] ${i.title}: ${preview}`;
-          }).join('\n')}\n${noteContext}${ancestorCtx}`
+          }).join('\n')}\n${noteContext}${tasksCtx}${ancestorCtx}`
         );
 
         result = { description: text };
@@ -158,11 +196,13 @@ Return JSON: { "suggestions": ["Title 1", "Title 2", "Title 3"] }`,
         const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body, metadata, occurred_at').eq('topic_id', topic_id).order('occurred_at', { ascending: true }).limit(30);
         const noteContext = await getTopicNoteContext(topic_id);
         const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
         const groundTruth = buildGroundTruthSection(topic);
 
         const { data } = await callClaudeJSON<{ action_items: Array<{ task: string; assignee: string; due: string; priority: string; source_item: string; status: string }> }>(
           `Extract ALL action items, tasks, commitments, promises, and follow-ups from these communications.
 IMPORTANT: Prioritize action items that are directly relevant to the topic's stated title and description. Tangential items from related projects can be included but should be marked as lower priority unless they directly impact this topic's focus.
+IMPORTANT: If existing tasks are provided below, do NOT duplicate them. Only extract NEW action items that are not already tracked.
 
 Be thorough and look for:
 
@@ -192,7 +232,7 @@ Return JSON: { "action_items": [{ "task": "description", "assignee": "person nam
             if (meta.cc) header += `\nCC: ${meta.cc}`;
             if (meta.attendees) header += `\nAttendees: ${JSON.stringify(meta.attendees)}`;
             return `${header}\n${contentPreview}`;
-          }).join('\n\n---\n\n')}\n${noteContext}${ancestorCtx}`
+          }).join('\n\n---\n\n')}\n${noteContext}${tasksCtx}${ancestorCtx}`
         );
 
         result = { action_items: data.action_items };
@@ -242,17 +282,19 @@ Return JSON: { "action_items": [{ "task": "description", "assignee": "person nam
         const { data: items } = await supabase.from('topic_items').select('*').eq('topic_id', topic_id).order('occurred_at', { ascending: true }).limit(30);
         const noteContext = await getTopicNoteContext(topic_id);
         const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
         const groundTruth = buildGroundTruthSection(topic);
 
         const { text } = await callClaude(
           `Create a chronological executive summary of this topic's communications and notes.
-IMPORTANT: Frame the summary through the lens of the topic's title and description. Highlight key decisions, commitments, and open questions that are most relevant to the stated focus. Tangential discussions from related projects should be briefly mentioned as context but not dominate the summary.`,
+IMPORTANT: Frame the summary through the lens of the topic's title and description. Highlight key decisions, commitments, and open questions that are most relevant to the stated focus. Tangential discussions from related projects should be briefly mentioned as context but not dominate the summary.
+Include a section on current task status if tasks exist for this topic.`,
           `${groundTruth}\nTopic: ${topic.title}\nDescription: ${topic.description || 'None'}\n\nCommunications (chronological):\n${(items || []).map((i: Record<string, unknown>) => {
             const meta = i.metadata as Record<string, unknown> || {};
             const content = (i.body as string) || (i.snippet as string) || '';
             const contentPreview = content.length > 1500 ? content.substring(0, 1500) + '...' : content;
             return `[${i.occurred_at}] [${i.source}] ${i.title}\n${contentPreview}\nFrom: ${meta.from || ''} To: ${meta.to || ''}`;
-          }).join('\n---\n')}\n${noteContext}${ancestorCtx}`
+          }).join('\n---\n')}\n${noteContext}${tasksCtx}${ancestorCtx}`
         );
 
         result = { summary: text };
@@ -267,10 +309,24 @@ IMPORTANT: Frame the summary through the lens of the topic's title and descripti
           .eq('user_id', user.id).eq('status', 'active').order('priority', { ascending: false }).limit(10);
         const { data: recentItems } = await supabase.from('topic_items').select('title, source, snippet, body, occurred_at, topics(title)')
           .eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);
+        // Fetch pending/in-progress tasks across all topics
+        const { data: pendingTasks } = await supabase.from('topic_tasks')
+          .select('title, status, priority, due_date, assignee, topics(title)')
+          .eq('user_id', user.id)
+          .in('status', ['pending', 'in_progress'])
+          .order('created_at', { ascending: false })
+          .limit(20);
+
+        const tasksSection = pendingTasks && pendingTasks.length > 0
+          ? `\n\nOpen Tasks (${pendingTasks.length}):\n${pendingTasks.map((t: Record<string, unknown>) => {
+              const topicTitle = (t.topics as { title: string } | null)?.title || 'Unknown topic';
+              return `- [${t.priority === 'high' ? '🔴' : t.priority === 'medium' ? '🟡' : '🟢'} ${t.status}] ${t.title} (Topic: ${topicTitle})${t.assignee ? ` — ${t.assignee}` : ''}${t.due_date ? ` — Due: ${new Date(t.due_date as string).toLocaleDateString()}` : ''}`;
+            }).join('\n')}`
+          : '';
 
         const { text } = await callClaude(
-          'You are an executive assistant. Generate a concise daily briefing for the user based on ALL their connected sources (email, calendar, drive, slack, notion, notes, links). Include: 1) Priority items needing attention today, 2) Key updates from recent activity, 3) Upcoming deadlines, 4) Suggested focus areas. Keep it brief and actionable.',
-          `Date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}\n\nActive Topics:\n${(topics || []).map((t: Record<string, unknown>) => `- ${t.title} (priority: ${t.priority || 0}, due: ${t.due_date || 'none'}, tags: ${(t.tags as string[] || []).join(', ')})\n  Summary: ${(t.summary as string || 'No summary').substring(0, 200)}`).join('\n')}\n\nRecent Items (from all sources):\n${(recentItems || []).map((i: Record<string, unknown>) => {
+          'You are an executive assistant. Generate a concise daily briefing for the user based on ALL their connected sources (email, calendar, drive, slack, notion, notes, links). Include: 1) Priority items and TASKS needing attention today, 2) Key updates from recent activity, 3) Upcoming deadlines (from both topics and tasks), 4) Suggested focus areas. Keep it brief and actionable. Highlight overdue or high-priority tasks.',
+          `Date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}\n\nActive Topics:\n${(topics || []).map((t: Record<string, unknown>) => `- ${t.title} (priority: ${t.priority || 0}, due: ${t.due_date || 'none'}, tags: ${(t.tags as string[] || []).join(', ')})\n  Summary: ${(t.summary as string || 'No summary').substring(0, 200)}`).join('\n')}${tasksSection}\n\nRecent Items (from all sources):\n${(recentItems || []).map((i: Record<string, unknown>) => {
             const content = (i.body as string) || (i.snippet as string) || '';
             const preview = content.length > 300 ? content.substring(0, 300) + '...' : content;
             return `- [${i.source}] ${i.title} (${i.occurred_at}) → ${(i.topics as {title: string} | null)?.title || 'Unlinked'}${preview ? '\n  ' + preview : ''}`;
@@ -929,6 +985,7 @@ ${(actionItems || []).map((i: Record<string, unknown>, idx: number) => {
         const noteContext = await getTopicNoteContext(topic_id);
         const ancestorCtx = await getAncestorContext(topic_id, supabase);
         const ancestorItems = await getAncestorItems(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
         const groundTruth = buildGroundTruthSection(topic);
 
         // Enrich all items (fetch full content from sources)
@@ -1046,7 +1103,7 @@ ${noteContext}
 Content enrichment: ${enriched} items enriched, ${failed} failed
 
 Full Content of ${(fullItems || []).length} Linked Items:
-${itemsContent}${ancestorCtx}${ancestorItems}`,
+${itemsContent}${tasksCtx}${ancestorCtx}${ancestorItems}`,
           { maxTokens: 8192 }
         );
 
@@ -1071,6 +1128,7 @@ ${itemsContent}${ancestorCtx}${ancestorItems}`,
           .eq('topic_id', topic_id).limit(20);
         const noteContext = await getTopicNoteContext(topic_id);
         const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
         const groundTruth = buildGroundTruthSection(topic);
 
         const itemsSummary = (items || []).map((i: Record<string, unknown>) => {
@@ -1109,7 +1167,7 @@ Goal: ${topic.goal || 'None'}
 ${noteContext}
 
 Currently linked items (${(items || []).length}):
-${itemsSummary}${ancestorCtx}`
+${itemsSummary}${tasksCtx}${ancestorCtx}`
         );
 
         result = { recommendations: data.recommendations, missing_sources: data.missing_sources, suggested_people: data.suggested_people };
@@ -1130,6 +1188,7 @@ ${itemsSummary}${ancestorCtx}`
           .eq('topic_id', topic_id).limit(20);
         const noteContext = await getTopicNoteContext(topic_id);
         const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
         const groundTruth = buildGroundTruthSection(topic);
 
         const itemsContent = (items || []).map((i: Record<string, unknown>) => {
@@ -1144,7 +1203,7 @@ ${itemsSummary}${ancestorCtx}`
           amounts: Array<{ value: string; currency: string; context: string }>;
           action_items: Array<{ task: string; assignee: string; due: string; status: string }>;
         }>(
-          `Extract all entities from the full content of these items. Be thorough and extract:
+          `Extract all entities from the full content of these items and tasks. Be thorough and extract:
 
 1. People: name, email (if found), apparent role, and how many times they're mentioned
 2. Organizations: company/org name, type (client/vendor/partner/internal), context of mention
@@ -1155,7 +1214,7 @@ ${itemsSummary}${ancestorCtx}`
 Focus on entities most relevant to the topic's stated title and description.
 
 Return JSON: { "people": [...], "organizations": [...], "dates": [...], "amounts": [...], "action_items": [...] }`,
-          `${groundTruth}\nTopic: ${topic.title}\n${noteContext}\n\nFull Content:\n${itemsContent}${ancestorCtx}`
+          `${groundTruth}\nTopic: ${topic.title}\n${noteContext}\n\nFull Content:\n${itemsContent}${tasksCtx}${ancestorCtx}`
         );
 
         result = data;
@@ -1172,6 +1231,7 @@ Return JSON: { "people": [...], "organizations": [...], "dates": [...], "amounts
           .select('title, source, snippet, body, metadata')
           .eq('topic_id', topic_id).limit(15);
         const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
         const groundTruth = buildGroundTruthSection(topic);
 
         // Get all other topics for comparison
@@ -1210,7 +1270,7 @@ Only include topics with confidence >= 0.3.`,
 Description: ${topic.description || 'None'}
 Tags: ${(topic.tags || []).join(', ') || 'None'}
 Parent topic: ${topic.parent_topic_id || 'None (root topic)'}
-Items:\n${currentItems}
+Items:\n${currentItems}${tasksCtx}
 ${ancestorCtx}
 
 Other Topics:\n${otherTopics}`
@@ -1236,6 +1296,7 @@ Other Topics:\n${otherTopics}`
 
         const noteContext = await getTopicNoteContext(topic_id);
         const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
         const groundTruth = buildGroundTruthSection(topic);
         const itemCount = (items || []).length;
         const sources = [...new Set((items || []).map((i: { source: string }) => i.source))];
@@ -1294,7 +1355,7 @@ Sources used: ${sources.join(', ') || 'none'}
 Missing sources: ${missingSources.join(', ') || 'none'}
 Contacts linked: ${contactCount}
 Date range: ${oldestItem?.toLocaleDateString() || 'N/A'} to ${newestItem?.toLocaleDateString() || 'N/A'}
-Days since last activity: ${daysSinceLastItem ?? 'N/A'}${ancestorCtx}`
+Days since last activity: ${daysSinceLastItem ?? 'N/A'}${tasksCtx}${ancestorCtx}`
         );
 
         result = {
