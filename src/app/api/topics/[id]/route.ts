@@ -132,7 +132,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     // Only allow known fields to be updated (prevent arbitrary field injection)
-    const allowedFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'parent_topic_id', 'is_ongoing', 'summary', 'notes', 'progress_percent', 'owner', 'goal', 'updated_at'];
+    const allowedFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'parent_topic_id', 'is_ongoing', 'summary', 'notes', 'progress_percent', 'owner', 'owner_contact_id', 'goal', 'updated_at'];
     const updateData: Record<string, unknown> = {};
     for (const key of allowedFields) {
       if (key in body) updateData[key] = body[key];
@@ -156,7 +156,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     // If schema cache error, retry with all known fields
     if (error && error.message.includes('schema cache')) {
       console.warn('PATCH /api/topics/[id]: schema cache error, retrying with known fields');
-      const knownFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'parent_topic_id', 'summary', 'notes', 'progress_percent', 'owner', 'goal', 'updated_at'];
+      const knownFields = ['title', 'description', 'area', 'status', 'due_date', 'start_date', 'priority', 'tags', 'folder_id', 'parent_topic_id', 'summary', 'notes', 'progress_percent', 'owner', 'owner_contact_id', 'goal', 'updated_at'];
       const safeData: Record<string, unknown> = {};
       for (const key of knownFields) {
         if (key in updateData) safeData[key] = updateData[key];

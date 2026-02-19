@@ -10,6 +10,7 @@ import { NoteCard } from './note-card';
 import { TopicTimeline } from './topic-timeline';
 import { Search, Sparkles, Link2, Unlink, ExternalLink, ChevronDown, ChevronUp, Edit3, Archive, Trash2, Save, X, Bot, RefreshCw, StickyNote, Loader2, CheckSquare, Square, MessageSquare, Tag, Wand2, ListChecks, Users, Clock, FileText, Brain, Zap, Heart, AlertTriangle, TrendingUp, Eye, EyeOff, Pin, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Layers, GitBranch, Compass, Award, Target, MoreHorizontal, ChevronRight, Info, Calendar, FolderOpen, Check, CircleDot, Keyboard, Activity } from 'lucide-react';
 import { HierarchyPicker, buildFolderPickerItems, buildTopicPickerItems } from '@/components/ui/hierarchy-picker';
+import { ContactPicker, type ContactOption } from '@/components/ui/contact-picker';
 
 interface TopicItem {
   id: string;
@@ -58,6 +59,7 @@ interface Topic {
   urgency_score: number | null;
   notes: string | null;
   owner: string | null;
+  owner_contact_id: string | null;
   stakeholders: string[];
   progress_percent: number | null;
   risk_level: string | null;
@@ -97,6 +99,7 @@ interface TopicTask {
   priority: 'high' | 'medium' | 'low';
   due_date: string | null;
   assignee: string | null;
+  assignee_contact_id: string | null;
   source: 'manual' | 'ai_extracted';
   source_item_ref: string | null;
   position: number;
@@ -195,7 +198,9 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [editFolderId, setEditFolderId] = useState(topic.folder_id || '');
   const [editParentTopicId, setEditParentTopicId] = useState(topic.parent_topic_id || '');
   const [editOwner, setEditOwner] = useState(topic.owner || '');
+  const [editOwnerContactId, setEditOwnerContactId] = useState(topic.owner_contact_id || null);
   const [editGoal, setEditGoal] = useState(topic.goal || '');
+  const [pickerContacts, setPickerContacts] = useState<ContactOption[]>([]);
   const [editIsOngoing, setEditIsOngoing] = useState(topic.is_ongoing || false);
 
   // Folders for folder picker (full data for hierarchy display)
@@ -226,6 +231,17 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
     fetch(`/api/topics/${initialTopic.id}/tasks`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.tasks) setTasks(d.tasks); })
+      .catch(() => {});
+    // Fetch all contacts for pickers (assignee, owner)
+    fetch('/api/contacts?limit=200')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.contacts) {
+          setPickerContacts(d.contacts.map((c: { id: string; name: string; email: string | null; organization: string | null; area: string | null }) => ({
+            id: c.id, name: c.name, email: c.email, organization: c.organization, area: c.area,
+          })));
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -272,12 +288,12 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [taskSaving, setTaskSaving] = useState(false);
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [taskFormData, setTaskFormData] = useState<{
-    title: string; description: string; assignee: string; priority: 'high' | 'medium' | 'low'; due_date: string;
-  }>({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' });
+    title: string; description: string; assignee: string; assignee_contact_id: string | null; priority: 'high' | 'medium' | 'low'; due_date: string;
+  }>({ title: '', description: '', assignee: '', assignee_contact_id: null, priority: 'medium', due_date: '' });
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingTaskData, setEditingTaskData] = useState<{
-    title: string; description: string; assignee: string; priority: 'high' | 'medium' | 'low'; due_date: string; status: string;
-  }>({ title: '', description: '', assignee: '', priority: 'medium', due_date: '', status: 'pending' });
+    title: string; description: string; assignee: string; assignee_contact_id: string | null; priority: 'high' | 'medium' | 'low'; due_date: string; status: string;
+  }>({ title: '', description: '', assignee: '', assignee_contact_id: null, priority: 'medium', due_date: '', status: 'pending' });
   const [taskRecommendations, setTaskRecommendations] = useState<Array<{
     title: string; description: string; priority: string; assignee: string; due: string; rationale: string;
   }>>([]);
@@ -1005,6 +1021,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
           folder_id: editFolderId || null,
           parent_topic_id: editParentTopicId || null,
           owner: editOwner.trim() || null,
+          owner_contact_id: editOwnerContactId || null,
           goal: editGoal.trim() || null,
           is_ongoing: editIsOngoing,
         }),
@@ -1205,13 +1222,14 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
     setTasksLoading(false);
   }, [topic.id]);
 
-  const createTask = async (titleOrData: string | { title: string; description?: string; assignee?: string; priority?: string; due_date?: string }) => {
+  const createTask = async (titleOrData: string | { title: string; description?: string; assignee?: string; assignee_contact_id?: string | null; priority?: string; due_date?: string }) => {
     const payload = typeof titleOrData === 'string'
       ? { title: titleOrData.trim() }
       : {
           title: titleOrData.title.trim(),
           ...(titleOrData.description && { description: titleOrData.description.trim() }),
           ...(titleOrData.assignee && { assignee: titleOrData.assignee.trim() }),
+          ...(titleOrData.assignee_contact_id && { assignee_contact_id: titleOrData.assignee_contact_id }),
           ...(titleOrData.priority && { priority: titleOrData.priority }),
           ...(titleOrData.due_date && { due_date: new Date(titleOrData.due_date).toISOString() }),
         };
@@ -1227,7 +1245,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
       const data = await res.json();
       setTasks(prev => [data.task, ...prev]);
       setNewTaskTitle('');
-      setTaskFormData({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' });
+      setTaskFormData({ title: '', description: '', assignee: '', assignee_contact_id: null, priority: 'medium', due_date: '' });
       setShowTaskForm(false);
       toast.success('Task created');
     } catch (err) {
@@ -1242,6 +1260,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
       title: task.title,
       description: task.description || '',
       assignee: task.assignee || '',
+      assignee_contact_id: task.assignee_contact_id || null,
       priority: task.priority,
       due_date: task.due_date ? task.due_date.split('T')[0] : '',
       status: task.status,
@@ -1254,6 +1273,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
       title: editingTaskData.title.trim(),
       description: editingTaskData.description.trim(),
       assignee: editingTaskData.assignee.trim() || null,
+      assignee_contact_id: editingTaskData.assignee_contact_id || null,
       priority: editingTaskData.priority,
       due_date: editingTaskData.due_date ? new Date(editingTaskData.due_date).toISOString() : null,
       status: editingTaskData.status,
@@ -1742,9 +1762,12 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Owner</label>
-                      <input value={editOwner} onChange={e => setEditOwner(e.target.value)}
-                        placeholder="e.g. John Doe"
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80" />
+                      <ContactPicker
+                        contacts={pickerContacts}
+                        value={editOwnerContactId}
+                        onChange={(contactId, contactName) => { setEditOwnerContactId(contactId); setEditOwner(contactName); }}
+                        placeholder="Select owner contact..."
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Goal</label>
@@ -2557,7 +2580,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                 {taskSaving && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-amber-500" />}
               </div>
               <button
-                onClick={() => { setShowTaskForm(!showTaskForm); if (!showTaskForm) setTaskFormData({ title: newTaskTitle || '', description: '', assignee: '', priority: 'medium', due_date: '' }); }}
+                onClick={() => { setShowTaskForm(!showTaskForm); if (!showTaskForm) setTaskFormData({ title: newTaskTitle || '', description: '', assignee: '', assignee_contact_id: null, priority: 'medium', due_date: '' }); }}
                 className={`px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${showTaskForm ? 'bg-amber-50 border-amber-200 text-amber-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
                 title="Expand to add more details"
               >
@@ -2585,8 +2608,13 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                       <label className="block text-xs font-semibold text-gray-600 mb-1">
                         <Users className="w-3 h-3 inline mr-1" />Owner
                       </label>
-                      <input type="text" value={taskFormData.assignee} onChange={e => setTaskFormData(prev => ({ ...prev, assignee: e.target.value }))}
-                        placeholder="Assignee name" className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400" />
+                      <ContactPicker
+                        contacts={pickerContacts}
+                        value={taskFormData.assignee_contact_id}
+                        onChange={(contactId, contactName) => setTaskFormData(prev => ({ ...prev, assignee_contact_id: contactId, assignee: contactName }))}
+                        placeholder="Assign contact..."
+                        compact
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-gray-600 mb-1">
@@ -2611,7 +2639,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                     className="px-4 py-1.5 text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors disabled:opacity-50">
                     {taskSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Create Task'}
                   </button>
-                  <button onClick={() => { setShowTaskForm(false); setTaskFormData({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' }); }}
+                  <button onClick={() => { setShowTaskForm(false); setTaskFormData({ title: '', description: '', assignee: '', assignee_contact_id: null, priority: 'medium', due_date: '' }); }}
                     className="px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">Cancel</button>
                 </div>
               </div>
@@ -2699,8 +2727,13 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                             <label className="block text-xs font-semibold text-gray-600 mb-1">
                               <Users className="w-3 h-3 inline mr-1" />Owner
                             </label>
-                            <input type="text" value={editingTaskData.assignee} onChange={e => setEditingTaskData(prev => ({ ...prev, assignee: e.target.value }))}
-                              placeholder="Assignee" className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20" />
+                            <ContactPicker
+                              contacts={pickerContacts}
+                              value={editingTaskData.assignee_contact_id}
+                              onChange={(contactId, contactName) => setEditingTaskData(prev => ({ ...prev, assignee_contact_id: contactId, assignee: contactName }))}
+                              placeholder="Assign contact..."
+                              compact
+                            />
                           </div>
                           <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">

@@ -16,6 +16,7 @@ export interface Topic {
   notes: string | null;
   progress_percent: number | null;
   owner: string | null;
+  owner_contact_id: string | null;
   stakeholders: string[];
   urgency_score: number | null;
   user_id: string;
@@ -48,6 +49,7 @@ export interface TopicTask {
   priority: 'high' | 'medium' | 'low';
   due_date: string | null;
   assignee: string | null;
+  assignee_contact_id: string | null;
   source: 'manual' | 'ai_extracted';
   source_item_ref: string | null;
   position: number;

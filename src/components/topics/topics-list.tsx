@@ -8,6 +8,8 @@ import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, Fol
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { HierarchyPicker, buildFolderPickerItems, buildTopicPickerItems } from '@/components/ui/hierarchy-picker';
+import { ContactPicker, type ContactOption } from '@/components/ui/contact-picker';
+import { Copy, Download } from 'lucide-react';
 
 // --- Area border color map for topic cards ---
 const areaBorderColors: Record<string, string> = {
@@ -166,6 +168,7 @@ interface TopicTaskPreview {
   priority: 'high' | 'medium' | 'low';
   due_date: string | null;
   assignee: string | null;
+  assignee_contact_id: string | null;
   source: 'manual' | 'ai_extracted';
   created_at: string;
 }
@@ -241,7 +244,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
   const [filterStatus, setFilterStatus] = useState<string>('active');
   const [sortBy, setSortBy] = useState<string>('relevance');
   const [showFilters, setShowFilters] = useState(false);
-  const [viewMode, setViewMode] = useState<'folders' | 'flat' | 'tasks'>('folders');
+  const [viewMode, setViewMode] = useState<'folders' | 'flat' | 'tasks' | 'contact'>('folders');
 
   // Task inline preview state
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
@@ -250,9 +253,17 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
   const [inlineNewTaskTitle, setInlineNewTaskTitle] = useState<Record<string, string>>({});
   const [inlineTaskFormTopic, setInlineTaskFormTopic] = useState<string | null>(null);
   const [inlineTaskFormData, setInlineTaskFormData] = useState<{
-    title: string; description: string; assignee: string; priority: 'high' | 'medium' | 'low'; due_date: string;
-  }>({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' });
+    title: string; description: string; assignee: string; assignee_contact_id: string | null; priority: 'high' | 'medium' | 'low'; due_date: string;
+  }>({ title: '', description: '', assignee: '', assignee_contact_id: null, priority: 'medium', due_date: '' });
   const [tasksViewLoaded, setTasksViewLoaded] = useState(false);
+
+  // Contact view mode state
+  const [contactViewContactId, setContactViewContactId] = useState<string | null>(null);
+  const [contactViewContacts, setContactViewContacts] = useState<ContactOption[]>([]);
+  const [contactViewTopicIds, setContactViewTopicIds] = useState<Set<string>>(new Set());
+  const [contactViewTasksByTopic, setContactViewTasksByTopic] = useState<Record<string, TopicTaskPreview[]>>({});
+  const [contactViewLoading, setContactViewLoading] = useState(false);
+  const [contactViewLoaded, setContactViewLoaded] = useState(false);
 
   // Auto-load tasks for all topics when entering tasks view
   useEffect(() => {
@@ -282,6 +293,82 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
   useEffect(() => {
     if (viewMode !== 'tasks') setTasksViewLoaded(false);
   }, [viewMode]);
+
+  // Fetch contacts list when entering contact or tasks view (needed for contact picker)
+  useEffect(() => {
+    if ((viewMode !== 'contact' && viewMode !== 'tasks') || contactViewContacts.length > 0) return;
+    fetch('/api/contacts?limit=200')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.contacts) {
+          setContactViewContacts(d.contacts.map((c: { id: string; name: string; email: string | null; organization: string | null; area: string | null }) => ({
+            id: c.id, name: c.name, email: c.email, organization: c.organization, area: c.area,
+          })));
+        }
+      })
+      .catch(() => {});
+  }, [viewMode, contactViewContacts.length]);
+
+  // Load topic/task data when a contact is selected in contact view
+  useEffect(() => {
+    if (viewMode !== 'contact' || !contactViewContactId) return;
+    setContactViewLoading(true);
+    setContactViewLoaded(false);
+    const supabase = createClient();
+
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        // 1. Get topics linked to this contact via contact_topic_links
+        const { data: links } = await supabase
+          .from('contact_topic_links')
+          .select('topic_id')
+          .eq('contact_id', contactViewContactId);
+        const linkedTopicIds = new Set<string>((links || []).map((l: { topic_id: string }) => l.topic_id));
+
+        // 2. Get tasks assigned to this contact
+        const { data: assignedTasks } = await supabase
+          .from('topic_tasks')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('assignee_contact_id', contactViewContactId)
+          .in('status', ['pending', 'in_progress']);
+
+        // Add topic IDs from assigned tasks
+        const tasksByTopic: Record<string, TopicTaskPreview[]> = {};
+        if (assignedTasks) {
+          for (const task of assignedTasks) {
+            linkedTopicIds.add(task.topic_id);
+            if (!tasksByTopic[task.topic_id]) tasksByTopic[task.topic_id] = [];
+            tasksByTopic[task.topic_id].push(task);
+          }
+        }
+
+        // 3. Also load all tasks for linked topics (for context)
+        for (const topicId of linkedTopicIds) {
+          if (!tasksByTopic[topicId]) tasksByTopic[topicId] = [];
+          if (!topicTasksCache[topicId]) {
+            try {
+              const res = await fetch(`/api/topics/${topicId}/tasks?status=active`);
+              if (res.ok) {
+                const data = await res.json();
+                setTopicTasksCache(prev => ({ ...prev, [topicId]: data.tasks || [] }));
+              }
+            } catch {}
+          }
+        }
+
+        setContactViewTopicIds(linkedTopicIds);
+        setContactViewTasksByTopic(tasksByTopic);
+      } catch (err) {
+        console.error('Contact view load error:', err);
+      }
+      setContactViewLoading(false);
+      setContactViewLoaded(true);
+    })();
+  }, [viewMode, contactViewContactId]);
 
   // Bulk selection state
   const [selectedTopics, setSelectedTopics] = useState<Set<string>>(new Set());
@@ -1001,12 +1088,13 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
     }
   };
 
-  const quickAddTask = async (topicId: string, formData?: { title: string; description?: string; assignee?: string; priority?: string; due_date?: string }) => {
+  const quickAddTask = async (topicId: string, formData?: { title: string; description?: string; assignee?: string; assignee_contact_id?: string | null; priority?: string; due_date?: string }) => {
     const payload = formData
       ? {
           title: formData.title.trim(),
           ...(formData.description && { description: formData.description.trim() }),
           ...(formData.assignee && { assignee: formData.assignee.trim() }),
+          ...(formData.assignee_contact_id && { assignee_contact_id: formData.assignee_contact_id }),
           ...(formData.priority && { priority: formData.priority }),
           ...(formData.due_date && { due_date: new Date(formData.due_date).toISOString() }),
         }
@@ -1026,13 +1114,89 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
         }));
         setInlineNewTaskTitle(prev => ({ ...prev, [topicId]: '' }));
         setInlineTaskFormTopic(null);
-        setInlineTaskFormData({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' });
+        setInlineTaskFormData({ title: '', description: '', assignee: '', assignee_contact_id: null, priority: 'medium', due_date: '' });
         toast.success('Task added');
       }
     } catch {
       toast.error('Failed to add task');
     }
   };
+
+  // --- Contact View Export Functions ---
+  const generateContactMarkdown = useCallback(() => {
+    if (!contactViewContactId) return '';
+    const contact = contactViewContacts.find(c => c.id === contactViewContactId);
+    if (!contact) return '';
+    const contactTopics = topics.filter(t => contactViewTopicIds.has(t.id));
+    const lines: string[] = [];
+    lines.push(`# Topics & Tasks — ${contact.name}`);
+    if (contact.organization) lines.push(`**${contact.organization}**`);
+    lines.push(`*Generated from YouOS on ${new Date().toLocaleDateString()}*`);
+    lines.push('');
+
+    for (const t of contactTopics) {
+      const areaLabel = t.area.charAt(0).toUpperCase() + t.area.slice(1);
+      const statusLabel = t.status.charAt(0).toUpperCase() + t.status.slice(1);
+      lines.push(`## ${t.title} (${areaLabel} · ${statusLabel})`);
+      if (t.due_date) lines.push(`**Due:** ${new Date(t.due_date).toLocaleDateString()}`);
+      if (t.description) lines.push(t.description);
+      lines.push('');
+
+      // Tasks assigned to this contact
+      const assignedTasks = contactViewTasksByTopic[t.id] || [];
+      // Also show other tasks from cache for context
+      const allTopicTasks = topicTasksCache[t.id] || [];
+      const assignedIds = new Set(assignedTasks.map(at => at.id));
+
+      if (assignedTasks.length > 0 || allTopicTasks.length > 0) {
+        lines.push('**Tasks:**');
+        // Show assigned tasks first (highlighted)
+        for (const task of assignedTasks) {
+          const check = task.status === 'completed' ? 'x' : ' ';
+          const priority = task.priority === 'high' ? ' **HIGH**' : task.priority === 'low' ? ' *low*' : '';
+          const due = task.due_date ? ` — due ${new Date(task.due_date).toLocaleDateString()}` : '';
+          lines.push(`- [${check}]${priority} ${task.title}${due} ← assigned`);
+        }
+        // Show other tasks for context (not assigned to this contact)
+        for (const task of allTopicTasks) {
+          if (assignedIds.has(task.id)) continue;
+          if (task.status === 'completed' || task.status === 'archived') continue;
+          const priority = task.priority === 'high' ? ' **HIGH**' : '';
+          const due = task.due_date ? ` — due ${new Date(task.due_date).toLocaleDateString()}` : '';
+          const owner = task.assignee ? ` (${task.assignee})` : '';
+          lines.push(`- [ ]${priority} ${task.title}${due}${owner}`);
+        }
+        lines.push('');
+      }
+    }
+
+    lines.push('---');
+    lines.push(`*Exported from YouOS · ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}*`);
+    return lines.join('\n');
+  }, [contactViewContactId, contactViewContacts, contactViewTopicIds, contactViewTasksByTopic, topicTasksCache, topics]);
+
+  const copyContactView = useCallback(() => {
+    const md = generateContactMarkdown();
+    if (!md) return;
+    navigator.clipboard.writeText(md).then(() => toast.success('Copied to clipboard!')).catch(() => toast.error('Failed to copy'));
+  }, [generateContactMarkdown]);
+
+  const downloadContactView = useCallback(() => {
+    const md = generateContactMarkdown();
+    if (!md) return;
+    const contact = contactViewContacts.find(c => c.id === contactViewContactId);
+    const filename = `${(contact?.name || 'contact').replace(/[^a-zA-Z0-9]/g, '_')}_topics_tasks.md`;
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success('Downloaded!');
+  }, [generateContactMarkdown, contactViewContacts, contactViewContactId]);
 
   // Render a topic card (enhanced - visual improvements)
   const renderTopicCard = (t: Topic, depth: number = 0) => {
@@ -1350,8 +1514,13 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                     placeholder="Description (optional)" rows={1}
                     className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-amber-400 resize-none" />
                   <div className="grid grid-cols-3 gap-1.5">
-                    <input type="text" value={inlineTaskFormData.assignee} onChange={e => setInlineTaskFormData(prev => ({ ...prev, assignee: e.target.value }))}
-                      placeholder="Owner" className="px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-amber-400" />
+                    <ContactPicker
+                      contacts={contactViewContacts}
+                      value={inlineTaskFormData.assignee_contact_id}
+                      onChange={(contactId, contactName) => setInlineTaskFormData(prev => ({ ...prev, assignee_contact_id: contactId, assignee: contactName }))}
+                      placeholder="Owner"
+                      compact
+                    />
                     <input type="date" value={inlineTaskFormData.due_date} onChange={e => setInlineTaskFormData(prev => ({ ...prev, due_date: e.target.value }))}
                       className="px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-amber-400" />
                     <select value={inlineTaskFormData.priority} onChange={e => setInlineTaskFormData(prev => ({ ...prev, priority: e.target.value as 'high' | 'medium' | 'low' }))}
@@ -1364,7 +1533,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => quickAddTask(t.id, inlineTaskFormData)} disabled={!inlineTaskFormData.title.trim()}
                       className="px-2.5 py-1 text-[10px] font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded transition-colors disabled:opacity-50">Create</button>
-                    <button onClick={() => { setInlineTaskFormTopic(null); setInlineTaskFormData({ title: '', description: '', assignee: '', priority: 'medium', due_date: '' }); }}
+                    <button onClick={() => { setInlineTaskFormTopic(null); setInlineTaskFormData({ title: '', description: '', assignee: '', assignee_contact_id: null, priority: 'medium', due_date: '' }); }}
                       className="px-2 py-1 text-[10px] text-gray-500 hover:bg-gray-100 rounded transition-colors">Cancel</button>
                   </div>
                 </div>
@@ -1379,7 +1548,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                     placeholder="Add task... (Enter)"
                     className="flex-1 text-xs px-0 py-0.5 border-none focus:ring-0 placeholder:text-gray-300 bg-transparent"
                   />
-                  <button onClick={() => { setInlineTaskFormTopic(t.id); setInlineTaskFormData({ title: inlineNewTaskTitle[t.id] || '', description: '', assignee: '', priority: 'medium', due_date: '' }); }}
+                  <button onClick={() => { setInlineTaskFormTopic(t.id); setInlineTaskFormData({ title: inlineNewTaskTitle[t.id] || '', description: '', assignee: '', assignee_contact_id: null, priority: 'medium', due_date: '' }); }}
                     className="text-[10px] text-gray-400 hover:text-amber-600 px-1.5 py-0.5 rounded hover:bg-amber-50 transition-colors flex-shrink-0" title="Add with details">
                     + Details
                   </button>
@@ -2324,6 +2493,12 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                 }`} title="Tasks View">
                 <ListChecks className="w-3.5 h-3.5" /> Tasks
               </button>
+              <button onClick={() => setViewMode('contact')}
+                className={`px-2.5 py-2 text-xs font-medium flex items-center gap-1 transition-colors border-l border-gray-200 ${
+                  viewMode === 'contact' ? 'bg-teal-50 text-teal-700' : 'bg-white text-gray-500 hover:bg-gray-50'
+                }`} title="Contact View — Topics & tasks for a specific person">
+                <Users className="w-3.5 h-3.5" /> Contact
+              </button>
             </div>
           </div>
 
@@ -2694,6 +2869,142 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                   <Brain className="w-4 h-4" /> Import from Sources
                 </button>
               </div>
+            </div>
+          ) : viewMode === 'contact' ? (
+            <div>
+              {/* Contact View: Pick a contact, see their topics & tasks */}
+              <div className="mb-6 bg-gradient-to-r from-teal-50 to-cyan-50 border border-teal-200/60 rounded-xl p-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center">
+                    <Users className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-bold text-teal-900">Contact View</h3>
+                    <p className="text-xs text-teal-600">Select a contact to see their topics & assigned tasks</p>
+                  </div>
+                  {contactViewContactId && (
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={copyContactView} className="px-2.5 py-1.5 text-xs font-medium text-teal-700 bg-white border border-teal-200 rounded-lg hover:bg-teal-50 transition-colors flex items-center gap-1" title="Copy as Markdown">
+                        <Copy className="w-3 h-3" /> Copy
+                      </button>
+                      <button onClick={downloadContactView} className="px-2.5 py-1.5 text-xs font-medium text-teal-700 bg-white border border-teal-200 rounded-lg hover:bg-teal-50 transition-colors flex items-center gap-1" title="Download as .md file">
+                        <Download className="w-3 h-3" /> Download
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <ContactPicker
+                  contacts={contactViewContacts}
+                  value={contactViewContactId}
+                  onChange={(contactId) => { setContactViewContactId(contactId); setContactViewLoaded(false); }}
+                  placeholder="Select a contact to filter..."
+                />
+              </div>
+
+              {contactViewLoading && (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 animate-spin text-teal-500" />
+                  <span className="ml-2 text-sm text-teal-600">Loading topics & tasks...</span>
+                </div>
+              )}
+
+              {contactViewLoaded && contactViewContactId && (() => {
+                const contactTopics = topics.filter(t => contactViewTopicIds.has(t.id));
+                if (contactTopics.length === 0) {
+                  return (
+                    <div className="text-center py-16 text-gray-400">
+                      <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                      <p className="text-sm">No topics linked to this contact</p>
+                      <p className="text-xs mt-1">Link this contact to topics or assign them tasks to see data here.</p>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-xs font-medium text-gray-500">{contactTopics.length} topic{contactTopics.length !== 1 ? 's' : ''} · {Object.values(contactViewTasksByTopic).flat().length} assigned task{Object.values(contactViewTasksByTopic).flat().length !== 1 ? 's' : ''}</span>
+                    </div>
+                    {contactTopics.map(t => {
+                      const assignedTasks = contactViewTasksByTopic[t.id] || [];
+                      const allCachedTasks = topicTasksCache[t.id] || [];
+                      const assignedIds = new Set(assignedTasks.map(at => at.id));
+                      const otherTasks = allCachedTasks.filter(ct => !assignedIds.has(ct.id) && ct.status !== 'completed' && ct.status !== 'archived');
+                      const areaColor = areaBorderColors[t.area] || 'border-l-gray-300';
+
+                      return (
+                        <div key={t.id} className={`bg-white border border-gray-200 rounded-xl overflow-hidden border-l-4 ${areaColor}`}>
+                          {/* Topic header */}
+                          <Link href={`/topics/${t.id}`} className="block px-4 py-3 hover:bg-gray-50/50 transition-colors">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-sm text-gray-900 flex-1">{t.title}</span>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${statusColors[t.status] || 'bg-gray-100 text-gray-600'}`}>{t.status}</span>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${areaColors[t.area] || 'bg-gray-100 text-gray-600'}`}>{t.area}</span>
+                            </div>
+                            {t.due_date && (
+                              <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
+                                <Clock className="w-3 h-3" />
+                                <span className={new Date(t.due_date) < new Date() ? 'text-red-500 font-medium' : ''}>Due {new Date(t.due_date).toLocaleDateString()}</span>
+                              </div>
+                            )}
+                          </Link>
+
+                          {/* Assigned tasks */}
+                          {(assignedTasks.length > 0 || otherTasks.length > 0) && (
+                            <div className="border-t border-gray-100 px-4 py-2 space-y-1">
+                              {assignedTasks.map(task => (
+                                <div key={task.id} className="flex items-center gap-2 py-1 bg-teal-50/50 -mx-1 px-1 rounded">
+                                  <button onClick={() => quickCompleteTask(t.id, task.id)} className="flex-shrink-0">
+                                    {task.status === 'completed'
+                                      ? <CheckSquare className="w-3.5 h-3.5 text-teal-500" />
+                                      : <Square className="w-3.5 h-3.5 text-gray-300 hover:text-teal-500" />}
+                                  </button>
+                                  <span className={`text-xs flex-1 ${task.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                    {task.title}
+                                  </span>
+                                  {task.priority === 'high' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">HIGH</span>}
+                                  {task.due_date && (
+                                    <span className={`text-[10px] ${new Date(task.due_date) < new Date() ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
+                                      {new Date(task.due_date).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-600 font-medium">assigned</span>
+                                </div>
+                              ))}
+                              {otherTasks.length > 0 && (
+                                <div className="pt-1 border-t border-gray-100/50">
+                                  {otherTasks.slice(0, 3).map(task => (
+                                    <div key={task.id} className="flex items-center gap-2 py-0.5 opacity-50">
+                                      <Square className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                                      <span className="text-xs text-gray-500 flex-1 truncate">{task.title}</span>
+                                      {task.assignee && <span className="text-[9px] text-gray-400">{task.assignee}</span>}
+                                    </div>
+                                  ))}
+                                  {otherTasks.length > 3 && (
+                                    <span className="text-[10px] text-gray-400 pl-5">+{otherTasks.length - 3} more tasks</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {assignedTasks.length === 0 && otherTasks.length === 0 && (
+                            <div className="border-t border-gray-100 px-4 py-2">
+                              <span className="text-xs text-gray-400 italic">No active tasks</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {!contactViewContactId && !contactViewLoading && (
+                <div className="text-center py-16 text-gray-400">
+                  <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                  <p className="text-sm">Select a contact above to see their topics & tasks</p>
+                </div>
+              )}
             </div>
           ) : viewMode === 'tasks' ? (
             <div>

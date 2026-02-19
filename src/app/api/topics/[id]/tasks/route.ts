@@ -64,6 +64,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       priority: t.priority || 'medium',
       due_date: t.due_date || null,
       assignee: t.assignee || null,
+      assignee_contact_id: t.assignee_contact_id || null,
       source: t.source || 'manual',
       source_item_ref: t.source_item_ref || null,
       position: typeof t.position === 'number' ? t.position : index,
