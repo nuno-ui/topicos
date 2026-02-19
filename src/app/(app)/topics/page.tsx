@@ -3,6 +3,8 @@ import { TopicsList } from '@/components/topics/topics-list';
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'Topics - YouOS',
   description: 'Your projects and life areas, organized intelligently',

@@ -185,6 +185,16 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.accounts) setSearchAccounts(d.accounts); })
       .catch(() => {});
+    // Always refresh items from DB on mount to avoid stale SSR cache
+    fetch(`/api/topics/${initialTopic.id}/items`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.items) setItems(d.items); })
+      .catch(() => {});
+    // Also refresh topic data (notes, status, etc.) in case SSR cache is stale
+    fetch(`/api/topics/${initialTopic.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.topic) { setTopic(d.topic); setNotes(d.topic.notes || ''); } })
+      .catch(() => {});
   }, []);
 
   // Notes state

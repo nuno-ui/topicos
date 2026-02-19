@@ -5,6 +5,8 @@ import { Zap, Clock, FolderKanban, Newspaper, PieChart, Mail, Calendar, FileText
 import { DashboardAgents } from '@/components/dashboard/dashboard-agents';
 import { ClientGreeting, ClientDate } from '@/components/dashboard/client-date';
 
+export const dynamic = 'force-dynamic';
+
 const sourceIconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   gmail: Mail,
   calendar: Calendar,

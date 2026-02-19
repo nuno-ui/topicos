@@ -3,6 +3,9 @@ import { TopicDetail } from '@/components/topics/topic-detail';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 
+// Prevent any caching — always fetch fresh data on every request
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const supabase = await createServerSupabaseClient();

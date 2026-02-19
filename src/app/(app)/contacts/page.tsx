@@ -2,6 +2,8 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { ContactsList } from '@/components/contacts/contacts-list';
 import type { Metadata } from 'next';
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'People - YouOS',
   description: 'People from your topics, emails, and connected sources',

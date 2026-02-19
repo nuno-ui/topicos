@@ -5,6 +5,8 @@ import { notFound } from 'next/navigation';
 import { getContactItems, updateContactStats } from '@/lib/contacts/interaction-stats';
 import type { Metadata } from 'next';
 
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const supabase = await createServerSupabaseClient();
