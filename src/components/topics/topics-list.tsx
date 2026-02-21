@@ -9,7 +9,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { HierarchyPicker, buildFolderPickerItems, buildTopicPickerItems } from '@/components/ui/hierarchy-picker';
 import { ContactPicker, type ContactOption } from '@/components/ui/contact-picker';
-import { Copy, Download } from 'lucide-react';
+import { Copy, Download, ExternalLink } from 'lucide-react';
 
 // --- Area border color map for topic cards ---
 const areaBorderColors: Record<string, string> = {
@@ -264,6 +264,8 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
   const [contactViewTasksByTopic, setContactViewTasksByTopic] = useState<Record<string, TopicTaskPreview[]>>({});
   const [contactViewLoading, setContactViewLoading] = useState(false);
   const [contactViewLoaded, setContactViewLoaded] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [sharingLoading, setSharingLoading] = useState(false);
 
   // Auto-load tasks for all topics when entering tasks view
   useEffect(() => {
@@ -1197,6 +1199,34 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
     URL.revokeObjectURL(url);
     toast.success('Downloaded!');
   }, [generateContactMarkdown, contactViewContacts, contactViewContactId]);
+
+  const createShareLink = useCallback(async () => {
+    if (!contactViewContactId) return;
+    setSharingLoading(true);
+    try {
+      const contact = contactViewContacts.find(c => c.id === contactViewContactId);
+      const res = await fetch('/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contact_id: contactViewContactId,
+          area: selectedArea || 'work',
+          label: contact ? `${(selectedArea || 'work').charAt(0).toUpperCase()}${(selectedArea || 'work').slice(1)} Topics — ${contact.name}` : 'Work Topics',
+        }),
+      });
+      if (res.ok) {
+        const { shareUrl: url } = await res.json();
+        setShareUrl(url);
+        await navigator.clipboard.writeText(url);
+        toast.success('Share link copied to clipboard!');
+      } else {
+        toast.error('Failed to create share link');
+      }
+    } catch {
+      toast.error('Failed to create share link');
+    }
+    setSharingLoading(false);
+  }, [contactViewContactId, contactViewContacts, selectedArea]);
 
   // Render a topic card (enhanced - visual improvements)
   const renderTopicCard = (t: Topic, depth: number = 0) => {
@@ -2889,14 +2919,35 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                     <p className="text-xs text-teal-600">Select a contact to see their topics & assigned tasks</p>
                   </div>
                   {contactViewContactId && (
-                    <div className="flex items-center gap-1.5">
-                      <button onClick={copyContactView} className="px-2.5 py-1.5 text-xs font-medium text-teal-700 bg-white border border-teal-200 rounded-lg hover:bg-teal-50 transition-colors flex items-center gap-1" title="Copy as Markdown">
-                        <Copy className="w-3 h-3" /> Copy
-                      </button>
-                      <button onClick={downloadContactView} className="px-2.5 py-1.5 text-xs font-medium text-teal-700 bg-white border border-teal-200 rounded-lg hover:bg-teal-50 transition-colors flex items-center gap-1" title="Download as .md file">
-                        <Download className="w-3 h-3" /> Download
-                      </button>
-                    </div>
+                    <>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={copyContactView} className="px-2.5 py-1.5 text-xs font-medium text-teal-700 bg-white border border-teal-200 rounded-lg hover:bg-teal-50 transition-colors flex items-center gap-1" title="Copy as Markdown">
+                          <Copy className="w-3 h-3" /> Copy
+                        </button>
+                        <button onClick={downloadContactView} className="px-2.5 py-1.5 text-xs font-medium text-teal-700 bg-white border border-teal-200 rounded-lg hover:bg-teal-50 transition-colors flex items-center gap-1" title="Download as .md file">
+                          <Download className="w-3 h-3" /> Download
+                        </button>
+                        <button
+                          onClick={createShareLink}
+                          disabled={sharingLoading}
+                          className="px-2.5 py-1.5 text-xs font-medium text-white bg-teal-600 border border-teal-700 rounded-lg hover:bg-teal-700 transition-colors flex items-center gap-1 disabled:opacity-50"
+                          title="Create shareable page link"
+                        >
+                          {sharingLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ExternalLink className="w-3 h-3" />}
+                          Share Page
+                        </button>
+                      </div>
+                      {shareUrl && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            readOnly
+                            value={shareUrl}
+                            className="flex-1 text-xs px-2 py-1 bg-white border border-teal-200 rounded-lg text-teal-700 truncate"
+                            onClick={e => { (e.target as HTMLInputElement).select(); navigator.clipboard.writeText(shareUrl); toast.success('Copied!'); }}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
                 <ContactPicker
