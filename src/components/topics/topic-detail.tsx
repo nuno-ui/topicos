@@ -269,6 +269,8 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [threadSummary, setThreadSummary] = useState<string | null>(null);
   const [showThreadSummary, setShowThreadSummary] = useState(false);
   const [goalProposal, setGoalProposal] = useState<{ proposed_goal: string; reasoning: string; is_improvement: boolean; current_goal: string | null; alternatives: string[] } | null>(null);
+  const [taskImprovement, setTaskImprovement] = useState<{ task_id: string; original_title: string; original_description: string; improved_title: string; improved_description: string; reasoning: string } | null>(null);
+  const [improvingTaskId, setImprovingTaskId] = useState<string | null>(null);
 
   // Note editor state
   const [showNoteEditor, setShowNoteEditor] = useState(false);
@@ -676,6 +678,36 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
       toast.error(err instanceof Error ? err.message : 'Agent failed');
     }
     setAgentLoading(null);
+  };
+
+  // Improve a single task with AI
+  const improveTask = async (task: TopicTask) => {
+    setImprovingTaskId(task.id);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'improve_task', context: { topic_id: topic.id, task_id: task.id, task_title: task.title, task_description: task.description } }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setTaskImprovement(data.result);
+      toast.success('Task improvement ready!');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to improve task');
+    }
+    setImprovingTaskId(null);
+  };
+
+  const acceptTaskImprovement = async () => {
+    if (!taskImprovement) return;
+    try {
+      await updateTask(taskImprovement.task_id, { title: taskImprovement.improved_title, description: taskImprovement.improved_description } as Partial<TopicTask>);
+      setTaskImprovement(null);
+      toast.success('Task improved!');
+    } catch {
+      toast.error('Failed to apply improvement');
+    }
   };
 
   // Format agent last run time
@@ -2860,8 +2892,8 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                   }
 
                   return (
+                    <div key={task.id} className="space-y-1.5">
                     <div
-                      key={task.id}
                       className={`group flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-all hover:shadow-sm cursor-pointer ${
                         isArchived ? 'border-gray-100 bg-gray-50/50 opacity-60' : isCompleted ? 'border-green-100 bg-green-50/30' : 'border-gray-100 bg-white hover:border-gray-200'
                       }`}
@@ -2923,6 +2955,11 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
 
                       {/* Hover actions */}
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                        <button onClick={(e) => { e.stopPropagation(); improveTask(task); }}
+                          disabled={improvingTaskId === task.id}
+                          className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors disabled:opacity-50" title="AI: Improve task">
+                          {improvingTaskId === task.id ? <Loader2 className="w-3 h-3 animate-spin text-purple-500" /> : <Sparkles className="w-3 h-3" />}
+                        </button>
                         <button onClick={() => startEditingTask(task)}
                           className="p-1 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors" title="Edit task">
                           <Edit3 className="w-3 h-3" />
@@ -2947,6 +2984,42 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                           <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
+                    </div>
+                    {/* Task improvement proposal inline */}
+                    {taskImprovement && taskImprovement.task_id === task.id && (
+                      <div className="ml-7 p-3 bg-purple-50 rounded-lg border border-purple-200 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                          <span className="text-xs font-semibold text-purple-800">AI Improved Task</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          <div>
+                            <span className="text-[10px] text-gray-400 uppercase tracking-wider">Title</span>
+                            <p className="text-xs text-gray-400 line-through">{taskImprovement.original_title}</p>
+                            <p className="text-sm font-medium text-purple-900">{taskImprovement.improved_title}</p>
+                          </div>
+                          {(taskImprovement.improved_description || taskImprovement.original_description) && (
+                            <div>
+                              <span className="text-[10px] text-gray-400 uppercase tracking-wider">Description</span>
+                              {taskImprovement.original_description && (
+                                <p className="text-xs text-gray-400 line-through">{taskImprovement.original_description}</p>
+                              )}
+                              <p className="text-xs text-purple-800">{taskImprovement.improved_description}</p>
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-purple-600 italic">{taskImprovement.reasoning}</p>
+                        <div className="flex gap-2 pt-1">
+                          <button onClick={acceptTaskImprovement}
+                            className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700">
+                            Accept
+                          </button>
+                          <button onClick={() => setTaskImprovement(null)} className="px-3 py-1.5 text-gray-500 hover:text-gray-700 text-xs">
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     </div>
                   );
                 })}

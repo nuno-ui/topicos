@@ -229,6 +229,41 @@ Return JSON: { "proposed_goal": "your best proposed goal", "reasoning": "1-2 sen
         break;
       }
 
+      case 'improve_task': {
+        // AI improves a single task's title and description to be clearer and more professional
+        const { topic_id, task_id, task_title, task_description } = context;
+        const { data: topic } = await supabase.from('topics').select('title, description, goal, area, tags').eq('id', topic_id).eq('user_id', user.id).single();
+        if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
+
+        inputSummary = `Improving task: ${task_title}`;
+
+        const { data: improvedTask } = await callClaudeJSON<{ improved_title: string; improved_description: string; reasoning: string }>(
+          `You are a professional task writing assistant. Take the given task and rewrite it to be clearer, more specific, and more professional.
+
+RULES:
+1. The improved title should be an actionable verb phrase. Start with a verb (e.g., "Finalize", "Review", "Implement", "Schedule").
+2. Keep the title concise but specific — include WHO, WHAT, or WHERE when relevant. Max 12 words.
+3. Write a brief description (1-2 sentences) that adds context: expected outcome, key details, or acceptance criteria. If the original has a good description, refine it.
+4. Preserve the original meaning — do NOT change what the task is about, only HOW it's expressed.
+5. Consider the parent topic's context (title, goal, other tasks) to ensure the task aligns.
+6. Be professional but not overly formal.
+
+Return JSON: { "improved_title": "...", "improved_description": "...", "reasoning": "1-sentence explanation of what you improved" }`,
+          `Parent Topic: ${topic.title}\nTopic Goal: ${topic.goal || 'None'}\nTopic Description: ${topic.description || 'None'}\n\nTask to improve:\nTitle: ${task_title}\nDescription: ${task_description || 'None'}\n\nOther tasks in this topic for context:${tasksCtx}`
+        );
+
+        result = {
+          task_id,
+          original_title: task_title,
+          original_description: task_description || '',
+          improved_title: improvedTask.improved_title,
+          improved_description: improvedTask.improved_description,
+          reasoning: improvedTask.reasoning,
+        };
+        break;
+      }
+
       case 'extract_action_items': {
         // AI extracts action items from topic communications — deep extraction
         const { topic_id } = context;
