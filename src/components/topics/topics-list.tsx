@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client';
 import { formatRelativeDate } from '@/lib/utils';
 import { SourceIcon } from '@/components/ui/source-icon';
 import { toast } from 'sonner';
-import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, ArrowRightLeft, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban, Circle, Undo2, RefreshCw, ListChecks, CheckSquare, Square } from 'lucide-react';
+import { Plus, Filter, X, Search, Sparkles, ArrowUpDown, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreHorizontal, Edit3, Trash2, MoveRight, ArrowRightLeft, Tag, Wand2, Loader2, Brain, Clock, Users, Paperclip, AlertTriangle, TrendingUp, Activity, Heart, StickyNote, Mail, Calendar, FileText, MessageSquare, BookOpen, Zap, Eye, Star, Archive, Pin, GripVertical, Inbox, BarChart3, CheckCircle2, CircleDot, Flame, ShieldAlert, Hash, Briefcase, Home, Rocket, ArrowLeft, Code, Palette, Megaphone, DollarSign, Plane, Layers, FolderKanban, Circle, Undo2, RefreshCw, ListChecks, CheckSquare, Square, Target } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { HierarchyPicker, buildFolderPickerItems, buildTopicPickerItems } from '@/components/ui/hierarchy-picker';
@@ -154,6 +154,7 @@ interface Topic {
   stakeholders: string[] | null;
   progress_percent: number | null;
   notes: string | null;
+  goal: string | null;
   topic_items: { count: number }[];
   topic_tasks?: { count: number }[];
   recent_items?: Array<{ title: string; source: string; occurred_at: string }>;
@@ -1136,6 +1137,35 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
     lines.push(`*Generated from YouOS on ${new Date().toLocaleDateString()}*`);
     lines.push('');
 
+    // Compute shared tasks across topics
+    const _mdTitleMap: Record<string, Array<{ title: string; topicTitle: string }>> = {};
+    for (const ct of contactTopics) {
+      const assigned = contactViewTasksByTopic[ct.id] || [];
+      for (const task of assigned) {
+        if (task.status === 'completed' || task.status === 'archived') continue;
+        const key = task.title.trim().toLowerCase();
+        if (!_mdTitleMap[key]) _mdTitleMap[key] = [];
+        _mdTitleMap[key].push({ title: task.title, topicTitle: ct.title });
+      }
+    }
+    const mdSharedTasks = Object.entries(_mdTitleMap)
+      .filter(([, entries]) => new Set(entries.map(e => e.topicTitle)).size >= 2)
+      .map(([, entries]) => ({
+        title: entries[0].title,
+        topics: [...new Set(entries.map(e => e.topicTitle))],
+      }));
+
+    if (mdSharedTasks.length > 0) {
+      lines.push('## ⚡ Shared Next Steps');
+      lines.push('*Tasks spanning multiple topics — completing these unlocks progress across the board.*');
+      lines.push('');
+      for (const st of mdSharedTasks) {
+        lines.push(`- [ ] ${st.title}`);
+        lines.push(`  → ${st.topics.join(', ')}`);
+      }
+      lines.push('');
+    }
+
     for (const t of contactTopics) {
       const areaLabel = t.area.charAt(0).toUpperCase() + t.area.slice(1);
       const statusLabel = t.status.charAt(0).toUpperCase() + t.status.slice(1);
@@ -1168,6 +1198,12 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
           const owner = task.assignee ? ` (${task.assignee})` : '';
           lines.push(`- [ ]${priority} ${task.title}${due}${owner}`);
         }
+        lines.push('');
+      }
+
+      // Goal
+      if (t.goal) {
+        lines.push(`**🎯 Goal:** ${t.goal}`);
         lines.push('');
       }
     }
@@ -1541,6 +1577,24 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                   </div>
                 );
               })}
+              {/* Goal as final destination */}
+              {t.goal && activeTasks.length > 0 && (
+                <>
+                  <div className="flex items-center gap-2 px-2 py-0.5">
+                    <div className="w-3.5 flex justify-center">
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                        <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                        <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-blue-50/60 border border-dashed border-blue-200">
+                    <Target className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                    <span className="text-xs font-medium text-blue-700 flex-1 min-w-0 truncate">Goal: {t.goal}</span>
+                  </div>
+                </>
+              )}
               {/* Quick-add inside tasks view */}
               {inlineTaskFormTopic === t.id ? (
                 <div className="bg-amber-50/40 border border-amber-200/50 rounded-lg p-2.5 space-y-2 mt-1">
@@ -2981,7 +3035,69 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                     <div className="flex items-center justify-between px-1">
                       <span className="text-xs font-medium text-gray-500">{contactTopics.length} topic{contactTopics.length !== 1 ? 's' : ''} · {Object.values(contactViewTasksByTopic).flat().length} assigned task{Object.values(contactViewTasksByTopic).flat().length !== 1 ? 's' : ''}</span>
                     </div>
-                    {contactTopics.map(t => {
+
+                    {/* Cross-topic shared tasks detection */}
+                    {(() => {
+                      const taskTitleMap: Record<string, Array<{ task: TopicTaskPreview; topicId: string; topicTitle: string }>> = {};
+                      for (const ct of contactTopics) {
+                        const assigned = contactViewTasksByTopic[ct.id] || [];
+                        for (const task of assigned) {
+                          if (task.status === 'completed' || task.status === 'archived') continue;
+                          const key = task.title.trim().toLowerCase();
+                          if (!taskTitleMap[key]) taskTitleMap[key] = [];
+                          taskTitleMap[key].push({ task, topicId: ct.id, topicTitle: ct.title });
+                        }
+                      }
+                      const sharedTasks = Object.entries(taskTitleMap)
+                        .filter(([, entries]) => new Set(entries.map(e => e.topicId)).size >= 2)
+                        .map(([, entries]) => ({
+                          title: entries[0].task.title,
+                          priority: entries[0].task.priority,
+                          due_date: entries[0].task.due_date,
+                          topics: [...new Set(entries.map(e => e.topicTitle))],
+                        }));
+                      if (sharedTasks.length === 0) return null;
+                      return (
+                        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-1">
+                          <h3 className="text-sm font-semibold text-indigo-800 flex items-center gap-2 mb-2">
+                            <Layers className="w-4 h-4" />
+                            Shared Next Steps
+                            <span className="text-xs font-normal text-indigo-600">Tasks spanning multiple topics</span>
+                          </h3>
+                          <div className="space-y-1.5">
+                            {sharedTasks.map((st, i) => (
+                              <div key={i} className="flex items-start gap-2 py-1.5 px-2 bg-white rounded-lg border border-indigo-100">
+                                <Zap className="w-3.5 h-3.5 text-indigo-500 mt-0.5 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-xs font-medium text-gray-800">{st.title}</span>
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {st.topics.map(topicTitle => (
+                                      <span key={topicTitle} className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium">{topicTitle}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                                {st.priority === 'high' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">HIGH</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {(() => {
+                      // Compute shared task titles for badge display
+                      const _titleCount: Record<string, Set<string>> = {};
+                      for (const ct of contactTopics) {
+                        for (const task of (contactViewTasksByTopic[ct.id] || [])) {
+                          if (task.status === 'completed' || task.status === 'archived') continue;
+                          const key = task.title.trim().toLowerCase();
+                          if (!_titleCount[key]) _titleCount[key] = new Set();
+                          _titleCount[key].add(ct.id);
+                        }
+                      }
+                      const sharedTaskTitles = new Set(Object.entries(_titleCount).filter(([, s]) => s.size >= 2).map(([k]) => k));
+
+                      return contactTopics.map(t => {
                       const assignedTasks = contactViewTasksByTopic[t.id] || [];
                       const allCachedTasks = topicTasksCache[t.id] || [];
                       const assignedIds = new Set(assignedTasks.map(at => at.id));
@@ -3002,6 +3118,9 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                                 <Clock className="w-3 h-3" />
                                 <span className={new Date(t.due_date) < new Date() ? 'text-red-500 font-medium' : ''}>Due {new Date(t.due_date).toLocaleDateString()}</span>
                               </div>
+                            )}
+                            {t.description && (
+                              <p className="text-xs text-gray-500 mt-1.5 line-clamp-2">{t.description}</p>
                             )}
                           </Link>
 
@@ -3025,6 +3144,11 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                                     </span>
                                   )}
                                   <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-600 font-medium">assigned</span>
+                                  {sharedTaskTitles.has(task.title.trim().toLowerCase()) && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium flex items-center gap-0.5">
+                                      <Layers className="w-2.5 h-2.5" /> shared
+                                    </span>
+                                  )}
                                 </div>
                               ))}
                               {otherTasks.length > 0 && (
@@ -3041,17 +3165,38 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                                   )}
                                 </div>
                               )}
+                              {/* Goal as final destination */}
+                              {t.goal && (
+                                <div className="pt-1.5 mt-1 border-t border-blue-100/50">
+                                  <div className="flex items-center gap-0.5 justify-center mb-1">
+                                    <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                                    <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                                    <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                                  </div>
+                                  <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-blue-50/60 border border-dashed border-blue-200">
+                                    <Target className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                                    <span className="text-xs font-medium text-blue-700 flex-1 min-w-0 truncate">Goal: {t.goal}</span>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
 
                           {assignedTasks.length === 0 && otherTasks.length === 0 && (
                             <div className="border-t border-gray-100 px-4 py-2">
                               <span className="text-xs text-gray-400 italic">No active tasks</span>
+                              {t.goal && (
+                                <div className="flex items-center gap-2 px-2 py-1.5 mt-1 rounded-lg bg-blue-50/60 border border-dashed border-blue-200">
+                                  <Target className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                                  <span className="text-xs font-medium text-blue-700 flex-1 min-w-0 truncate">Goal: {t.goal}</span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
                       );
-                    })}
+                    });
+                    })()}
                   </div>
                 );
               })()}
