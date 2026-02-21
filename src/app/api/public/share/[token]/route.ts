@@ -36,11 +36,12 @@ export async function GET(
     .eq('area', area)
     .order('updated_at', { ascending: false });
 
-  // Fetch all folders
+  // Fetch folders for this area only
   const { data: folders } = await supabase
     .from('folders')
     .select('*')
     .eq('user_id', userId)
+    .eq('area', area)
     .order('position', { ascending: true });
 
   // Fetch all tasks for these topics

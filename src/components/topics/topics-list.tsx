@@ -2347,6 +2347,11 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
               {reorgLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
               {reorgLoading ? 'Analyzing...' : 'AI Reorganize'}
             </button>
+            <button onClick={handleProposeGoals} disabled={!!aiLoading}
+              className="px-3 py-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-sm font-medium hover:bg-blue-100 flex items-center gap-2 disabled:opacity-50 transition-colors">
+              {aiLoading === 'propose_goals' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
+              {aiLoading === 'propose_goals' ? 'Proposing...' : 'AI Propose Goals'}
+            </button>
           </div>
 
           {/* Create topic form on area page */}
