@@ -669,6 +669,32 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
     if (result) setAiSuggestions(result);
   };
 
+  const [goalProposals, setGoalProposals] = useState<Array<{ topic_id: string; topic_title: string; current_goal: string | null; proposed_goal: string; reasoning: string; is_improvement: boolean }>>([]);
+
+  const handleProposeGoals = async () => {
+    const result = await runAgent('propose_goals', { area: selectedArea });
+    if (result?.proposals) {
+      setGoalProposals(result.proposals);
+      toast.success(`AI proposed goals for ${result.proposals.length} topics`);
+    }
+  };
+
+  const acceptGoalProposal = async (topicId: string, goal: string) => {
+    try {
+      const res = await fetch(`/api/topics/${topicId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal }),
+      });
+      if (!res.ok) throw new Error('Failed to update goal');
+      setTopics(prev => prev.map(t => t.id === topicId ? { ...t, goal } : t));
+      setGoalProposals(prev => prev.filter(p => p.topic_id !== topicId));
+      toast.success('Goal updated!');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update goal');
+    }
+  };
+
   const createSuggestedTopic = async (suggestion: { title: string; description: string; area: string }) => {
     const { data: { user } } = await supabase.auth.getUser();
     const { data, error } = await supabase.from('topics').insert({
@@ -2465,6 +2491,47 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
               </div>
             </div>
           )}
+
+          {/* AI Goal Proposals */}
+          {goalProposals.length > 0 && (
+            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h3 className="text-sm font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                <Target className="w-4 h-4" /> AI Goal Proposals
+                <span className="text-xs font-normal text-blue-600">{goalProposals.length} suggestion{goalProposals.length !== 1 ? 's' : ''}</span>
+              </h3>
+              <div className="space-y-2">
+                {goalProposals.map((p, i) => (
+                  <div key={i} className="flex items-start justify-between gap-3 p-3 bg-white rounded-lg border border-blue-100">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900">{p.topic_title}</p>
+                      {p.is_improvement && p.current_goal && (
+                        <p className="text-xs text-gray-400 mt-0.5 line-through">{p.current_goal}</p>
+                      )}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <Target className="w-3 h-3 text-blue-500 flex-shrink-0" />
+                        <p className="text-xs font-medium text-blue-700">{p.proposed_goal}</p>
+                      </div>
+                      <p className="text-xs text-blue-600 mt-1 italic">{p.reasoning}</p>
+                      {p.is_improvement && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium mt-1 inline-block">improvement</span>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1 flex-shrink-0">
+                      <button onClick={() => acceptGoalProposal(p.topic_id, p.proposed_goal)}
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">
+                        Accept
+                      </button>
+                      <button onClick={() => setGoalProposals(prev => prev.filter(x => x.topic_id !== p.topic_id))}
+                        className="px-3 py-1 text-gray-400 hover:text-gray-600 text-xs">
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <button onClick={() => setGoalProposals([])} className="text-xs text-blue-600 hover:underline">Dismiss all</button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         /* ======================== AREA DETAIL VIEW ======================== */
@@ -2553,6 +2620,11 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
               );
               return null;
             })()}
+            <button onClick={handleProposeGoals} disabled={!!aiLoading}
+              className="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 flex items-center gap-1.5 disabled:opacity-50 transition-colors">
+              {aiLoading === 'propose_goals' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Target className="w-3.5 h-3.5" />}
+              {aiLoading === 'propose_goals' ? 'Proposing...' : 'AI Propose Goals'}
+            </button>
             <button onClick={runReorganize} disabled={reorgLoading || !!aiLoading}
               className="px-3 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-medium hover:bg-indigo-100 flex items-center gap-1.5 disabled:opacity-50 transition-colors">
               {reorgLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
@@ -2613,6 +2685,47 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
                   </div>
                 ))}
                 <button onClick={() => setAiSuggestions([])} className="text-xs text-purple-600 hover:underline">Dismiss</button>
+              </div>
+            </div>
+          )}
+
+          {/* AI Goal Proposals (area detail) */}
+          {goalProposals.length > 0 && (
+            <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h3 className="text-sm font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                <Target className="w-4 h-4" /> AI Goal Proposals
+                <span className="text-xs font-normal text-blue-600">{goalProposals.length} suggestion{goalProposals.length !== 1 ? 's' : ''}</span>
+              </h3>
+              <div className="space-y-2">
+                {goalProposals.map((p, i) => (
+                  <div key={i} className="flex items-start justify-between gap-3 p-3 bg-white rounded-lg border border-blue-100">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900">{p.topic_title}</p>
+                      {p.is_improvement && p.current_goal && (
+                        <p className="text-xs text-gray-400 mt-0.5 line-through">{p.current_goal}</p>
+                      )}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <Target className="w-3 h-3 text-blue-500 flex-shrink-0" />
+                        <p className="text-xs font-medium text-blue-700">{p.proposed_goal}</p>
+                      </div>
+                      <p className="text-xs text-blue-600 mt-1 italic">{p.reasoning}</p>
+                      {p.is_improvement && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium mt-1 inline-block">improvement</span>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1 flex-shrink-0">
+                      <button onClick={() => acceptGoalProposal(p.topic_id, p.proposed_goal)}
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">
+                        Accept
+                      </button>
+                      <button onClick={() => setGoalProposals(prev => prev.filter(x => x.topic_id !== p.topic_id))}
+                        className="px-3 py-1 text-gray-400 hover:text-gray-600 text-xs">
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <button onClick={() => setGoalProposals([])} className="text-xs text-blue-600 hover:underline">Dismiss all</button>
               </div>
             </div>
           )}

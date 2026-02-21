@@ -395,6 +395,53 @@ ${(recentItems || []).map((i: { source: string; title: string; snippet: string; 
         break;
       }
 
+      case 'propose_goals': {
+        // AI proposes goals for topics — both new goals and improvements to existing ones
+        const area = context.area as string | null;
+        const query = supabase.from('topics')
+          .select('id, title, description, goal, status, area, notes, due_date, priority, tags')
+          .eq('user_id', user.id)
+          .eq('status', 'active');
+        if (area) query.eq('area', area);
+        const { data: activeTopics } = await query.order('updated_at', { ascending: false }).limit(40);
+
+        if (!activeTopics || activeTopics.length === 0) {
+          result = { proposals: [] };
+          break;
+        }
+
+        // Build context for each topic (tasks + description + existing goal)
+        const topicContexts = await Promise.all(activeTopics.map(async (t: { id: string; title: string; description: string | null; goal: string | null; notes: string | null; area: string; tags: string[] | null; due_date: string | null }) => {
+          const tasksCtx = await getTopicTasksContext(t.id, supabase);
+          return `--- TOPIC: ${t.title} (id: ${t.id}, area: ${t.area}) ---
+Description: ${t.description || 'None'}
+Current Goal: ${t.goal || 'None'}
+Notes: ${t.notes ? t.notes.substring(0, 300) : 'None'}
+Tags: ${t.tags?.join(', ') || 'None'}
+Due: ${t.due_date ? new Date(t.due_date).toLocaleDateString() : 'No deadline'}${tasksCtx}`;
+        }));
+
+        inputSummary = `Proposing goals for ${activeTopics.length} topics${area ? ` in ${area}` : ''}`;
+
+        const { data: goalData } = await callClaudeJSON<{ proposals: Array<{ topic_id: string; topic_title: string; current_goal: string | null; proposed_goal: string; reasoning: string; is_improvement: boolean }> }>(
+          `You are a strategic planning assistant. Analyze the following topics and propose concise, actionable goals for each one.
+
+RULES:
+1. For topics WITHOUT a goal: Propose a clear goal based on the topic's description, tasks, and context. Set is_improvement to false.
+2. For topics WITH an existing goal: The existing goal is your best reference. Only propose an improvement if you can make it significantly more specific, actionable, or measurable. Set is_improvement to true. If the existing goal is already strong, SKIP that topic entirely.
+3. Goals should be outcome-focused (the end-state), NOT process-focused. Example: "Launch production API with <100ms p95 latency" not "Work on improving the API".
+4. Keep goals to 1 sentence, max 15 words.
+5. Consider relationships between topics — if multiple topics share tasks, their goals should reflect how they connect to a larger objective.
+6. Return proposals ONLY for topics where you have a meaningful goal to suggest. Do NOT force goals on every topic.
+
+Return JSON: { "proposals": [{ "topic_id": "...", "topic_title": "...", "current_goal": "existing goal or null", "proposed_goal": "your proposed goal", "reasoning": "1-sentence explanation", "is_improvement": true/false }] }`,
+          topicContexts.join('\n\n')
+        );
+
+        result = { proposals: goalData.proposals || [] };
+        break;
+      }
+
       case 'weekly_review': {
         // AI generates a weekly review
         const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();

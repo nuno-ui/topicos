@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import {
   FolderOpen,
+  Folder,
   CheckCircle2,
   Circle,
   Clock,
@@ -13,6 +14,7 @@ import {
   MessageSquare,
   Send,
   User,
+  Users,
   Briefcase,
   ArrowUpRight,
   Target,
@@ -21,6 +23,10 @@ import {
   Code,
   ChevronUp,
   StickyNote,
+  Calendar,
+  Inbox,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 interface ShareData {
@@ -61,6 +67,8 @@ interface Folder {
   name: string;
   color: string | null;
   position: number;
+  parent_id: string | null;
+  area: string | null;
 }
 
 interface Task {
@@ -73,6 +81,8 @@ interface Task {
   assignee: string | null;
   assignee_contact_id: string | null;
   description: string;
+  created_at?: string;
+  source?: string | null;
 }
 
 interface Comment {
@@ -84,27 +94,46 @@ interface Comment {
   created_at: string;
 }
 
-const statusIcon = (status: string) => {
-  switch (status) {
-    case 'completed': return <CheckCircle2 className="w-4 h-4 text-green-500" />;
-    case 'in_progress': return <Clock className="w-4 h-4 text-blue-500" />;
-    case 'archived': return <AlertTriangle className="w-4 h-4 text-gray-400" />;
-    default: return <Circle className="w-4 h-4 text-gray-400" />;
-  }
+// --- Color maps matching internal app ---
+const areaBorderColors: Record<string, string> = {
+  work: 'border-l-blue-500',
+  personal: 'border-l-green-500',
+  career: 'border-l-purple-500',
 };
 
-const priorityBadge = (priority: string) => {
-  const colors: Record<string, string> = {
-    high: 'bg-red-100 text-red-700',
-    medium: 'bg-yellow-100 text-yellow-700',
-    low: 'bg-gray-100 text-gray-600',
-  };
-  return (
-    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${colors[priority] || colors.medium}`}>
-      {priority}
-    </span>
-  );
+const areaColors: Record<string, string> = {
+  work: 'bg-blue-100 text-blue-700',
+  personal: 'bg-green-100 text-green-700',
+  career: 'bg-purple-100 text-purple-700',
 };
+
+const statusColors: Record<string, string> = {
+  active: 'bg-emerald-100 text-emerald-700',
+  completed: 'bg-gray-100 text-gray-600',
+  archived: 'bg-amber-100 text-amber-700',
+};
+
+const folderColorMap: Record<string, string> = {
+  red: 'text-red-500', blue: 'text-blue-500', green: 'text-green-500',
+  purple: 'text-purple-500', amber: 'text-amber-500', gray: 'text-gray-500',
+};
+
+const folderBorderColorMap: Record<string, string> = {
+  red: '#ef4444', blue: '#3b82f6', green: '#22c55e',
+  purple: '#8b5cf6', amber: '#f59e0b', gray: '#6b7280',
+};
+
+function formatRelativeDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+  return date.toLocaleDateString();
+}
 
 export default function SharePage() {
   const params = useParams();
@@ -275,129 +304,275 @@ export default function SharePage() {
     }
   });
 
-  const renderTask = (task: Task, isContactTask: boolean = false) => (
-    <div
-      key={task.id}
-      className={`flex items-start gap-2 py-1.5 px-2 rounded text-sm ${
-        isContactTask ? 'bg-teal-50 border border-teal-100' : ''
-      }`}
-    >
-      {statusIcon(task.status)}
-      <span className={task.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-700'}>
-        {task.title}
-      </span>
-      {task.priority === 'high' && priorityBadge('high')}
-      {task.due_date && (
-        <span className="text-xs text-gray-400 ml-auto whitespace-nowrap">
-          {new Date(task.due_date).toLocaleDateString()}
-        </span>
-      )}
-      {task.assignee && (
-        <span className="text-xs text-gray-400 flex items-center gap-0.5">
-          <User className="w-3 h-3" />{task.assignee}
-        </span>
-      )}
-    </div>
-  );
-
-  const renderTopic = (topic: Topic, indent: number = 0) => {
-    const topicTasks = tasksByTopic[topic.id] || [];
-    const activeTasks = topicTasks.filter(t => t.status !== 'archived');
-    const completedCount = activeTasks.filter(t => t.status === 'completed').length;
-    const children = childTopics[topic.id] || [];
-    const isExpanded = expandedTopics.has(topic.id);
-    const isContactTopic = contactTopicIds.includes(topic.id);
-
-    return (
-      <div key={topic.id} className={`${indent > 0 ? 'ml-4' : ''}`}>
-        <div
-          className={`flex items-center gap-2 py-2 px-3 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors ${
-            isContactTopic ? 'border-l-2 border-teal-400' : ''
-          }`}
-          onClick={() => toggleTopic(topic.id)}
-        >
-          {(activeTasks.length > 0 || children.length > 0) ? (
-            isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />
-          ) : (
-            <div className="w-4" />
-          )}
-          <span className="font-medium text-gray-900 text-sm">{topic.title}</span>
-          {topic.status === 'completed' && <CheckCircle2 className="w-4 h-4 text-green-500" />}
-          {topic.owner && (
-            <span className="text-xs bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded flex items-center gap-0.5">
-              <User className="w-3 h-3" />{topic.owner}
-            </span>
-          )}
-          {topic.tags?.slice(0, 2).map(tag => (
-            <span key={tag} className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{tag}</span>
-          ))}
-          {activeTasks.length > 0 && (
-            <span className="text-xs text-gray-400 ml-auto">
-              {completedCount}/{activeTasks.length} tasks
-            </span>
-          )}
-          {topic.due_date && (
-            <span className="text-xs text-gray-400">{new Date(topic.due_date).toLocaleDateString()}</span>
-          )}
-        </div>
-        {/* Description below title */}
-        {topic.description && (
-          <p className="text-xs text-gray-500 px-3 pb-1 line-clamp-2">{topic.description}</p>
-        )}
-        {isExpanded && (
-          <div className="ml-6 mb-2">
-            {activeTasks.map(task => renderTask(task, contactTaskIds.includes(task.id)))}
-            {/* Goal as final destination */}
-            {topic.goal && activeTasks.length > 0 && (
-              <>
-                <div className="flex justify-center py-0.5">
-                  <div className="flex flex-col items-center gap-0.5">
-                    <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
-                    <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
-                    <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-blue-50 border border-dashed border-blue-200">
-                  <Target className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                  <span className="text-sm font-medium text-blue-700">Goal: {topic.goal}</span>
-                </div>
-              </>
-            )}
-            {children.map(child => renderTopic(child, indent + 1))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderFolder = (folder: Folder) => {
-    const folderTopics = topicsByFolder[folder.id] || [];
-    if (folderTopics.length === 0) return null;
-    const isExpanded = expandedFolders.has(folder.id);
-
-    return (
-      <div key={folder.id} className="mb-3">
-        <div
-          className="flex items-center gap-2 py-2 px-3 bg-white rounded-lg shadow-sm border cursor-pointer hover:border-gray-300 transition-colors"
-          onClick={() => toggleFolder(folder.id)}
-        >
-          {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-          <FolderOpen className="w-4 h-4" style={{ color: folder.color || '#6B7280' }} />
-          <span className="font-semibold text-gray-800 text-sm">{folder.name}</span>
-          <span className="text-xs text-gray-400 ml-auto">{folderTopics.length} topics</span>
-        </div>
-        {isExpanded && (
-          <div className="mt-1 ml-2 space-y-0.5">
-            {folderTopics.map(t => renderTopic(t))}
-          </div>
-        )}
-      </div>
-    );
-  };
+  // Build folder tree
+  const rootFolders = folders.filter(f => !f.parent_id).sort((a, b) => a.position - b.position);
+  const childFoldersMap: Record<string, Folder[]> = {};
+  folders.forEach(f => {
+    if (f.parent_id) {
+      if (!childFoldersMap[f.parent_id]) childFoldersMap[f.parent_id] = [];
+      childFoldersMap[f.parent_id].push(f);
+    }
+  });
 
   // Contact-specific topics
   const contactRelevantTopics = topics.filter(t => contactTopicIds.includes(t.id));
   const contactAssignedTasks = tasks.filter(t => contactTaskIds.includes(t.id));
+
+  // --- Render task row matching internal tasks view ---
+  const renderTask = (task: Task, isContactTask: boolean = false) => {
+    const isCompleted = task.status === 'completed';
+    const dotColor = task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400';
+    const statusBadge = task.status === 'in_progress'
+      ? <span className="text-[9px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">In Progress</span>
+      : task.status === 'completed'
+      ? <span className="text-[9px] font-medium text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">Done</span>
+      : null;
+
+    return (
+      <div
+        key={task.id}
+        className={`flex items-center gap-2 px-2 py-1.5 rounded hover:bg-amber-50/40 transition-colors ${
+          isCompleted ? 'opacity-50' : ''
+        } ${isContactTask ? 'bg-teal-50/50 border border-teal-100' : ''}`}
+      >
+        {/* Status icon */}
+        <span className="flex-shrink-0">
+          {isCompleted ? <CheckSquare className="w-3.5 h-3.5 text-green-500" /> : <Square className="w-3.5 h-3.5 text-gray-300" />}
+        </span>
+        {/* Priority dot */}
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
+        {/* Task title */}
+        <span className={`text-xs flex-1 min-w-0 truncate ${isCompleted ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+          {task.title}
+        </span>
+        {/* Status badge */}
+        {statusBadge}
+        {/* Contact badge */}
+        {isContactTask && (
+          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-600 font-medium">assigned</span>
+        )}
+        {/* Assignee */}
+        {task.assignee && (
+          <span className="text-[10px] text-gray-400 flex items-center gap-0.5 flex-shrink-0">
+            <Users className="w-2.5 h-2.5" /> {task.assignee}
+          </span>
+        )}
+        {/* Due date */}
+        {task.due_date && (
+          <span className={`text-[10px] flex items-center gap-0.5 flex-shrink-0 ${
+            new Date(task.due_date) < new Date() && !isCompleted ? 'text-red-500 font-semibold' : 'text-gray-400'
+          }`}>
+            <Calendar className="w-2.5 h-2.5" /> {formatRelativeDate(task.due_date)}
+          </span>
+        )}
+        {/* AI badge */}
+        {task.source === 'ai_extracted' && (
+          <span className="text-[8px] text-purple-500 bg-purple-50 px-1 rounded flex-shrink-0">AI</span>
+        )}
+      </div>
+    );
+  };
+
+  // --- Render topic card + inline tasks (matching internal tasks view) ---
+  const renderTopicWithTasks = (topic: Topic, depth: number = 0) => {
+    const topicTasks = tasksByTopic[topic.id] || [];
+    const activeTasks = topicTasks.filter(t => t.status !== 'archived');
+    const children = childTopics[topic.id] || [];
+    const isExpanded = expandedTopics.has(topic.id);
+    const isContactTopic = contactTopicIds.includes(topic.id);
+    const areaColor = areaBorderColors[topic.area] || 'border-l-gray-300';
+    const hasExpandableContent = activeTasks.length > 0 || children.length > 0;
+
+    return (
+      <div key={topic.id}>
+        {/* Topic card */}
+        <div
+          className={`block px-3 py-2.5 bg-white rounded-xl border border-gray-100 border-l-[3px] ${areaColor} hover:border-blue-200 hover:shadow-sm transition-all shadow-sm cursor-pointer ${
+            isContactTopic ? 'ring-1 ring-teal-200' : ''
+          }`}
+          onClick={() => toggleTopic(topic.id)}
+        >
+          {/* Row 1: Title */}
+          <div className="flex items-center gap-2">
+            {hasExpandableContent ? (
+              isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+            ) : (
+              <div className="w-3.5" />
+            )}
+            <span className="font-semibold text-sm text-gray-900 flex-1 min-w-0 truncate">{topic.title}</span>
+            {topic.status && (
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${statusColors[topic.status] || 'bg-gray-100 text-gray-600'}`}>{topic.status}</span>
+            )}
+            {topic.area && (
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${areaColors[topic.area] || 'bg-gray-100 text-gray-600'}`}>{topic.area}</span>
+            )}
+            {topic.owner && (
+              <span className="text-xs bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                <User className="w-3 h-3" />{topic.owner}
+              </span>
+            )}
+          </div>
+          {/* Row 2: Meta */}
+          <div className="flex items-center gap-2 mt-1 ml-5.5">
+            {topic.due_date && (
+              <span className={`text-[10px] flex items-center gap-0.5 ${
+                new Date(topic.due_date) < new Date() ? 'text-red-500 font-medium' : 'text-gray-400'
+              }`}>
+                <Clock className="w-3 h-3" /> Due {formatRelativeDate(topic.due_date)}
+              </span>
+            )}
+            {topic.tags?.slice(0, 2).map(tag => (
+              <span key={tag} className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{tag}</span>
+            ))}
+            {activeTasks.length > 0 && (
+              <span className="text-[10px] text-gray-400 ml-auto">
+                {activeTasks.filter(t => t.status === 'completed').length}/{activeTasks.length} tasks
+              </span>
+            )}
+          </div>
+          {/* Description */}
+          {topic.description && (
+            <p className="text-xs text-gray-500 mt-1 ml-5.5 line-clamp-1">{topic.description}</p>
+          )}
+        </div>
+
+        {/* Inline tasks (expanded) */}
+        {isExpanded && activeTasks.length > 0 && (
+          <div className="ml-6 mb-2 pl-3 border-l-2 border-amber-100 space-y-0">
+            {activeTasks.map(task => renderTask(task, contactTaskIds.includes(task.id)))}
+            {/* Goal */}
+            {topic.goal && (
+              <>
+                <div className="flex items-center gap-2 px-2 py-0.5">
+                  <div className="w-3.5 flex justify-center">
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                      <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                      <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-blue-50/60 border border-dashed border-blue-200">
+                  <Target className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                  <span className="text-xs font-medium text-blue-700 flex-1 min-w-0 truncate">Goal: {topic.goal}</span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Children topics */}
+        {isExpanded && children.length > 0 && (
+          <div className="ml-5 pl-3 border-l-2 border-indigo-100 space-y-1.5 mt-1">
+            {children.map(child => renderTopicWithTasks(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // --- Render folder node with hierarchy ---
+  const renderFolderNode = (folder: Folder, depth: number = 0) => {
+    const folderTopics = topicsByFolder[folder.id] || [];
+    const childFolders = childFoldersMap[folder.id] || [];
+    const isExpanded = expandedFolders.has(folder.id);
+    const totalTopics = folderTopics.length + childFolders.reduce((sum, cf) => sum + (topicsByFolder[cf.id]?.length || 0), 0);
+    const folderColor = folder.color ? (folderColorMap[folder.color] || 'text-amber-500') : 'text-amber-500';
+
+    if (totalTopics === 0 && childFolders.length === 0) return null;
+
+    return (
+      <div key={folder.id} className="mb-0.5">
+        <div
+          className={`flex items-center gap-1.5 py-2 px-2 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors ${folder.color ? 'border-l-2' : ''}`}
+          style={{
+            marginLeft: `${depth * 20}px`,
+            ...(folder.color ? { borderLeftColor: folderBorderColorMap[folder.color] || undefined } : {}),
+          }}
+          onClick={() => toggleFolder(folder.id)}
+        >
+          <span className={`block transition-transform duration-200 ${isExpanded ? 'rotate-0' : '-rotate-90'}`}>
+            <ChevronDown className="w-4 h-4 text-gray-400" />
+          </span>
+          {isExpanded
+            ? <FolderOpen className={`w-4 h-4 ${folderColor} flex-shrink-0`} />
+            : <Folder className={`w-4 h-4 ${folderColor} flex-shrink-0`} />
+          }
+          <span className="text-sm font-medium text-gray-700 flex-1">{folder.name}</span>
+          <span className={`text-[10px] font-semibold min-w-[20px] text-center px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+            totalTopics > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-50 text-gray-300'
+          }`}>
+            {totalTopics}
+          </span>
+        </div>
+        <div className={`overflow-hidden transition-all duration-200 ${isExpanded ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+          <div className="relative" style={{ marginLeft: `${depth * 20 + 10}px` }}>
+            {/* Child folders */}
+            {childFolders.map(cf => renderFolderNode(cf, depth + 1))}
+            {/* Topics */}
+            <div className="space-y-1.5 mt-1 mb-2 ml-3">
+              {folderTopics.map(t => renderTopicWithTasks(t))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // --- Notes section renderer (shared between overview + assignments) ---
+  const renderTopicNotes = (topicId: string) => {
+    const topicComments = commentsByTopic[topicId] || [];
+    const isNotesExpanded = expandedNotes.has(topicId);
+
+    return (
+      <div className="mt-3 pt-2 border-t border-gray-100">
+        <button
+          onClick={() => toggleNotes(topicId)}
+          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+        >
+          <StickyNote className="w-3.5 h-3.5" />
+          Notes {topicComments.length > 0 && `(${topicComments.length})`}
+          {isNotesExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        </button>
+        {isNotesExpanded && (
+          <div className="mt-2 space-y-2">
+            {topicComments.length > 0 && (
+              <div className="space-y-2">
+                {topicComments.map(note => (
+                  <div key={note.id} className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                    <div className="flex items-baseline gap-2 mb-0.5">
+                      <span className="text-xs font-medium text-gray-800">{note.author_name}</span>
+                      <span className="text-[10px] text-gray-400">{new Date(note.created_at).toLocaleString()}</span>
+                    </div>
+                    <p className="text-xs text-gray-700 whitespace-pre-wrap">{note.body}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <textarea
+                value={topicNoteBody[topicId] || ''}
+                onChange={e => setTopicNoteBody(prev => ({ ...prev, [topicId]: e.target.value }))}
+                placeholder={commentName.trim() ? 'Add a note...' : 'Set your name first, then add a note...'}
+                rows={2}
+                className="flex-1 px-2 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-amber-400 focus:border-amber-400 outline-none resize-none"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitTopicNote(topicId);
+                }}
+              />
+              <button
+                onClick={() => submitTopicNote(topicId)}
+                disabled={topicNoteSubmitting === topicId || !commentName.trim() || !topicNoteBody[topicId]?.trim()}
+                className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-medium hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed self-end"
+              >
+                {topicNoteSubmitting === topicId ? '...' : 'Add'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -455,26 +630,33 @@ export default function SharePage() {
       )}
 
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        {/* Overview Tab */}
+        {/* ========== Overview Tab ========== */}
         {activeTab === 'overview' && (
-          <div className="space-y-3">
-            {folders.map(f => renderFolder(f))}
+          <div>
+            {/* Folder hierarchy */}
+            {rootFolders.map(f => renderFolderNode(f))}
+
+            {/* Unfiled topics */}
             {unfolderedTopics.length > 0 && (
-              <div>
-                {unfolderedTopics.length > 0 && folders.length > 0 && (
-                  <div className="text-xs text-gray-400 uppercase tracking-wider font-medium mb-2 px-3">
-                    Unfiled
+              <div className={rootFolders.length > 0 ? 'mt-6' : ''}>
+                {rootFolders.length > 0 && (
+                  <div className="border-t border-gray-200 pt-4 mb-3">
+                    <div className="flex items-center gap-2 px-2">
+                      <Inbox className="w-4 h-4 text-gray-400" />
+                      <span className="text-sm font-medium text-gray-500">Topics without a folder</span>
+                      <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{unfolderedTopics.length}</span>
+                    </div>
                   </div>
                 )}
-                <div className="space-y-0.5">
-                  {unfolderedTopics.map(t => renderTopic(t))}
+                <div className="space-y-1.5">
+                  {unfolderedTopics.map(t => renderTopicWithTasks(t))}
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* Assignments Tab */}
+        {/* ========== Assignments Tab ========== */}
         {activeTab === 'assignments' && hasContactView && (
           <div className="space-y-4">
             <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
@@ -538,7 +720,6 @@ export default function SharePage() {
 
             {/* Per-topic cards with dedup badges, notes, and goals */}
             {(() => {
-              // Compute shared task titles for badge display
               const _titleCount: Record<string, Set<string>> = {};
               for (const ct of contactRelevantTopics) {
                 for (const task of (tasksByTopic[ct.id] || []).filter(t => contactTaskIds.includes(t.id))) {
@@ -554,119 +735,129 @@ export default function SharePage() {
                 const topicTasks = tasksByTopic[topic.id] || [];
                 const assignedToContact = topicTasks.filter(t => contactTaskIds.includes(t.id));
                 const otherTasks = topicTasks.filter(t => !contactTaskIds.includes(t.id) && t.status !== 'archived');
-                const topicComments = commentsByTopic[topic.id] || [];
-                const isNotesExpanded = expandedNotes.has(topic.id);
+                const areaColor = areaBorderColors[topic.area] || 'border-l-gray-300';
 
                 return (
-                  <div key={topic.id} className="bg-white rounded-xl shadow-sm border p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-semibold text-gray-900">{topic.title}</span>
-                      {topic.status === 'completed' && <CheckCircle2 className="w-4 h-4 text-green-500" />}
+                  <div key={topic.id} className={`bg-white rounded-xl shadow-sm border border-l-[3px] ${areaColor} overflow-hidden`}>
+                    {/* Topic header */}
+                    <div className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-gray-900 flex-1">{topic.title}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${statusColors[topic.status] || 'bg-gray-100 text-gray-600'}`}>{topic.status}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${areaColors[topic.area] || 'bg-gray-100 text-gray-600'}`}>{topic.area}</span>
+                        {topic.owner && (
+                          <span className="text-xs bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                            <User className="w-3 h-3" />{topic.owner}
+                          </span>
+                        )}
+                      </div>
                       {topic.due_date && (
-                        <span className="text-xs text-gray-400 ml-auto">
-                          Due {new Date(topic.due_date).toLocaleDateString()}
-                        </span>
+                        <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
+                          <Clock className="w-3 h-3" />
+                          <span className={new Date(topic.due_date) < new Date() ? 'text-red-500 font-medium' : ''}>Due {formatRelativeDate(topic.due_date)}</span>
+                        </div>
+                      )}
+                      {topic.description && (
+                        <p className="text-xs text-gray-500 mt-1.5 line-clamp-2">{topic.description}</p>
                       )}
                     </div>
-                    {topic.description && (
-                      <p className="text-sm text-gray-500 mb-3 line-clamp-3">{topic.description}</p>
-                    )}
 
-                    {assignedToContact.length > 0 && (
-                      <div className="mb-2">
-                        <div className="text-xs font-medium text-teal-600 mb-1">Your tasks:</div>
-                        <div className="space-y-1">
-                          {assignedToContact.map(task => (
-                            <div
-                              key={task.id}
-                              className="flex items-start gap-2 py-1.5 px-2 rounded text-sm bg-teal-50 border border-teal-100"
-                            >
-                              {statusIcon(task.status)}
-                              <span className={task.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-700'}>
-                                {task.title}
-                              </span>
-                              {task.priority === 'high' && priorityBadge('high')}
-                              {sharedTaskTitles.has(task.title.trim().toLowerCase()) && (
-                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium flex items-center gap-0.5">
-                                  <Layers className="w-2.5 h-2.5" /> shared
-                                </span>
-                              )}
-                              {task.due_date && (
-                                <span className="text-xs text-gray-400 ml-auto whitespace-nowrap">
-                                  {new Date(task.due_date).toLocaleDateString()}
-                                </span>
-                              )}
+                    {/* Tasks section */}
+                    {(assignedToContact.length > 0 || otherTasks.length > 0) && (
+                      <div className="border-t border-gray-100 px-4 py-2 space-y-0">
+                        {/* Assigned tasks */}
+                        {assignedToContact.length > 0 && (
+                          <div className="mb-1">
+                            <div className="text-[10px] font-semibold text-teal-600 mb-0.5 uppercase tracking-wider">Your tasks</div>
+                            {assignedToContact.map(task => {
+                              const isCompleted = task.status === 'completed';
+                              const dotColor = task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400';
+                              const stBadge = task.status === 'in_progress'
+                                ? <span className="text-[9px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">In Progress</span>
+                                : task.status === 'completed'
+                                ? <span className="text-[9px] font-medium text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">Done</span>
+                                : null;
+                              return (
+                                <div key={task.id} className={`flex items-center gap-2 py-1 bg-teal-50/50 -mx-1 px-1 rounded ${isCompleted ? 'opacity-50' : ''}`}>
+                                  <span className="flex-shrink-0">
+                                    {isCompleted ? <CheckSquare className="w-3.5 h-3.5 text-teal-500" /> : <Square className="w-3.5 h-3.5 text-gray-300" />}
+                                  </span>
+                                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
+                                  <span className={`text-xs flex-1 min-w-0 truncate ${isCompleted ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                    {task.title}
+                                  </span>
+                                  {stBadge}
+                                  {task.priority === 'high' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">HIGH</span>}
+                                  {task.due_date && (
+                                    <span className={`text-[10px] flex items-center gap-0.5 flex-shrink-0 ${
+                                      new Date(task.due_date) < new Date() && !isCompleted ? 'text-red-500 font-medium' : 'text-gray-400'
+                                    }`}>
+                                      <Calendar className="w-2.5 h-2.5" /> {formatRelativeDate(task.due_date)}
+                                    </span>
+                                  )}
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-600 font-medium">assigned</span>
+                                  {sharedTaskTitles.has(task.title.trim().toLowerCase()) && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium flex items-center gap-0.5">
+                                      <Layers className="w-2.5 h-2.5" /> shared
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Other tasks */}
+                        {otherTasks.length > 0 && (
+                          <div className="pt-1 border-t border-gray-100/50">
+                            <div className="text-[10px] font-semibold text-gray-400 mb-0.5 uppercase tracking-wider">Other tasks</div>
+                            {otherTasks.slice(0, 5).map(task => (
+                              <div key={task.id} className="flex items-center gap-2 py-0.5 opacity-50">
+                                <Square className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400'}`} />
+                                <span className="text-xs text-gray-500 flex-1 truncate">{task.title}</span>
+                                {task.assignee && <span className="text-[9px] text-gray-400">{task.assignee}</span>}
+                              </div>
+                            ))}
+                            {otherTasks.length > 5 && (
+                              <span className="text-[10px] text-gray-400 pl-5">+{otherTasks.length - 5} more tasks</span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Goal */}
+                        {topic.goal && (
+                          <div className="pt-1.5 mt-1 border-t border-blue-100/50">
+                            <div className="flex items-center gap-0.5 justify-center mb-1">
+                              <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                              <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                              <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
                             </div>
-                          ))}
-                        </div>
+                            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-blue-50/60 border border-dashed border-blue-200">
+                              <Target className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                              <span className="text-xs font-medium text-blue-700 flex-1 min-w-0 truncate">Goal: {topic.goal}</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {otherTasks.length > 0 && (
-                      <div className="opacity-50">
-                        <div className="text-xs font-medium text-gray-400 mb-1">Other tasks:</div>
-                        <div className="space-y-0.5">
-                          {otherTasks.map(task => renderTask(task))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Goal as final destination */}
-                    {topic.goal && (
-                      <div className="mt-2 pt-2 border-t border-gray-100">
-                        <div className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-blue-50 border border-dashed border-blue-200">
-                          <Target className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-blue-700">Goal: {topic.goal}</span>
-                        </div>
+                    {/* No tasks fallback with goal */}
+                    {assignedToContact.length === 0 && otherTasks.length === 0 && (
+                      <div className="border-t border-gray-100 px-4 py-2">
+                        <span className="text-xs text-gray-400 italic">No active tasks</span>
+                        {topic.goal && (
+                          <div className="flex items-center gap-2 px-2 py-1.5 mt-1 rounded-lg bg-blue-50/60 border border-dashed border-blue-200">
+                            <Target className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                            <span className="text-xs font-medium text-blue-700 flex-1 min-w-0 truncate">Goal: {topic.goal}</span>
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {/* Per-topic Notes */}
-                    <div className="mt-3 pt-2 border-t border-gray-100">
-                      <button
-                        onClick={() => toggleNotes(topic.id)}
-                        className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
-                      >
-                        <StickyNote className="w-3.5 h-3.5" />
-                        Notes {topicComments.length > 0 && `(${topicComments.length})`}
-                        {isNotesExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      </button>
-                      {isNotesExpanded && (
-                        <div className="mt-2 space-y-2">
-                          {topicComments.length > 0 && (
-                            <div className="space-y-2">
-                              {topicComments.map(note => (
-                                <div key={note.id} className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                                  <div className="flex items-baseline gap-2 mb-0.5">
-                                    <span className="text-xs font-medium text-gray-800">{note.author_name}</span>
-                                    <span className="text-[10px] text-gray-400">{new Date(note.created_at).toLocaleString()}</span>
-                                  </div>
-                                  <p className="text-xs text-gray-700 whitespace-pre-wrap">{note.body}</p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          <div className="flex gap-2">
-                            <textarea
-                              value={topicNoteBody[topic.id] || ''}
-                              onChange={e => setTopicNoteBody(prev => ({ ...prev, [topic.id]: e.target.value }))}
-                              placeholder={commentName.trim() ? 'Add a note...' : 'Set your name above first, then add a note...'}
-                              rows={2}
-                              className="flex-1 px-2 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-amber-400 focus:border-amber-400 outline-none resize-none"
-                              onKeyDown={e => {
-                                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitTopicNote(topic.id);
-                              }}
-                            />
-                            <button
-                              onClick={() => submitTopicNote(topic.id)}
-                              disabled={topicNoteSubmitting === topic.id || !commentName.trim() || !topicNoteBody[topic.id]?.trim()}
-                              className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-medium hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed self-end"
-                            >
-                              {topicNoteSubmitting === topic.id ? '...' : 'Add'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                    <div className="px-4 pb-3">
+                      {renderTopicNotes(topic.id)}
                     </div>
                   </div>
                 );
