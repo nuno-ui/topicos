@@ -188,6 +188,47 @@ Return JSON: { "suggestions": ["Title 1", "Title 2", "Title 3"] }`,
         break;
       }
 
+      case 'propose_goal': {
+        // AI proposes a goal for a single topic based on all available context
+        const { topic_id } = context;
+        const { data: topic } = await supabase.from('topics').select('*').eq('id', topic_id).eq('user_id', user.id).single();
+        if (!topic) return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+        const { data: items } = await supabase.from('topic_items').select('title, source, snippet, body').eq('topic_id', topic_id).limit(20);
+        const noteContext = await getTopicNoteContext(topic_id);
+        const ancestorCtx = await getAncestorContext(topic_id, supabase);
+        const tasksCtx = await getTopicTasksContext(topic_id, supabase);
+        const groundTruth = buildGroundTruthSection(topic);
+
+        inputSummary = `Proposing goal for topic: ${topic.title}`;
+
+        const { data: goalResult } = await callClaudeJSON<{ proposed_goal: string; reasoning: string; is_improvement: boolean; alternatives: string[] }>(
+          `You are a strategic planning assistant. Analyze this topic and propose a concise, actionable goal.
+
+RULES:
+1. The goal should be outcome-focused (the desired end-state), NOT process-focused. Example: "Launch production API with <100ms p95 latency" not "Work on improving the API".
+2. Keep the goal to 1 sentence, max 15 words.
+3. If an existing goal is provided, use it as your best reference. Only propose something different if you can make it significantly more specific, actionable, or measurable. If the existing goal is already excellent, refine it slightly or return it as-is with reasoning.
+4. Consider the topic's tasks, description, linked items, and notes to understand the full context.
+5. Also provide 2-3 alternative goal formulations so the user can pick the best fit.
+
+Return JSON: { "proposed_goal": "your best proposed goal", "reasoning": "1-2 sentence explanation of why this goal captures the topic's intent", "is_improvement": true/false (true if there was an existing goal you improved), "alternatives": ["alt goal 1", "alt goal 2"] }`,
+          `${groundTruth}\nTopic: ${topic.title}\nCurrent Goal: ${topic.goal || 'None set'}\nDescription: ${topic.description || 'None'}\nNotes: ${topic.notes ? topic.notes.substring(0, 500) : 'None'}\nTags: ${topic.tags?.join(', ') || 'None'}\nDue: ${topic.due_date ? new Date(topic.due_date).toLocaleDateString() : 'No deadline'}\n\nItems:\n${(items || []).map((i: { source: string; title: string; snippet: string; body?: string | null }) => {
+            const content = i.body || i.snippet || '';
+            const preview = content.length > 300 ? content.substring(0, 300) + '...' : content;
+            return `[${i.source}] ${i.title}: ${preview}`;
+          }).join('\n')}\n${noteContext}${tasksCtx}${ancestorCtx}`
+        );
+
+        result = {
+          proposed_goal: goalResult.proposed_goal,
+          reasoning: goalResult.reasoning,
+          is_improvement: goalResult.is_improvement,
+          current_goal: topic.goal || null,
+          alternatives: goalResult.alternatives || [],
+        };
+        break;
+      }
+
       case 'extract_action_items': {
         // AI extracts action items from topic communications — deep extraction
         const { topic_id } = context;

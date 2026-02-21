@@ -268,6 +268,7 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
   const [showExtractedContacts, setShowExtractedContacts] = useState(false);
   const [threadSummary, setThreadSummary] = useState<string | null>(null);
   const [showThreadSummary, setShowThreadSummary] = useState(false);
+  const [goalProposal, setGoalProposal] = useState<{ proposed_goal: string; reasoning: string; is_improvement: boolean; current_goal: string | null; alternatives: string[] } | null>(null);
 
   // Note editor state
   const [showNoteEditor, setShowNoteEditor] = useState(false);
@@ -656,6 +657,10 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
           setCompletenessScore(data.result);
           setShowCompleteness(true);
           toast.success(`Completeness score: ${data.result.score}%`);
+          break;
+        case 'propose_goal':
+          setGoalProposal(data.result);
+          toast.success('Goal proposed!');
           break;
       }
       // Track success animation and last run time
@@ -1604,6 +1609,12 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
                   className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-green-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
                   {agentLoading === 'generate_description' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-green-500" /> : <FileText className="w-3.5 h-3.5 text-green-500" />} Generate Description
                 </button>
+                <button onClick={() => { runAgent('propose_goal'); setShowAgentMenu(false); }} disabled={!!agentLoading}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2.5 disabled:opacity-50 transition-colors">
+                  {agentLoading === 'propose_goal' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <Target className="w-3.5 h-3.5 text-blue-500" />}
+                  <span className="flex-1">Propose Goal</span>
+                  {formatAgentLastRun('propose_goal') && <span className="text-[9px] text-gray-400">{formatAgentLastRun('propose_goal')}</span>}
+                </button>
                 <div className="border-t border-gray-100 my-1.5" />
                 <p className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Requires linked items</p>
                 <button onClick={() => { runAgent('extract_action_items'); setShowAgentMenu(false); }} disabled={!!agentLoading || items.length === 0}
@@ -2125,10 +2136,78 @@ export function TopicDetail({ topic: initialTopic, initialItems, initialContacts
             {agentLoading === 'generate_description' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-green-500" /> : <Wand2 className="w-3.5 h-3.5" />}
           </button>
         </div>
-        {topic.goal && (
-          <div className="flex items-start gap-2.5 p-3 bg-blue-50/50 rounded-lg border border-blue-100/50">
-            <Target className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-            <p className="text-sm text-gray-700"><span className="font-semibold text-gray-800">Goal:</span> {topic.goal}</p>
+        {/* Goal row with inline propose button */}
+        <div className="flex items-start gap-2.5">
+          {topic.goal ? (
+            <div className="flex-1 flex items-start gap-2.5 p-3 bg-blue-50/50 rounded-lg border border-blue-100/50">
+              <Target className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-gray-700 flex-1"><span className="font-semibold text-gray-800">Goal:</span> {topic.goal}</p>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center gap-2 p-3 bg-gray-50 rounded-lg border border-dashed border-gray-200">
+              <Target className="w-4 h-4 text-gray-300 flex-shrink-0" />
+              <p className="text-sm text-gray-400 italic">No goal set</p>
+            </div>
+          )}
+          <button
+            onClick={() => runAgent('propose_goal')}
+            disabled={!!agentLoading}
+            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all flex-shrink-0 disabled:opacity-50"
+            title="AI: Propose goal"
+          >
+            {agentLoading === 'propose_goal' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <Target className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+        {/* Goal proposal card */}
+        {goalProposal && (
+          <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 space-y-2">
+            <div className="flex items-center gap-2">
+              <Zap className="w-3.5 h-3.5 text-blue-600" />
+              <span className="text-xs font-semibold text-blue-800">AI Goal Proposal</span>
+              {goalProposal.is_improvement && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">improvement</span>
+              )}
+            </div>
+            {goalProposal.is_improvement && goalProposal.current_goal && (
+              <p className="text-xs text-gray-400 line-through">{goalProposal.current_goal}</p>
+            )}
+            <p className="text-sm font-medium text-blue-900">{goalProposal.proposed_goal}</p>
+            <p className="text-xs text-blue-600 italic">{goalProposal.reasoning}</p>
+            {goalProposal.alternatives.length > 0 && (
+              <div className="pt-1 border-t border-blue-100">
+                <p className="text-[10px] text-blue-500 font-medium mb-1">Alternatives:</p>
+                <div className="space-y-1">
+                  {goalProposal.alternatives.map((alt, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-xs text-gray-700 flex-1">{alt}</span>
+                      <button
+                        onClick={async () => {
+                          await fetch(`/api/topics/${topic.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goal: alt }) });
+                          setTopic(prev => ({ ...prev, goal: alt }));
+                          setGoalProposal(null);
+                          toast.success('Goal updated!');
+                        }}
+                        className="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 font-medium flex-shrink-0"
+                      >Use</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={async () => {
+                  await fetch(`/api/topics/${topic.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goal: goalProposal.proposed_goal }) });
+                  setTopic(prev => ({ ...prev, goal: goalProposal.proposed_goal }));
+                  setGoalProposal(null);
+                  toast.success('Goal updated!');
+                }}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700"
+              >Accept Goal</button>
+              <button onClick={() => setGoalProposal(null)} className="px-3 py-1.5 text-gray-500 hover:text-gray-700 text-xs">
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
         {topic.tags && topic.tags.length > 0 && (
