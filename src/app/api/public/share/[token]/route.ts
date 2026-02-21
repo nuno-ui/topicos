@@ -36,13 +36,26 @@ export async function GET(
     .eq('area', area)
     .order('updated_at', { ascending: false });
 
-  // Fetch folders for this area only
-  const { data: folders } = await supabase
+  // Fetch all folders (some parents have null area, so we filter on frontend)
+  const { data: allFolders } = await supabase
     .from('folders')
     .select('*')
     .eq('user_id', userId)
-    .eq('area', area)
     .order('position', { ascending: true });
+
+  // Build set of relevant folder IDs: folders that contain topics + their ancestor chain
+  const topicFolderIds = new Set((topics || []).map((t: { folder_id: string | null }) => t.folder_id).filter(Boolean));
+  const folderMap = new Map((allFolders || []).map((f: { id: string; parent_id: string | null }) => [f.id, f]));
+  const relevantFolderIds = new Set<string>();
+  for (const fid of topicFolderIds) {
+    let current = fid as string;
+    while (current && !relevantFolderIds.has(current)) {
+      relevantFolderIds.add(current);
+      const folder = folderMap.get(current) as { parent_id: string | null } | undefined;
+      current = folder?.parent_id as string;
+    }
+  }
+  const folders = (allFolders || []).filter((f: { id: string }) => relevantFolderIds.has(f.id));
 
   // Fetch all tasks for these topics
   const topicIds = (topics || []).map((t: { id: string }) => t.id);

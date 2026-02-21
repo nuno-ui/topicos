@@ -245,7 +245,7 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
   const [filterStatus, setFilterStatus] = useState<string>('active');
   const [sortBy, setSortBy] = useState<string>('relevance');
   const [showFilters, setShowFilters] = useState(false);
-  const [viewMode, setViewMode] = useState<'folders' | 'flat' | 'tasks' | 'contact'>('folders');
+  const [viewMode, setViewMode] = useState<'folders' | 'flat' | 'tasks' | 'contact'>('tasks');
 
   // Task inline preview state
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
