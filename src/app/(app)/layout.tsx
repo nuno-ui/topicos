@@ -7,6 +7,7 @@ import { FeedbackButton } from '@/components/feedback/feedback-button';
 import { RouteProgress } from '@/components/ui/route-progress';
 import { BackToTop } from '@/components/ui/back-to-top';
 import { MobileFAB } from '@/components/ui/mobile-fab';
+import { FavouriteContactsPanel } from '@/components/layout/favourite-contacts-panel';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabaseClient();
@@ -37,6 +38,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <FeedbackButton />
       <BackToTop />
       <MobileFAB />
+      <FavouriteContactsPanel />
     </div>
   );
 }

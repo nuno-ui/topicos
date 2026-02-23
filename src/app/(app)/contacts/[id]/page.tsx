@@ -30,7 +30,7 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
 
   const { data: contact } = await supabase
     .from('contacts')
-    .select('*, contact_topic_links(id, topic_id, role, created_at, topics(title, status, due_date, priority, area, updated_at, tags))')
+    .select('*, contact_topic_links(id, topic_id, role, created_at, topics(title, status, due_date, priority, area, updated_at, tags, description, goal, owner))')
     .eq('id', id)
     .eq('user_id', user!.id)
     .single();
@@ -56,16 +56,36 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
     // Topics where this contact is the owner
     supabase
       .from('topics')
-      .select('id, title, status, due_date, priority, area, updated_at, tags')
+      .select('id, title, status, due_date, priority, area, updated_at, tags, description, goal, owner')
       .eq('user_id', user!.id)
       .eq('owner_contact_id', id),
     // Tasks assigned to this contact → get their topic IDs
     supabase
       .from('topic_tasks')
-      .select('topic_id, topics!inner(id, title, status, due_date, priority, area, updated_at, tags)')
+      .select('topic_id, topics!inner(id, title, status, due_date, priority, area, updated_at, tags, description, goal, owner)')
       .eq('user_id', user!.id)
       .eq('assignee_contact_id', id),
   ]);
+
+  // Compute all involved topic IDs and fetch tasks for the dashboard view
+  const linkedTopicIds = (contact.contact_topic_links || []).map((l: { topic_id: string }) => l.topic_id);
+  const ownedTopicIds = (ownedTopicsRes.data || []).map((t: { id: string }) => t.id);
+  const assignedTopicIds = (assignedTasksRes.data || []).map((t: Record<string, unknown>) => {
+    const topics = t.topics as { id: string } | null;
+    return topics?.id;
+  }).filter(Boolean) as string[];
+  const allInvolvedTopicIds = [...new Set([...linkedTopicIds, ...ownedTopicIds, ...assignedTopicIds])];
+
+  let dashboardTasks: Record<string, unknown>[] = [];
+  if (allInvolvedTopicIds.length > 0) {
+    const { data: tasks } = await supabase
+      .from('topic_tasks')
+      .select('id, topic_id, title, status, priority, due_date, assignee, assignee_contact_id, description, position, source')
+      .in('topic_id', allInvolvedTopicIds)
+      .in('status', ['pending', 'in_progress', 'completed'])
+      .order('position', { ascending: true });
+    dashboardTasks = tasks || [];
+  }
 
   return (
     <div className="p-4 md:p-8 max-w-5xl animate-page-enter">
@@ -77,6 +97,7 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
         initialContactItems={contactItemsRes.data ?? []}
         ownedTopics={ownedTopicsRes.data ?? []}
         assignedTaskTopics={(assignedTasksRes.data ?? []).map((t: Record<string, unknown>) => t.topics as Record<string, unknown>).filter(Boolean)}
+        dashboardTasks={dashboardTasks}
       />
     </div>
   );

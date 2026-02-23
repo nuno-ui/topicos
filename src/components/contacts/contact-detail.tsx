@@ -50,6 +50,13 @@ import {
   ClipboardList,
   Database,
   BookOpen,
+  ArrowUpRight,
+  Layers,
+  Zap,
+  Square,
+  CheckSquare,
+  Calendar,
+  Users,
 } from 'lucide-react';
 import { SourceIconCircle, getSourceLabel, getSourceBorderColor } from '@/components/ui/source-icon';
 
@@ -130,6 +137,22 @@ interface TopicBasic {
   area?: string;
   updated_at?: string;
   tags?: string[];
+  description?: string | null;
+  goal?: string | null;
+  owner?: string | null;
+}
+
+interface DashboardTask {
+  id: string;
+  topic_id: string;
+  title: string;
+  status: string;
+  priority: string;
+  due_date: string | null;
+  assignee: string | null;
+  assignee_contact_id: string | null;
+  description: string;
+  source: string | null;
 }
 
 interface ContactDetailProps {
@@ -139,6 +162,7 @@ interface ContactDetailProps {
   initialContactItems?: ContactItemData[];
   ownedTopics?: TopicBasic[];
   assignedTaskTopics?: Record<string, unknown>[];
+  dashboardTasks?: Record<string, unknown>[];
 }
 
 // ============================
@@ -255,7 +279,7 @@ const ROLE_OPTIONS = ['Owner', 'Stakeholder', 'Decision Maker', 'Contributor', '
 // Component
 // ============================
 
-export function ContactDetail({ contact: initialContact, relatedItems, allTopics, initialContactItems = [], ownedTopics = [], assignedTaskTopics = [] }: ContactDetailProps) {
+export function ContactDetail({ contact: initialContact, relatedItems, allTopics, initialContactItems = [], ownedTopics = [], assignedTaskTopics = [], dashboardTasks = [] }: ContactDetailProps) {
   const router = useRouter();
   const [contact, setContact] = useState(initialContact);
 
@@ -381,6 +405,8 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
   const [savingQuickNote, setSavingQuickNote] = useState(false);
 
   // Sections collapse
+  const [showDashboard, setShowDashboard] = useState(true);
+  const [dashboardExpandedTopics, setDashboardExpandedTopics] = useState<Set<string>>(new Set());
   const [showPendingTopics, setShowPendingTopics] = useState(true);
   const [showAllTopics, setShowAllTopics] = useState(true);
   const [showTimeline, setShowTimeline] = useState(true);
@@ -430,6 +456,47 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
 
     return Array.from(map.values());
   }, [topicLinks, ownedTopics, assignedTaskTopics]);
+
+  // Dashboard data: tasks grouped by topic, with contact-assigned identification
+  const typedDashboardTasks = useMemo(() => {
+    return (dashboardTasks || []).map(t => t as unknown as DashboardTask);
+  }, [dashboardTasks]);
+
+  const dashboardTasksByTopic = useMemo(() => {
+    const map: Record<string, DashboardTask[]> = {};
+    for (const task of typedDashboardTasks) {
+      if (!map[task.topic_id]) map[task.topic_id] = [];
+      map[task.topic_id].push(task);
+    }
+    return map;
+  }, [typedDashboardTasks]);
+
+  const contactAssignedTaskIds = useMemo(() => {
+    return new Set(typedDashboardTasks.filter(t => t.assignee_contact_id === contact.id).map(t => t.id));
+  }, [typedDashboardTasks, contact.id]);
+
+  const contactAssignedTaskCount = contactAssignedTaskIds.size;
+
+  const dashboardTopics = useMemo(() => {
+    // Only show topics that have tasks assigned to this contact OR are linked to this contact
+    return allInvolvedTopics
+      .filter(link => {
+        const topicTasks = dashboardTasksByTopic[link.topic_id] || [];
+        const hasAssignedTasks = topicTasks.some(t => contactAssignedTaskIds.has(t.id));
+        return hasAssignedTasks || link.sources.includes('Owner') || link.sources.includes('Assignee');
+      })
+      .sort((a, b) => {
+        // Topics with assigned tasks first
+        const aHasAssigned = (dashboardTasksByTopic[a.topic_id] || []).some(t => contactAssignedTaskIds.has(t.id));
+        const bHasAssigned = (dashboardTasksByTopic[b.topic_id] || []).some(t => contactAssignedTaskIds.has(t.id));
+        if (aHasAssigned !== bHasAssigned) return bHasAssigned ? 1 : -1;
+        // Then by priority
+        const aPri = a.topics?.priority ?? 0;
+        const bPri = b.topics?.priority ?? 0;
+        if (aPri !== bPri) return bPri - aPri;
+        return 0;
+      });
+  }, [allInvolvedTopics, dashboardTasksByTopic, contactAssignedTaskIds]);
 
   const pendingTopics = useMemo(() => {
     return allInvolvedTopics
@@ -2222,6 +2289,248 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
           </div>
         );
       })()}
+
+      {/* ============================
+          3.5 Dashboard — Share-page-like view with topics + inline tasks
+          ============================ */}
+      {dashboardTopics.length > 0 && (
+        <div className="animate-fade-in bg-white rounded-2xl border border-gray-200/60 shadow-sm hover-lift overflow-hidden">
+          <div className="h-0.5 w-full" style={{ background: 'linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%)' }} />
+          <button
+            onClick={() => setShowDashboard(!showDashboard)}
+            className="w-full px-5 py-4 flex items-center justify-between text-left"
+          >
+            <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%)' }}>
+                <ArrowUpRight className="w-3.5 h-3.5 text-white" />
+              </div>
+              Assignments Dashboard
+              <span className="text-[10px] font-bold text-white px-2 py-0.5 rounded-full" style={{ background: 'linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%)' }}>{contactAssignedTaskCount} tasks</span>
+            </h2>
+            {showDashboard ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+          </button>
+
+          {showDashboard && (
+            <div className="px-5 pb-5 space-y-3">
+              {/* Summary banner */}
+              <div className="bg-teal-50 border border-teal-200 rounded-xl p-3">
+                <p className="text-sm text-teal-700">
+                  <span className="font-semibold">{contactAssignedTaskCount}</span> task{contactAssignedTaskCount !== 1 ? 's' : ''} assigned across <span className="font-semibold">{dashboardTopics.length}</span> topic{dashboardTopics.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+
+              {/* Cross-topic shared tasks */}
+              {(() => {
+                const taskTitleMap: Record<string, Array<{ task: DashboardTask; topicTitle: string }>> = {};
+                for (const dt of dashboardTopics) {
+                  const topicTasks = dashboardTasksByTopic[dt.topic_id] || [];
+                  const assigned = topicTasks.filter(t => contactAssignedTaskIds.has(t.id));
+                  for (const task of assigned) {
+                    if (task.status === 'completed') continue;
+                    const key = task.title.trim().toLowerCase();
+                    if (!taskTitleMap[key]) taskTitleMap[key] = [];
+                    taskTitleMap[key].push({ task, topicTitle: dt.topics?.title || '' });
+                  }
+                }
+                const sharedTasks = Object.entries(taskTitleMap)
+                  .filter(([, entries]) => new Set(entries.map(e => e.topicTitle)).size >= 2)
+                  .map(([, entries]) => ({
+                    title: entries[0].task.title,
+                    priority: entries[0].task.priority,
+                    topics: [...new Set(entries.map(e => e.topicTitle))],
+                  }));
+                if (sharedTasks.length === 0) return null;
+                return (
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3">
+                    <h3 className="text-xs font-semibold text-indigo-800 flex items-center gap-2 mb-2">
+                      <Layers className="w-3.5 h-3.5" />
+                      Shared Next Steps
+                      <span className="text-[10px] font-normal text-indigo-600">Tasks spanning multiple topics</span>
+                    </h3>
+                    <div className="space-y-1.5">
+                      {sharedTasks.map((st, i) => (
+                        <div key={i} className="flex items-start gap-2 py-1.5 px-2 bg-white rounded-lg border border-indigo-100">
+                          <Zap className="w-3.5 h-3.5 text-indigo-500 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs font-medium text-gray-800">{st.title}</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {st.topics.map(topicTitle => (
+                                <span key={topicTitle} className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium">{topicTitle}</span>
+                              ))}
+                            </div>
+                          </div>
+                          {st.priority === 'high' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">HIGH</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Per-topic cards with inline tasks */}
+              {dashboardTopics.map(dt => {
+                const topic = dt.topics;
+                if (!topic) return null;
+                const topicTasks = dashboardTasksByTopic[dt.topic_id] || [];
+                const assignedToContact = topicTasks.filter(t => contactAssignedTaskIds.has(t.id));
+                const otherTasks = topicTasks.filter(t => !contactAssignedTaskIds.has(t.id) && t.status !== 'archived');
+                const isExpanded = dashboardExpandedTopics.has(dt.topic_id);
+                const areaBorderColor = topic.area === 'work' ? 'border-l-blue-500' : topic.area === 'personal' ? 'border-l-green-500' : topic.area === 'career' ? 'border-l-purple-500' : 'border-l-gray-300';
+                const areaBadgeColor = topic.area === 'work' ? 'bg-blue-100 text-blue-700' : topic.area === 'personal' ? 'bg-green-100 text-green-700' : topic.area === 'career' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600';
+
+                return (
+                  <div key={dt.topic_id} className={`bg-white rounded-xl shadow-sm border border-l-[3px] ${areaBorderColor} overflow-hidden`}>
+                    {/* Topic header */}
+                    <div
+                      className="px-4 py-3 cursor-pointer hover:bg-gray-50/50 transition-colors"
+                      onClick={() => setDashboardExpandedTopics(prev => {
+                        const next = new Set(prev);
+                        if (next.has(dt.topic_id)) next.delete(dt.topic_id); else next.add(dt.topic_id);
+                        return next;
+                      })}
+                    >
+                      <div className="flex items-center gap-2">
+                        {(assignedToContact.length > 0 || otherTasks.length > 0) ? (
+                          isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                        ) : (
+                          <div className="w-3.5" />
+                        )}
+                        <Link
+                          href={`/topics/${dt.topic_id}`}
+                          onClick={e => e.stopPropagation()}
+                          className="font-semibold text-sm text-gray-900 hover:text-blue-600 flex-1 min-w-0 truncate transition-colors"
+                        >
+                          {topic.title}
+                        </Link>
+                        <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', statusColor(topic.status))}>{topic.status || 'active'}</span>
+                        <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', areaBadgeColor)}>{topic.area}</span>
+                        {topic.owner && (
+                          <span className="text-xs bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                            <User className="w-3 h-3" />{topic.owner}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 ml-5.5">
+                        {topic.due_date && (
+                          <span className={`text-[10px] flex items-center gap-0.5 ${
+                            new Date(topic.due_date) < new Date() ? 'text-red-500 font-medium' : 'text-gray-400'
+                          }`}>
+                            <Clock className="w-3 h-3" /> Due {formatRelativeDate(topic.due_date)}
+                          </span>
+                        )}
+                        {assignedToContact.length > 0 && (
+                          <span className="text-[10px] text-teal-600 font-medium">
+                            {assignedToContact.filter(t => t.status === 'completed').length}/{assignedToContact.length} assigned tasks
+                          </span>
+                        )}
+                        {otherTasks.length > 0 && (
+                          <span className="text-[10px] text-gray-400 ml-auto">
+                            {topicTasks.filter(t => t.status === 'completed').length}/{topicTasks.length} total
+                          </span>
+                        )}
+                      </div>
+                      {topic.description && !isExpanded && (
+                        <p className="text-xs text-gray-500 mt-1 ml-5.5 line-clamp-1">{topic.description}</p>
+                      )}
+                    </div>
+
+                    {/* Expanded: inline tasks */}
+                    {isExpanded && (assignedToContact.length > 0 || otherTasks.length > 0) && (
+                      <div className="border-t border-gray-100 px-4 py-2 space-y-0">
+                        {/* Contact's assigned tasks */}
+                        {assignedToContact.length > 0 && (
+                          <div className="mb-1">
+                            <div className="text-[10px] font-semibold text-teal-600 mb-0.5 uppercase tracking-wider">{contact.name.split(' ')[0]}&apos;s tasks</div>
+                            {assignedToContact.map(task => {
+                              const isCompleted = task.status === 'completed';
+                              const dotColor = task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400';
+                              const stBadge = task.status === 'in_progress'
+                                ? <span className="text-[9px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">In Progress</span>
+                                : task.status === 'completed'
+                                ? <span className="text-[9px] font-medium text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">Done</span>
+                                : null;
+                              return (
+                                <div key={task.id} className={`flex items-center gap-2 py-1 bg-teal-50/50 -mx-1 px-1 rounded ${isCompleted ? 'opacity-50' : ''}`}>
+                                  <span className="flex-shrink-0">
+                                    {isCompleted ? <CheckSquare className="w-3.5 h-3.5 text-teal-500" /> : <Square className="w-3.5 h-3.5 text-gray-300" />}
+                                  </span>
+                                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
+                                  <span className={`text-xs flex-1 min-w-0 truncate ${isCompleted ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                    {task.title}
+                                  </span>
+                                  {stBadge}
+                                  {task.priority === 'high' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">HIGH</span>}
+                                  {task.due_date && (
+                                    <span className={`text-[10px] flex items-center gap-0.5 flex-shrink-0 ${
+                                      new Date(task.due_date) < new Date() && !isCompleted ? 'text-red-500 font-medium' : 'text-gray-400'
+                                    }`}>
+                                      <Calendar className="w-2.5 h-2.5" /> {formatRelativeDate(task.due_date)}
+                                    </span>
+                                  )}
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-600 font-medium">assigned</span>
+                                  {task.source === 'ai_extracted' && (
+                                    <span className="text-[8px] text-purple-500 bg-purple-50 px-1 rounded flex-shrink-0">AI</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Other tasks */}
+                        {otherTasks.length > 0 && (
+                          <div className="pt-1 border-t border-gray-100/50">
+                            <div className="text-[10px] font-semibold text-gray-400 mb-0.5 uppercase tracking-wider">Other tasks</div>
+                            {otherTasks.slice(0, 5).map(task => (
+                              <div key={task.id} className="flex items-center gap-2 py-0.5 opacity-50">
+                                <Square className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-amber-400' : 'bg-green-400'}`} />
+                                <span className="text-xs text-gray-500 flex-1 truncate">{task.title}</span>
+                                {task.assignee && <span className="text-[9px] text-gray-400">{task.assignee}</span>}
+                              </div>
+                            ))}
+                            {otherTasks.length > 5 && (
+                              <span className="text-[10px] text-gray-400 pl-5">+{otherTasks.length - 5} more tasks</span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Goal */}
+                        {topic.goal && (
+                          <div className="pt-1.5 mt-1 border-t border-blue-100/50">
+                            <div className="flex items-center gap-0.5 justify-center mb-1">
+                              <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                              <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                              <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
+                            </div>
+                            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-blue-50/60 border border-dashed border-blue-200">
+                              <Target className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                              <span className="text-xs font-medium text-blue-700 flex-1 min-w-0 truncate">Goal: {topic.goal}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* No tasks fallback */}
+                    {isExpanded && assignedToContact.length === 0 && otherTasks.length === 0 && (
+                      <div className="border-t border-gray-100 px-4 py-2">
+                        <span className="text-xs text-gray-400 italic">No active tasks</span>
+                        {topic.goal && (
+                          <div className="flex items-center gap-2 px-2 py-1.5 mt-1 rounded-lg bg-blue-50/60 border border-dashed border-blue-200">
+                            <Target className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                            <span className="text-xs font-medium text-blue-700 flex-1 min-w-0 truncate">Goal: {topic.goal}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ============================
           4. Pending Topics Section
