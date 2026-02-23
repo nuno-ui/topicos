@@ -385,6 +385,10 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
   const [showReorg, setShowReorg] = useState(false);
   const [reorgLoading, setReorgLoading] = useState(false);
 
+  // Batch enrichment state
+  const [batchEnriching, setBatchEnriching] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; topic: string; stage: string } | null>(null);
+
   // Stats filter state
   const [statsFilter, setStatsFilter] = useState<string | null>(null);
 
@@ -727,6 +731,55 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
       toast.error(err instanceof Error ? err.message : 'Analysis failed');
     }
     setReorgLoading(false);
+  };
+
+  const runBatchEnrich = async () => {
+    setBatchEnriching(true);
+    setBatchProgress(null);
+    const abortController = new AbortController();
+    try {
+      const res = await fetch('/api/topics/batch-enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ area: selectedArea }),
+        signal: abortController.signal,
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Batch enrichment failed');
+      }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('No stream reader');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'progress') {
+              setBatchProgress({ current: event.index + 1, total: event.total, topic: event.topic, stage: event.stage });
+              if (event.stage === 'error') {
+                toast.error(`Error on "${event.topic}": ${event.error}`);
+              }
+            } else if (event.type === 'complete') {
+              toast.success(`Enrichment complete: ${event.total} topics processed`);
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        toast.error(err instanceof Error ? err.message : 'Batch enrichment failed');
+      }
+    }
+    setBatchEnriching(false);
+    setBatchProgress(null);
   };
 
   // Build folder tree (sorting handled after relevance functions are defined)
@@ -2352,7 +2405,30 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
               {aiLoading === 'propose_goals' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
               {aiLoading === 'propose_goals' ? 'Proposing...' : 'AI Propose Goals'}
             </button>
+            <button onClick={runBatchEnrich} disabled={batchEnriching || !!aiLoading}
+              className="px-3 py-2.5 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg text-sm font-medium hover:bg-orange-100 flex items-center gap-2 disabled:opacity-50 transition-colors">
+              {batchEnriching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {batchEnriching && batchProgress ? `Enriching ${batchProgress.current}/${batchProgress.total}` : 'Enrich All Topics'}
+            </button>
           </div>
+
+          {/* Batch enrichment progress banner */}
+          {batchEnriching && batchProgress && (
+            <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+              <div className="flex items-center gap-3">
+                <Loader2 className="w-4 h-4 animate-spin text-orange-600 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-orange-800 truncate">
+                    {batchProgress.topic} — {batchProgress.stage === 'enrich' ? 'Enriching content...' : batchProgress.stage === 'contacts' ? 'Finding contacts...' : batchProgress.stage === 'deep_dive' ? 'Generating Intelligence...' : 'Done'}
+                  </p>
+                  <div className="mt-1.5 h-1.5 bg-orange-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-orange-500 rounded-full transition-all" style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }} />
+                  </div>
+                </div>
+                <span className="text-xs font-bold text-orange-600 flex-shrink-0">{batchProgress.current}/{batchProgress.total}</span>
+              </div>
+            </div>
+          )}
 
           {/* Create topic form on area page */}
           {showCreate && (
@@ -2640,6 +2716,11 @@ export function TopicsList({ initialTopics, initialFolders, initialArea }: { ini
               title={selectedTopics.size === 0 ? 'Select topics first' : `Analyze ${selectedTopics.size} selected topics`}>
               {aiAnalyzeAllLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
               {aiAnalyzeAllLoading ? 'Analyzing...' : `AI Analyze${selectedTopics.size > 0 ? ` (${selectedTopics.size})` : ''}`}
+            </button>
+            <button onClick={runBatchEnrich} disabled={batchEnriching || !!aiLoading}
+              className="px-3 py-2 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg text-xs font-medium hover:bg-orange-100 flex items-center gap-1.5 disabled:opacity-50 transition-colors">
+              {batchEnriching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              {batchEnriching && batchProgress ? `Enriching ${batchProgress.current}/${batchProgress.total}` : 'Enrich All'}
             </button>
             <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
               <button onClick={() => setViewMode('folders')}

@@ -78,6 +78,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Update topic updated_at
     await supabase.from('topics').update({ updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', user.id);
 
+    // Auto-link contacts for tasks with assignee_contact_id
+    const contactIdsToLink = new Set<string>();
+    for (const t of insertData) {
+      if (t.assignee_contact_id) contactIdsToLink.add(t.assignee_contact_id);
+    }
+    if (contactIdsToLink.size > 0) {
+      const linkRows = Array.from(contactIdsToLink).map(cid => ({
+        user_id: user.id, contact_id: cid, topic_id: id,
+      }));
+      await supabase.from('contact_topic_links').upsert(linkRows, { onConflict: 'contact_id, topic_id' })
+        .then(({ error: linkErr }) => {
+          if (linkErr) console.error('Auto-link task assignee error:', linkErr.message);
+        });
+    }
+
     // Return single task for single insert, array for bulk
     if (!Array.isArray(body.tasks)) {
       return NextResponse.json({ task: data![0] }, { status: 201 });

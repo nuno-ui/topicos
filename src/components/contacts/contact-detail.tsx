@@ -121,11 +121,24 @@ interface PendingItemData {
   context: string;
 }
 
+interface TopicBasic {
+  id: string;
+  title: string;
+  status?: string;
+  due_date?: string | null;
+  priority?: number;
+  area?: string;
+  updated_at?: string;
+  tags?: string[];
+}
+
 interface ContactDetailProps {
   contact: ContactData;
   relatedItems: Record<string, unknown>[];
   allTopics: Array<{ id: string; title: string; status: string; area: string }>;
   initialContactItems?: ContactItemData[];
+  ownedTopics?: TopicBasic[];
+  assignedTaskTopics?: Record<string, unknown>[];
 }
 
 // ============================
@@ -242,7 +255,7 @@ const ROLE_OPTIONS = ['Owner', 'Stakeholder', 'Decision Maker', 'Contributor', '
 // Component
 // ============================
 
-export function ContactDetail({ contact: initialContact, relatedItems, allTopics, initialContactItems = [] }: ContactDetailProps) {
+export function ContactDetail({ contact: initialContact, relatedItems, allTopics, initialContactItems = [], ownedTopics = [], assignedTaskTopics = [] }: ContactDetailProps) {
   const router = useRouter();
   const [contact, setContact] = useState(initialContact);
 
@@ -282,6 +295,22 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
   const [pendingItems, setPendingItems] = useState<PendingItemData[] | null>(null);
   const [dossier, setDossier] = useState<string | null>(null);
   const [deepAnalysis, setDeepAnalysis] = useState<{ analysis_type: string; items: Record<string, unknown>[] } | null>(null);
+
+  // Transcript state
+  const [showTranscriptModal, setShowTranscriptModal] = useState(false);
+  const [transcriptText, setTranscriptText] = useState('');
+  const [transcriptDate, setTranscriptDate] = useState(new Date().toISOString().split('T')[0]);
+  const [transcriptProcessing, setTranscriptProcessing] = useState(false);
+  const [transcriptResult, setTranscriptResult] = useState<{
+    item_id?: string;
+    analysis: {
+      summary: string;
+      action_items: Array<{ task: string; assignee: string; topic_title: string; topic_id?: string; priority: string; due_hint: string }>;
+      topic_updates: Array<{ topic_title: string; topic_id?: string; update: string; status_suggestion?: string }>;
+      key_decisions: string[];
+      follow_ups: string[];
+    };
+  } | null>(null);
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -362,8 +391,48 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
 
   const topicLinks = contact.contact_topic_links || [];
 
+  // Merge all topic sources: linked, owned, assigned — deduplicated with source badges
+  const allInvolvedTopics = useMemo(() => {
+    const map = new Map<string, { topic_id: string; topics: TopicBasic; sources: string[]; role: string | null }>();
+
+    // Source 1: Explicit contact_topic_links
+    for (const link of topicLinks) {
+      if (!link.topics) continue;
+      map.set(link.topic_id, {
+        topic_id: link.topic_id,
+        topics: link.topics as TopicBasic,
+        sources: ['Linked'],
+        role: link.role,
+      });
+    }
+
+    // Source 2: Owned topics
+    for (const t of ownedTopics) {
+      const existing = map.get(t.id);
+      if (existing) {
+        if (!existing.sources.includes('Owner')) existing.sources.push('Owner');
+      } else {
+        map.set(t.id, { topic_id: t.id, topics: t, sources: ['Owner'], role: null });
+      }
+    }
+
+    // Source 3: Assigned task topics
+    for (const raw of assignedTaskTopics) {
+      const t = raw as unknown as TopicBasic;
+      if (!t?.id) continue;
+      const existing = map.get(t.id);
+      if (existing) {
+        if (!existing.sources.includes('Assignee')) existing.sources.push('Assignee');
+      } else {
+        map.set(t.id, { topic_id: t.id, topics: t, sources: ['Assignee'], role: null });
+      }
+    }
+
+    return Array.from(map.values());
+  }, [topicLinks, ownedTopics, assignedTaskTopics]);
+
   const pendingTopics = useMemo(() => {
-    return topicLinks
+    return allInvolvedTopics
       .filter(link => link.topics?.status === 'active')
       .sort((a, b) => {
         const aDue = a.topics?.due_date ? new Date(a.topics.due_date) : null;
@@ -379,10 +448,10 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
         const bUpdated = b.topics?.updated_at ? new Date(b.topics.updated_at).getTime() : 0;
         return bUpdated - aUpdated;
       });
-  }, [topicLinks]);
+  }, [allInvolvedTopics]);
 
   const sortedTopicLinks = useMemo(() => {
-    return [...topicLinks].sort((a, b) => {
+    return [...allInvolvedTopics].sort((a, b) => {
       // Overdue items first
       const now = new Date();
       const aDue = a.topics?.due_date ? new Date(a.topics.due_date) : null;
@@ -400,7 +469,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       if (bDue) return 1;
       return 0;
     });
-  }, [topicLinks]);
+  }, [allInvolvedTopics]);
 
   const filteredLinkTopics = useMemo(() => {
     const linkedIds = new Set(topicLinks.map(l => l.topic_id));
@@ -780,6 +849,49 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
       setSelectedReviewResults(new Set());
     }
     setReviewLinking(false);
+  };
+
+  // Transcript processing
+  const processTranscript = async () => {
+    if (!transcriptText.trim()) { toast.error('Please enter transcript/notes'); return; }
+    setTranscriptProcessing(true);
+    try {
+      const res = await fetch('/api/ai/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: 'process_transcript',
+          context: { contact_id: contact.id, transcript: transcriptText, call_date: transcriptDate },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Processing failed');
+      setTranscriptResult(data.result);
+      toast.success('Transcript processed successfully');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Processing failed');
+    }
+    setTranscriptProcessing(false);
+  };
+
+  const createTaskFromTranscript = async (item: { task: string; assignee: string; topic_id?: string; priority: string; due_hint: string }) => {
+    if (!item.topic_id) { toast.error('No matching topic found for this task'); return; }
+    try {
+      const res = await fetch(`/api/topics/${item.topic_id}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: item.task,
+          priority: item.priority,
+          source: 'transcript',
+          assignee_contact_id: item.assignee === 'them' ? contact.id : null,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to create task');
+      toast.success('Task created');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create task');
+    }
   };
 
   // Topic linking
@@ -1457,7 +1569,7 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
           <p className="text-[11px] text-gray-500 font-medium mt-0.5">Interactions</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 text-center">
-          <p className="text-lg font-bold text-purple-600">{topicLinks.length}</p>
+          <p className="text-lg font-bold text-purple-600">{allInvolvedTopics.length}</p>
           <p className="text-[11px] text-gray-500 font-medium mt-0.5">Topics linked</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 text-center">
@@ -1561,6 +1673,19 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                 </span>
               </button>
             </div>
+
+            <button
+              onClick={() => { setShowTranscriptModal(true); setTranscriptResult(null); setTranscriptText(''); setTranscriptDate(new Date().toISOString().split('T')[0]); }}
+              className="group relative px-3 py-2 text-orange-700 rounded-xl text-xs font-semibold hover:bg-orange-50 flex items-center gap-1.5 transition-all"
+            >
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)' }}>
+                <FileText className="w-3 h-3 text-white" />
+              </div>
+              1:1 Notes
+              <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
+                Add 1:1 call transcript or notes
+              </span>
+            </button>
 
             <div className="flex-1" />
 
@@ -2216,14 +2341,14 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
               <LinkIcon className="w-3.5 h-3.5 text-white" />
             </div>
             Related Topics
-            <span className="text-[10px] font-bold text-white px-2 py-0.5 rounded-full" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}>{topicLinks.length}</span>
+            <span className="text-[10px] font-bold text-white px-2 py-0.5 rounded-full" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}>{allInvolvedTopics.length}</span>
           </h2>
           {showAllTopics ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </button>
 
         {showAllTopics && (
           <div className="px-5 pb-5">
-            {topicLinks.length === 0 ? (
+            {allInvolvedTopics.length === 0 ? (
               <div className="text-center py-10">
                 <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-gray-100 flex items-center justify-center">
                   <LinkIcon className="w-6 h-6 text-gray-300" />
@@ -2283,6 +2408,16 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
                               {topic.area}
                             </span>
                           )}
+                          {/* Source badges */}
+                          {link.sources?.map(src => (
+                            <span key={src} className={cn('text-[10px] px-2 py-0.5 rounded-full font-bold',
+                              src === 'Owner' ? 'bg-emerald-100 text-emerald-700' :
+                              src === 'Assignee' ? 'bg-purple-100 text-purple-700' :
+                              'bg-blue-50 text-blue-600'
+                            )}>
+                              {src}
+                            </span>
+                          ))}
                           {/* Priority indicator */}
                           {topicPriority >= 4 && (
                             <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-bold flex items-center gap-0.5">
@@ -3343,6 +3478,179 @@ export function ContactDetail({ contact: initialContact, relatedItems, allTopics
           </div>
         )}
       </div>
+
+      {/* ============================
+          Transcript Modal
+          ============================ */}
+      {showTranscriptModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => !transcriptProcessing && setShowTranscriptModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto m-4" onClick={e => e.stopPropagation()}>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-orange-500" />
+                  1:1 Call Notes — {contact.name}
+                </h2>
+                <button onClick={() => !transcriptProcessing && setShowTranscriptModal(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
+              </div>
+
+              {!transcriptResult ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">Call Date</label>
+                    <input
+                      type="date"
+                      value={transcriptDate}
+                      onChange={e => setTranscriptDate(e.target.value)}
+                      className="w-48 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">Transcript / Meeting Notes</label>
+                    <textarea
+                      value={transcriptText}
+                      onChange={e => setTranscriptText(e.target.value)}
+                      rows={15}
+                      placeholder="Paste your call transcript, meeting notes, or key discussion points here..."
+                      className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-y"
+                    />
+                  </div>
+                  <button
+                    onClick={processTranscript}
+                    disabled={transcriptProcessing || !transcriptText.trim()}
+                    className="w-full py-3 text-white font-semibold rounded-xl flex items-center justify-center gap-2 disabled:opacity-50 transition-all"
+                    style={{ background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)' }}
+                  >
+                    {transcriptProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    {transcriptProcessing ? 'Processing with AI...' : 'Process with AI'}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {/* Summary */}
+                  <div className="p-4 bg-orange-50 border border-orange-200 rounded-xl">
+                    <h3 className="text-sm font-bold text-orange-800 mb-2">Summary</h3>
+                    <p className="text-sm text-gray-700">{transcriptResult.analysis.summary}</p>
+                  </div>
+
+                  {/* Action Items */}
+                  {transcriptResult.analysis.action_items.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-900 mb-2 flex items-center gap-2">
+                        <ClipboardList className="w-4 h-4 text-blue-500" />
+                        Action Items ({transcriptResult.analysis.action_items.length})
+                      </h3>
+                      <div className="space-y-2">
+                        {transcriptResult.analysis.action_items.map((item, i) => (
+                          <div key={i} className="flex items-start gap-3 p-3 bg-white border border-gray-200 rounded-xl">
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900">{item.task}</p>
+                              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-bold',
+                                  item.assignee === 'me' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                                )}>
+                                  {item.assignee === 'me' ? 'You' : contact.name}
+                                </span>
+                                <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-bold',
+                                  item.priority === 'high' ? 'bg-red-100 text-red-700' : item.priority === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'
+                                )}>
+                                  {item.priority}
+                                </span>
+                                <span className="text-[10px] text-gray-500">{item.topic_title}</span>
+                                {item.due_hint !== 'No deadline' && <span className="text-[10px] text-gray-500">Due: {item.due_hint}</span>}
+                              </div>
+                            </div>
+                            {item.topic_id && (
+                              <button
+                                onClick={() => createTaskFromTranscript(item)}
+                                className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg flex items-center gap-1 flex-shrink-0"
+                                style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}
+                              >
+                                <Plus className="w-3 h-3" /> Create Task
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Topic Updates */}
+                  {transcriptResult.analysis.topic_updates.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-900 mb-2 flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 text-green-500" />
+                        Topic Updates ({transcriptResult.analysis.topic_updates.length})
+                      </h3>
+                      <div className="space-y-2">
+                        {transcriptResult.analysis.topic_updates.map((update, i) => (
+                          <div key={i} className="p-3 bg-green-50 border border-green-200 rounded-xl">
+                            <p className="text-xs font-bold text-green-800">{update.topic_title}</p>
+                            <p className="text-sm text-gray-700 mt-1">{update.update}</p>
+                            {update.status_suggestion && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-bold mt-1 inline-block">
+                                Suggest: {update.status_suggestion}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Key Decisions */}
+                  {transcriptResult.analysis.key_decisions.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-900 mb-2">Key Decisions</h3>
+                      <ul className="space-y-1.5">
+                        {transcriptResult.analysis.key_decisions.map((d, i) => (
+                          <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                            <Check className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
+                            {d}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Follow-ups */}
+                  {transcriptResult.analysis.follow_ups.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-900 mb-2">Follow-ups for Next Meeting</h3>
+                      <ul className="space-y-1.5">
+                        {transcriptResult.analysis.follow_ups.map((f, i) => (
+                          <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                            <ChevronRight className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                            {f}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      onClick={() => setTranscriptResult(null)}
+                      className="flex-1 py-2.5 text-sm font-semibold text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all"
+                    >
+                      Process Another
+                    </button>
+                    <button
+                      onClick={() => setShowTranscriptModal(false)}
+                      className="flex-1 py-2.5 text-sm font-semibold text-white rounded-xl transition-all"
+                      style={{ background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)' }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ============================
           Footer info

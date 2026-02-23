@@ -264,6 +264,105 @@ Return JSON: { "improved_title": "...", "improved_description": "...", "reasonin
         break;
       }
 
+      case 'process_transcript': {
+        // Process a 1:1 call transcript: extract summary, action items, topic updates
+        const { contact_id: transcriptContactId, transcript, call_date } = context;
+        const { data: txContact } = await supabase.from('contacts').select('*').eq('id', transcriptContactId).eq('user_id', user.id).single();
+        if (!txContact) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
+        // Fetch all topics linked to this contact for context
+        const { data: txLinks } = await supabase
+          .from('contact_topic_links')
+          .select('topic_id, topics(id, title, status, description, goal, area)')
+          .eq('contact_id', transcriptContactId);
+        // Also fetch topics where contact is owner or task assignee
+        const { data: txOwned } = await supabase
+          .from('topics')
+          .select('id, title, status, description, goal, area')
+          .eq('user_id', user.id)
+          .eq('owner_contact_id', transcriptContactId);
+        const { data: txAssigned } = await supabase
+          .from('topic_tasks')
+          .select('topic_id, topics!inner(id, title, status, description, goal, area)')
+          .eq('user_id', user.id)
+          .eq('assignee_contact_id', transcriptContactId);
+
+        // Deduplicate topics
+        const txTopicMap = new Map<string, Record<string, unknown>>();
+        for (const link of (txLinks || [])) {
+          const t = link.topics as unknown as Record<string, unknown>;
+          if (t?.id) txTopicMap.set(t.id as string, t);
+        }
+        for (const t of (txOwned || [])) txTopicMap.set(t.id, t as unknown as Record<string, unknown>);
+        for (const t of (txAssigned || [])) {
+          const topic = t.topics as unknown as Record<string, unknown>;
+          if (topic?.id) txTopicMap.set(topic.id as string, topic);
+        }
+        const txTopics = Array.from(txTopicMap.values());
+
+        const topicsContext = txTopics.map(t => `- ${t.title} [${t.status}] (${t.area}): ${t.description || 'No description'}${t.goal ? ` | Goal: ${t.goal}` : ''}`).join('\n');
+
+        inputSummary = `Processing 1:1 transcript with ${txContact.name}`;
+
+        const { data: txResult } = await callClaudeJSON<{
+          summary: string;
+          action_items: Array<{ task: string; assignee: 'me' | 'them'; topic_title: string; topic_id?: string; priority: string; due_hint: string }>;
+          topic_updates: Array<{ topic_title: string; topic_id?: string; update: string; status_suggestion?: string }>;
+          key_decisions: string[];
+          follow_ups: string[];
+        }>(
+          `You are analyzing a transcript/notes from a 1:1 call between the user and ${txContact.name} (${txContact.organization || 'Unknown org'}, ${txContact.role || 'Unknown role'}).
+
+CONTEXT - Related topics this contact is involved in:
+${topicsContext || 'No topics linked yet.'}
+
+TASK: Analyze the transcript and extract:
+1. **summary**: 2-4 sentence summary of the call
+2. **action_items**: Tasks that came up. For each: task description, assignee ("me" = the user, "them" = ${txContact.name}), matched topic_title (from context above, or "New" if it doesn't match any existing topic), priority (high/medium/low), due_hint (mentioned deadline or "No deadline")
+3. **topic_updates**: Status changes or new info for existing topics. Include topic_title and what changed.
+4. **key_decisions**: Important decisions made during the call
+5. **follow_ups**: Items to discuss in the next meeting
+
+For action_items and topic_updates, try to match to existing topic titles from the context. Include topic_id if you can match it.
+
+Return JSON: { "summary": "...", "action_items": [...], "topic_updates": [...], "key_decisions": [...], "follow_ups": [...] }`,
+          `Call date: ${call_date || 'Today'}\nContact: ${txContact.name} (${txContact.email || 'No email'})\nOrganization: ${txContact.organization || 'Unknown'}\nRole: ${txContact.role || 'Unknown'}\n\nTranscript/Notes:\n${transcript}`
+        );
+
+        // Match topic_ids from titles
+        for (const item of txResult.action_items) {
+          if (!item.topic_id && item.topic_title !== 'New') {
+            const match = txTopics.find(t => (t.title as string).toLowerCase().includes(item.topic_title.toLowerCase()) || item.topic_title.toLowerCase().includes((t.title as string).toLowerCase()));
+            if (match) item.topic_id = match.id as string;
+          }
+        }
+        for (const update of txResult.topic_updates) {
+          if (!update.topic_id) {
+            const match = txTopics.find(t => (t.title as string).toLowerCase().includes(update.topic_title.toLowerCase()) || update.topic_title.toLowerCase().includes((t.title as string).toLowerCase()));
+            if (match) update.topic_id = match.id as string;
+          }
+        }
+
+        // Store transcript as contact_item
+        const { data: txItem } = await supabase.from('contact_items').insert({
+          user_id: user.id,
+          contact_id: transcriptContactId,
+          source: 'transcript',
+          title: `1:1 Call Notes — ${call_date || new Date().toISOString().split('T')[0]}`,
+          snippet: txResult.summary,
+          body: transcript,
+          url: '',
+          occurred_at: call_date ? new Date(call_date).toISOString() : new Date().toISOString(),
+          metadata: { analysis: txResult },
+        }).select().single();
+
+        result = {
+          item_id: txItem?.id,
+          analysis: txResult,
+        };
+        break;
+      }
+
       case 'extract_action_items': {
         // AI extracts action items from topic communications — deep extraction
         const { topic_id } = context;
@@ -902,7 +1001,7 @@ ${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
       }
 
       case 'contact_auto_link': {
-        // Auto-link contacts to topics based on topic_items metadata matching — improved matching
+        // Auto-link contacts to topics based on ownership, task assignment, and topic_items metadata matching
         const allContacts = await supabase.from('contacts').select('id, name, email').eq('user_id', user.id);
         const allItems = await supabase.from('topic_items').select('topic_id, title, snippet, body, metadata').eq('user_id', user.id);
         const existingLinks = await supabase.from('contact_topic_links').select('contact_id, topic_id').eq('user_id', user.id);
@@ -910,6 +1009,35 @@ ${intelRelevant.map((i: Record<string, unknown>, idx: number) => {
         const existingSet = new Set((existingLinks.data || []).map((l: Record<string, unknown>) => `${l.contact_id}:${l.topic_id}`));
         const newLinks: Array<{ user_id: string; contact_id: string; topic_id: string }> = [];
 
+        // Source 1: Owner links — topics where owner_contact_id is set
+        const { data: ownedTopics } = await supabase
+          .from('topics')
+          .select('id, owner_contact_id')
+          .eq('user_id', user.id)
+          .not('owner_contact_id', 'is', null);
+        for (const t of (ownedTopics || [])) {
+          const key = `${t.owner_contact_id}:${t.id}`;
+          if (!existingSet.has(key)) {
+            newLinks.push({ user_id: user.id, contact_id: t.owner_contact_id, topic_id: t.id });
+            existingSet.add(key);
+          }
+        }
+
+        // Source 2: Assignee links — tasks where assignee_contact_id is set
+        const { data: assignedTasks } = await supabase
+          .from('topic_tasks')
+          .select('topic_id, assignee_contact_id')
+          .eq('user_id', user.id)
+          .not('assignee_contact_id', 'is', null);
+        for (const t of (assignedTasks || [])) {
+          const key = `${t.assignee_contact_id}:${t.topic_id}`;
+          if (!existingSet.has(key)) {
+            newLinks.push({ user_id: user.id, contact_id: t.assignee_contact_id, topic_id: t.topic_id });
+            existingSet.add(key);
+          }
+        }
+
+        // Source 3: Topic items metadata matching (existing logic)
         for (const contact of (allContacts.data || [])) {
           const cEmail = (contact.email || '').toLowerCase();
           const cName = (contact.name || '').toLowerCase();

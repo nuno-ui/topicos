@@ -173,6 +173,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // Auto-link contact when owner_contact_id is set
+    if (data && updateData.owner_contact_id) {
+      await supabase.from('contact_topic_links').upsert(
+        { user_id: user.id, contact_id: updateData.owner_contact_id as string, topic_id: id },
+        { onConflict: 'contact_id, topic_id' }
+      ).then(({ error: linkErr }) => {
+        if (linkErr) console.error('Auto-link owner error:', linkErr.message);
+      });
+    }
+
     return NextResponse.json({ topic: data });
   } catch (err) {
     console.error('PATCH /api/topics/[id] error:', err);

@@ -51,9 +51,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { source, title, body: itemBody, url, occurred_at, metadata } = body;
 
     // Validate
-    const validSources = ['manual', 'link', 'document', 'notion'];
+    const validSources = ['manual', 'link', 'document', 'notion', 'transcript'];
     if (!source || !validSources.includes(source)) {
-      return NextResponse.json({ error: 'Source must be one of: manual, link, document, notion' }, { status: 400 });
+      return NextResponse.json({ error: 'Source must be one of: manual, link, document, notion, transcript' }, { status: 400 });
     }
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return NextResponse.json({ error: 'Title is required' }, { status: 400 });

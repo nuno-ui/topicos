@@ -57,6 +57,16 @@ export async function PATCH(
 
     await supabase.from('topics').update({ updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', user.id);
 
+    // Auto-link contact when assignee_contact_id is set
+    if (data && updateData.assignee_contact_id) {
+      await supabase.from('contact_topic_links').upsert(
+        { user_id: user.id, contact_id: updateData.assignee_contact_id as string, topic_id: id },
+        { onConflict: 'contact_id, topic_id' }
+      ).then(({ error: linkErr }) => {
+        if (linkErr) console.error('Auto-link assignee error:', linkErr.message);
+      });
+    }
+
     return NextResponse.json({ task: data });
   } catch (err) {
     console.error('PATCH /api/topics/[id]/tasks/[taskId] error:', err);

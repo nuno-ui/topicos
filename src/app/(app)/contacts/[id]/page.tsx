@@ -38,7 +38,7 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
   if (!contact) notFound();
 
   // Run stats update and items fetch in parallel - don't let stats failure break the page
-  const [, relatedItems, topicsRes, contactItemsRes] = await Promise.all([
+  const [, relatedItems, topicsRes, contactItemsRes, ownedTopicsRes, assignedTasksRes] = await Promise.all([
     updateContactStats(supabase, user!.id, { id: contact.id, name: contact.name, email: contact.email }).catch(() => null),
     getContactItems(supabase, user!.id, { id: contact.id, name: contact.name, email: contact.email }, 50).catch(() => []),
     supabase
@@ -53,6 +53,18 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
       .eq('contact_id', id)
       .eq('user_id', user!.id)
       .order('occurred_at', { ascending: false }),
+    // Topics where this contact is the owner
+    supabase
+      .from('topics')
+      .select('id, title, status, due_date, priority, area, updated_at, tags')
+      .eq('user_id', user!.id)
+      .eq('owner_contact_id', id),
+    // Tasks assigned to this contact → get their topic IDs
+    supabase
+      .from('topic_tasks')
+      .select('topic_id, topics!inner(id, title, status, due_date, priority, area, updated_at, tags)')
+      .eq('user_id', user!.id)
+      .eq('assignee_contact_id', id),
   ]);
 
   return (
@@ -63,6 +75,8 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
         relatedItems={relatedItems as Record<string, unknown>[]}
         allTopics={topicsRes.data ?? []}
         initialContactItems={contactItemsRes.data ?? []}
+        ownedTopics={ownedTopicsRes.data ?? []}
+        assignedTaskTopics={(assignedTasksRes.data ?? []).map((t: Record<string, unknown>) => t.topics as Record<string, unknown>).filter(Boolean)}
       />
     </div>
   );
